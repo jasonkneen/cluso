@@ -1,0 +1,9 @@
+{
+  "name": "Gemini Live Interface",
+  "description": "A real-time multimodal voice and video interface powered by the Gemini Live API.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "display-capture"
+  ]
+}
