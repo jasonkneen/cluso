@@ -21,35 +21,12 @@ export const INJECTION_SCRIPT = `
     position: relative;
     z-index: 10000;
   }
-
-  .selection-box {
-    position: fixed;
-    border: 2px dashed #9333ea;
-    background-color: rgba(147, 51, 234, 0.1);
-    z-index: 10001;
-    pointer-events: none;
-    display: none;
-  }
-
-  .multi-selected {
-    outline: 2px dashed #9333ea !important;
-    outline-offset: -2px !important;
-    background-color: rgba(147, 51, 234, 0.05) !important;
-  }
 </style>
 <script>
   (function() {
     let currentSelected = null;
     let isInspectorActive = false;
     let isScreenshotActive = false;
-
-    // Drag Selection State
-    let isDragging = false;
-    let startX = 0;
-    let startY = 0;
-    let selectionBox = document.createElement('div');
-    selectionBox.className = 'selection-box';
-    document.body.appendChild(selectionBox);
 
     // --- Console Interception ---
     const originalLog = console.log;
@@ -101,17 +78,8 @@ export const INJECTION_SCRIPT = `
       };
     }
 
-    // Helper to check intersection
-    function isIntersecting(r1, r2) {
-      return !(r2.left > r1.right || 
-               r2.right < r1.left || 
-               r2.top > r1.bottom || 
-               r2.bottom < r1.top);
-    }
-
     document.addEventListener('mouseover', function(e) {
       if (!isInspectorActive && !isScreenshotActive) return;
-      if (isDragging) return; // Don't hover highlight while dragging
       e.stopPropagation();
       
       if (isInspectorActive) {
@@ -128,111 +96,9 @@ export const INJECTION_SCRIPT = `
       e.target.classList.remove('screenshot-hover-target');
     }, true);
 
-    document.addEventListener('mousedown', function(e) {
-        if (!isScreenshotActive) return;
-        
-        isDragging = true;
-        startX = e.clientX;
-        startY = e.clientY;
-        
-        selectionBox.style.left = startX + 'px';
-        selectionBox.style.top = startY + 'px';
-        selectionBox.style.width = '0px';
-        selectionBox.style.height = '0px';
-        selectionBox.style.display = 'block';
-        
-        // Prevent text selection
-        e.preventDefault();
-    }, true);
-
-    document.addEventListener('mousemove', function(e) {
-        if (!isDragging) return;
-        
-        e.preventDefault();
-        
-        const currentX = e.clientX;
-        const currentY = e.clientY;
-        
-        const width = Math.abs(currentX - startX);
-        const height = Math.abs(currentY - startY);
-        const left = Math.min(currentX, startX);
-        const top = Math.min(currentY, startY);
-        
-        selectionBox.style.width = width + 'px';
-        selectionBox.style.height = height + 'px';
-        selectionBox.style.left = left + 'px';
-        selectionBox.style.top = top + 'px';
-
-        // Highlight intersecting elements
-        // Debounce or limit this in production, but okay for prototype
-        const dragRect = selectionBox.getBoundingClientRect();
-        const allElements = document.body.getElementsByTagName('*');
-        
-        for (let el of allElements) {
-            if (el === selectionBox) continue;
-            if (el.classList.contains('inspector-hover-target')) continue; 
-            
-            const elRect = el.getBoundingClientRect();
-            // Basic optimization: only check visible elements
-            if (elRect.width === 0 || elRect.height === 0) continue;
-
-            if (isIntersecting(dragRect, elRect)) {
-                el.classList.add('multi-selected');
-            } else {
-                el.classList.remove('multi-selected');
-            }
-        }
-
-    }, true);
-
-    document.addEventListener('mouseup', function(e) {
-        if (isDragging) {
-            isDragging = false;
-            selectionBox.style.display = 'none';
-            
-            // Gather selected elements
-            const selectedEls = document.querySelectorAll('.multi-selected');
-            const summaryList = [];
-            
-            // Calculate total bounding box of selection
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-            selectedEls.forEach(el => {
-                el.classList.remove('multi-selected');
-                summaryList.push(getElementSummary(el));
-                const r = el.getBoundingClientRect();
-                minX = Math.min(minX, r.left);
-                minY = Math.min(minY, r.top);
-                maxX = Math.max(maxX, r.right);
-                maxY = Math.max(maxY, r.bottom);
-            });
-
-            // If we dragged but didn't catch anything, check the simple click target
-            if (summaryList.length === 0 && Math.abs(e.clientX - startX) < 5 && Math.abs(e.clientY - startY) < 5) {
-                 // It was a click
-                 return; // Let the click handler take over
-            }
-
-            if (summaryList.length > 0 || Math.abs(e.clientX - startX) > 10) {
-                 window.parent.postMessage({ 
-                    type: 'MULTI_SELECT', 
-                    elements: summaryList,
-                    rect: {
-                        top: minY === Infinity ? startY : minY,
-                        left: minX === Infinity ? startX : minX,
-                        width: maxX === -Infinity ? Math.abs(e.clientX - startX) : maxX - minX,
-                        height: maxY === -Infinity ? Math.abs(e.clientY - startY) : maxY - minY
-                    }
-                }, '*');
-                e.stopPropagation(); // Stop click handler from firing
-            }
-        }
-    }, true);
-
     document.addEventListener('click', function(e) {
       if (!isInspectorActive && !isScreenshotActive) return;
-      if (isDragging) return; // handled by mouseup
-
+      
       e.preventDefault();
       e.stopPropagation();
       
@@ -260,6 +126,7 @@ export const INJECTION_SCRIPT = `
           }, '*');
       } 
       else if (isScreenshotActive) {
+           // For screenshot, we just notify selection and clear highlight
            e.target.classList.remove('screenshot-hover-target');
            
            window.parent.postMessage({ 
