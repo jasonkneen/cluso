@@ -1,8 +1,11 @@
+
 import React, { useRef, useState, useEffect } from 'react';
 import { useLiveGemini } from './hooks/useLiveGemini';
 import { INJECTION_SCRIPT } from './utils/iframe-injection';
 import { SelectedElement, Message } from './types';
 import { GoogleGenAI } from '@google/genai';
+import { ControlTray } from './components/ControlTray';
+import { Visualizer } from './components/Visualizer';
 
 // --- Constants ---
 
@@ -94,9 +97,14 @@ export default function App() {
   // Selection States
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
   const [screenshotElement, setScreenshotElement] = useState<SelectedElement | null>(null);
+  const [multiSelectRegion, setMultiSelectRegion] = useState<{ rect: any, count: number } | null>(null);
   
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  
+  // Live / Media State
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [isWebcamActive, setIsWebcamActive] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   // Inspector & Context State
@@ -105,18 +113,22 @@ export default function App() {
   
   const [logs, setLogs] = useState<string[]>([]);
   const [attachLogs, setAttachLogs] = useState(false);
-  const [showConsole, setShowConsole] = useState(false); // Toggle bottom console view
+  const [showConsole, setShowConsole] = useState(false); 
   
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Popup Input State
   const [popupInput, setPopupInput] = useState('');
+  const [isPopupAgentMenuOpen, setIsPopupAgentMenuOpen] = useState(false);
 
   // Agent State
   const [selectedAgent, setSelectedAgent] = useState(AGENTS[0]);
   const [isAgentMenuOpen, setIsAgentMenuOpen] = useState(false);
   const [gitBranch, setGitBranch] = useState('main');
+
+  // Input UI State
+  const [isInputExpanded, setIsInputExpanded] = useState(false);
 
   // Refs for Live API
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -142,6 +154,7 @@ export default function App() {
     disconnect, 
     startVideoStreaming, 
     stopVideoStreaming, 
+    volume
   } = useLiveGemini({ 
     videoRef, 
     canvasRef, 
@@ -164,6 +177,16 @@ export default function App() {
             console.error("Failed to get display media", err);
             setIsScreenSharing(false);
         });
+    } else if (streamState.isConnected && isWebcamActive) {
+         navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+                startVideoStreaming();
+            }
+         }).catch(err => {
+             console.error("Failed to get webcam", err);
+             setIsWebcamActive(false);
+         });
     } else {
         stopVideoStreaming();
         if (videoRef.current && videoRef.current.srcObject) {
@@ -172,7 +195,7 @@ export default function App() {
             videoRef.current.srcObject = null;
         }
     }
-  }, [isScreenSharing, streamState.isConnected, startVideoStreaming, stopVideoStreaming]);
+  }, [isScreenSharing, isWebcamActive, streamState.isConnected, startVideoStreaming, stopVideoStreaming]);
 
   // Sync Inspector State with Iframe
   useEffect(() => {
@@ -209,7 +232,16 @@ export default function App() {
       else if (event.data.type === 'SCREENSHOT_SELECT') {
          const el = event.data.element;
          setScreenshotElement(el);
+         setMultiSelectRegion(null);
          setIsScreenshotActive(false); 
+      }
+      else if (event.data.type === 'MULTI_SELECT') {
+         setMultiSelectRegion({
+             rect: event.data.rect,
+             count: event.data.elements.length
+         });
+         setScreenshotElement(null);
+         setIsScreenshotActive(false);
       }
       else if (event.data.type === 'CONSOLE_LOG') {
           const logEntry = `> [${event.data.level.toUpperCase()}] ${event.data.message}`;
@@ -238,7 +270,7 @@ export default function App() {
   };
 
   const processPrompt = async (promptText: string, source: 'sidebar' | 'popup') => {
-    if (!promptText.trim() && !selectedElement && !attachedImage && !screenshotElement) return;
+    if (!promptText.trim() && !selectedElement && !attachedImage && !screenshotElement && !multiSelectRegion) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -261,6 +293,7 @@ export default function App() {
         User Request: ${userMessage.content}
         ${selectedElement ? `Context: User selected element for CODE editing: <${selectedElement.tagName}> with text "${selectedElement.text}"` : ''}
         ${screenshotElement ? `Context: User selected element for VISUAL reference: <${screenshotElement.tagName}>.` : ''}
+        ${multiSelectRegion ? `Context: User selected a REGION containing ${multiSelectRegion.count} elements.` : ''}
     `;
 
     if (attachLogs && logs.length > 0) {
@@ -280,6 +313,7 @@ export default function App() {
     setAttachLogs(false);
     setAttachedImage(null);
     setScreenshotElement(null);
+    setMultiSelectRegion(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
 
     try {
@@ -364,13 +398,13 @@ export default function App() {
     const iframeRect = iframeRef.current.getBoundingClientRect();
     const top = iframeRect.top + selectedElement.y + 10;
     const left = iframeRect.left + selectedElement.x;
-    return { top: `${Math.min(Math.max(10, top), window.innerHeight - 150)}px`, left: `${Math.min(Math.max(10, left), window.innerWidth - 320)}px` };
+    return { top: `${Math.min(Math.max(10, top), window.innerHeight - 200)}px`, left: `${Math.min(Math.max(10, left), window.innerWidth - 320)}px` };
   };
 
   const displayCode = isPreviewingOriginal ? (originalCode || htmlCode) : (pendingCode || htmlCode);
 
   return (
-    <div className="flex h-screen w-full bg-zinc-950 overflow-hidden font-sans text-neutral-200">
+    <div className="flex h-screen w-full bg-zinc-950 overflow-hidden font-sans text-neutral-200 relative">
       
       {/* --- Left Pane: Web Preview --- */}
       <div className={`flex-1 flex flex-col relative h-full bg-zinc-900 transition-all duration-300 ease-in-out border-r border-zinc-800 ${isSidebarOpen ? '' : 'w-full'}`}>
@@ -466,9 +500,31 @@ export default function App() {
                         <div className="bg-blue-900/30 text-blue-400 px-1.5 py-0.5 rounded font-mono font-medium">
                             {selectedElement.tagName}
                         </div>
-                        <span className="truncate max-w-[150px]">{selectedElement.text}</span>
+                        <span className="truncate max-w-[100px]">{selectedElement.text}</span>
                         <div className="flex-1"></div>
-                        <button onClick={() => setSelectedElement(null)} className="hover:text-white">
+                        
+                        {/* Agent Selector in Popup */}
+                        <div className="relative">
+                            <button onClick={() => setIsPopupAgentMenuOpen(!isPopupAgentMenuOpen)} className="flex items-center gap-1 hover:text-white">
+                                <span>{selectedAgent.icon === 'eh' ? '🤖' : selectedAgent.icon}</span>
+                            </button>
+                            {isPopupAgentMenuOpen && (
+                                <div className="absolute top-6 right-0 w-40 bg-zinc-950 border border-zinc-800 rounded-lg shadow-xl z-50">
+                                    {AGENTS.map(agent => (
+                                        <button
+                                            key={agent.id}
+                                            onClick={() => { setSelectedAgent(agent); setIsPopupAgentMenuOpen(false); }}
+                                            className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-800 text-zinc-300 flex items-center gap-2"
+                                        >
+                                            <span>{agent.icon === 'eh' ? '🤖' : agent.icon}</span>
+                                            {agent.name}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <button onClick={() => setSelectedElement(null)} className="hover:text-white ml-2">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                         </button>
                     </div>
@@ -477,7 +533,7 @@ export default function App() {
                         <textarea
                             value={popupInput}
                             onChange={(e) => setPopupInput(e.target.value)}
-                            placeholder="Change..."
+                            placeholder={`Ask ${selectedAgent.name}...`}
                             className="w-full text-sm p-2 bg-zinc-950 rounded-lg border border-zinc-800 text-white focus:outline-none focus:border-blue-500 resize-none"
                             rows={2}
                             autoFocus
@@ -514,7 +570,7 @@ export default function App() {
 
       {/* --- Right Pane: Chat Interface --- */}
       {isSidebarOpen && (
-        <div className={`w-[400px] flex-shrink-0 bg-zinc-950 flex flex-col transition-all duration-300`}>
+        <div className={`w-[400px] flex-shrink-0 bg-zinc-950 flex flex-col transition-all duration-300 border-l border-zinc-800`}>
             
             {/* Header */}
             <div className="h-10 border-b border-zinc-800 flex items-center justify-between px-4 flex-shrink-0 bg-zinc-950">
@@ -548,88 +604,115 @@ export default function App() {
             </div>
 
              {/* Indicators */}
-            {(selectedElement || screenshotElement || attachLogs || attachedImage) && (
+            {(selectedElement || screenshotElement || multiSelectRegion || attachLogs || attachedImage) && (
                 <div className="px-4 py-2 border-t border-zinc-800 flex flex-wrap gap-2">
                      {selectedElement && <span className="text-[10px] bg-blue-900/20 text-blue-400 px-2 py-0.5 rounded border border-blue-900/30">Code: {selectedElement.tagName}</span>}
                      {screenshotElement && <span className="text-[10px] bg-purple-900/20 text-purple-400 px-2 py-0.5 rounded border border-purple-900/30">Visual: {screenshotElement.tagName}</span>}
+                     {multiSelectRegion && <span className="text-[10px] bg-purple-900/20 text-purple-400 px-2 py-0.5 rounded border border-purple-900/30">Region: {multiSelectRegion.count} Items</span>}
                      {attachLogs && <span className="text-[10px] bg-yellow-900/20 text-yellow-400 px-2 py-0.5 rounded border border-yellow-900/30">Logs</span>}
                      {attachedImage && <span className="text-[10px] bg-green-900/20 text-green-400 px-2 py-0.5 rounded border border-green-900/30">Image</span>}
                 </div>
             )}
 
-            {/* Input Area */}
+            {/* Compact Chat Input Bubble */}
             <div className="p-4 bg-zinc-950">
-                <form onSubmit={(e) => { e.preventDefault(); processPrompt(input, 'sidebar'); }} className="relative bg-zinc-900 border border-zinc-800 rounded-xl p-2 focus-within:ring-1 focus-within:ring-zinc-700 transition-all">
+                <form 
+                    onSubmit={(e) => { e.preventDefault(); processPrompt(input, 'sidebar'); }} 
+                    className={`relative bg-zinc-900 border border-zinc-800 rounded-[20px] transition-all duration-300 ease-in-out ${isInputExpanded || input ? 'rounded-xl p-2' : 'p-1.5'}`}
+                >
+                    <div className="flex items-center">
+                        {/* Mini Agent Badge (Visible when collapsed) */}
+                        {!isInputExpanded && !input && (
+                             <div className="pl-2 pr-1 text-zinc-500 cursor-default">
+                                {selectedAgent.icon === 'eh' ? '🤖' : selectedAgent.icon}
+                             </div>
+                        )}
+                        <input
+                            type="text"
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onFocus={() => setIsInputExpanded(true)}
+                            onBlur={() => !input && !isAgentMenuOpen && setIsInputExpanded(false)}
+                            placeholder={isInputExpanded ? "Ask..." : "Ask..."}
+                            className={`w-full bg-transparent text-sm text-white placeholder-zinc-500 focus:outline-none transition-all ${isInputExpanded || input ? 'px-2 py-1 mb-2' : 'px-1 py-1'}`}
+                        />
+                    </div>
                     
-                    <input
-                        type="text"
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        placeholder="Ask..."
-                        className="w-full bg-transparent text-sm text-white placeholder-zinc-600 focus:outline-none px-2 py-1 mb-2"
-                    />
-                    
-                    <div className="flex items-center justify-between">
-                         <div className="flex items-center gap-1">
-                            {/* Agent Selector */}
-                            <div className="relative">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsAgentMenuOpen(!isAgentMenuOpen)}
-                                    className="flex items-center gap-1.5 px-2 py-1 hover:bg-zinc-800 rounded text-xs text-zinc-400 transition-colors"
-                                >
-                                    <span>{selectedAgent.icon === 'eh' ? '🤖' : selectedAgent.icon}</span>
-                                    <span className="font-medium">{selectedAgent.name}</span>
+                    <div className={`overflow-hidden transition-all duration-300 ${isInputExpanded || input ? 'max-h-20 opacity-100' : 'max-h-0 opacity-0'}`}>
+                        <div className="flex items-center justify-between pt-1">
+                             <div className="flex items-center gap-1">
+                                {/* Agent Selector */}
+                                <div className="relative">
+                                    <button
+                                        type="button"
+                                        onMouseDown={() => setIsAgentMenuOpen(!isAgentMenuOpen)} // Use onMouseDown to prevent blur
+                                        className="flex items-center gap-1.5 px-2 py-1 hover:bg-zinc-800 rounded text-xs text-zinc-400 transition-colors"
+                                    >
+                                        <span>{selectedAgent.icon === 'eh' ? '🤖' : selectedAgent.icon}</span>
+                                        <span className="font-medium">{selectedAgent.name}</span>
+                                    </button>
+                                    {isAgentMenuOpen && (
+                                        <div className="absolute bottom-full left-0 mb-1 w-48 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl py-1 z-50">
+                                            {AGENTS.map(agent => (
+                                                <button
+                                                    key={agent.id}
+                                                    type="button"
+                                                    onMouseDown={() => { setSelectedAgent(agent); setIsAgentMenuOpen(false); }}
+                                                    className="w-full text-left px-3 py-2 text-xs hover:bg-zinc-800 text-zinc-300 flex items-center gap-2"
+                                                >
+                                                    <span>{agent.icon === 'eh' ? '🤖' : agent.icon}</span>
+                                                    {agent.name}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="w-[1px] h-4 bg-zinc-800 mx-1"></div>
+                                
+                                {/* Attachments */}
+                                <button type="button" onMouseDown={() => fileInputRef.current?.click()} className="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                                 </button>
-                                {isAgentMenuOpen && (
-                                    <div className="absolute bottom-full left-0 mb-1 w-48 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl py-1 z-50">
-                                        {AGENTS.map(agent => (
-                                            <button
-                                                key={agent.id}
-                                                type="button"
-                                                onClick={() => { setSelectedAgent(agent); setIsAgentMenuOpen(false); }}
-                                                className="w-full text-left px-3 py-2 text-xs hover:bg-zinc-800 text-zinc-300 flex items-center gap-2"
-                                            >
-                                                <span>{agent.icon === 'eh' ? '🤖' : agent.icon}</span>
-                                                {agent.name}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
+                                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
 
-                            <div className="w-[1px] h-4 bg-zinc-800 mx-1"></div>
-                            
-                            {/* Attachments */}
-                            <button type="button" onClick={() => fileInputRef.current?.click()} className="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-                            </button>
-                            <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+                                <button type="button" onMouseDown={() => { setIsInspectorActive(!isInspectorActive); setIsScreenshotActive(false); }} className={`p-1.5 rounded ${isInspectorActive ? 'bg-blue-900/30 text-blue-400' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="M13 13l6 6"/></svg>
+                                </button>
 
-                            <button type="button" onClick={() => { setIsInspectorActive(!isInspectorActive); setIsScreenshotActive(false); }} className={`p-1.5 rounded ${isInspectorActive ? 'bg-blue-900/30 text-blue-400' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}>
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="M13 13l6 6"/></svg>
-                            </button>
+                                 <button type="button" onMouseDown={() => { setIsScreenshotActive(!isScreenshotActive); setIsInspectorActive(false); }} className={`p-1.5 rounded ${isScreenshotActive ? 'bg-purple-900/30 text-purple-400' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                </button>
+                             </div>
 
-                             <button type="button" onClick={() => { setIsScreenshotActive(!isScreenshotActive); setIsInspectorActive(false); }} className={`p-1.5 rounded ${isScreenshotActive ? 'bg-purple-900/30 text-purple-400' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}>
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                            </button>
-                         </div>
-
-                         <div className="flex items-center gap-1">
-                             <button type="button" onClick={() => setIsScreenSharing(!isScreenSharing)} className={`p-1.5 rounded ${isScreenSharing ? 'bg-green-900/30 text-green-400' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}>
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                             </button>
-                             <button type="button" onClick={streamState.isConnected ? disconnect : connect} className={`p-1.5 rounded ${streamState.isConnected ? 'bg-red-900/30 text-red-400 animate-pulse' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}`}>
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-                             </button>
-                             <button type="submit" disabled={!input.trim()} className="p-1.5 bg-white text-black rounded hover:bg-zinc-200 transition-colors ml-1">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                             </button>
-                         </div>
+                             <div className="flex items-center gap-1">
+                                 <button type="submit" disabled={!input.trim()} className="p-1.5 bg-white text-black rounded hover:bg-zinc-200 transition-colors ml-1">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                                 </button>
+                             </div>
+                        </div>
                     </div>
                 </form>
             </div>
         </div>
+      )}
+
+      {/* Floating Control Tray (Restored) */}
+      <ControlTray 
+          isConnected={streamState.isConnected}
+          isVideoEnabled={isWebcamActive}
+          isScreenEnabled={isScreenSharing}
+          onConnect={connect}
+          onDisconnect={disconnect}
+          onToggleVideo={() => setIsWebcamActive(!isWebcamActive)}
+          onToggleScreen={() => setIsScreenSharing(!isScreenSharing)}
+      />
+
+      {/* Audio Visualizer Overlay (Restored) */}
+      {streamState.isConnected && (
+         <div className="fixed bottom-24 right-8 w-64 h-32 z-40 pointer-events-none">
+            <Visualizer volume={volume} isActive={true} />
+         </div>
       )}
 
       {/* Hidden Media Elements for Live API */}
