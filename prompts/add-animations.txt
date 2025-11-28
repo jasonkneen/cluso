@@ -1,0 +1,1 @@
+Add subtle animations and transitions to make the UI feel more polished and responsive. Use hover effects, smooth transitions, and micro-interactions where appropriate.

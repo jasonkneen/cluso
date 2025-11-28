@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gemini Live</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* CSS Variables for shadcn/streamdown components */
+      :root {
+        --background: 250 250 249; /* stone-50 */
+        --foreground: 28 25 23; /* stone-900 */
+        --muted: 245 245 244; /* stone-100 */
+        --muted-foreground: 120 113 108; /* stone-500 */
+        --border: 231 229 228; /* stone-200 */
+        --primary: 28 25 23; /* stone-900 */
+        --primary-foreground: 250 250 249; /* stone-50 */
+      }
+
+      .dark {
+        --background: 23 23 23; /* neutral-900 */
+        --foreground: 245 245 245; /* neutral-100 */
+        --muted: 64 64 64; /* neutral-700 */
+        --muted-foreground: 163 163 163; /* neutral-400 */
+        --border: 64 64 64; /* neutral-700 */
+        --primary: 59 130 246; /* blue-500 */
+        --primary-foreground: 255 255 255; /* white */
+      }
+
+      /* Code block styling for dark mode - Shiki one-dark-pro theme colors */
+      .dark [data-streamdown="code-block"] {
+        background-color: #282c34 !important;
+        border-color: #3e4451 !important;
+      }
+
+      .dark [data-streamdown="code-block"] pre {
+        background-color: #282c34 !important;
+      }
+
+      /* Inline code styling */
+      .dark code:not(pre code) {
+        background-color: rgba(110, 118, 129, 0.4) !important;
+        color: #e5c07b !important;
+      }
+
+      body {
+        margin: 0;
+        background-color: #09090b; /* zinc-950 */
+        color: #fff;
+        font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        overflow: hidden;
+      }
+
+      /* IBM Plex Mono for code blocks */
+      code, pre, [data-streamdown="code-block"] code, [data-streamdown="code-block"] pre {
+        font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,1 @@
+Fix any layout issues on this page. Make sure elements are properly aligned, padding is consistent, and the overall visual hierarchy makes sense.
