@@ -836,7 +836,11 @@ export default function App() {
       clearTimeout(timer);
       setIsWebviewReady(false);
     };
-  }, [isElectron]);
+  // Re-run when these change (webview may mount/unmount based on URL/state):
+  // - currentUrl: the webview src
+  // - setupProject: when not null, webview is hidden (showing ProjectSetupFlow)
+  // - activeTab.url: determines isNewTabPage which controls webview visibility
+  }, [isElectron, currentUrl, setupProject, activeTab.url]);
 
   // Auto-scroll console panel to bottom when new logs arrive
   useEffect(() => {
