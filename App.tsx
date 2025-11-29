@@ -1374,15 +1374,17 @@ If you're not sure what the user wants, ask for clarification.
         </div>
         )}
 
-        {/* --- Right Pane: Chat --- */}
-      {isSidebarOpen && (
-      <>
-          {/* Resize Handle */}
+        {/* Resize Handle */}
+        {isSidebarOpen && (
           <div
             className={`w-1 cursor-ew-resize z-10 transition-colors flex-shrink-0 ${isResizing ? 'bg-blue-500' : 'hover:bg-blue-400'}`}
             onMouseDown={handleResizeStart}
           />
-          <div className={`flex flex-col rounded-xl shadow-sm flex-shrink-0 ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`} style={{ width: sidebarWidth }}>
+        )}
+
+        {/* --- Right Pane: Chat --- */}
+      {isSidebarOpen && (
+      <div className={`flex flex-col rounded-xl shadow-sm flex-shrink-0 ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`} style={{ width: sidebarWidth }}>
 
           {/* Git Header */}
           <div className={`h-12 border-b flex items-center justify-between px-3 flex-shrink-0 ${isDarkMode ? 'border-neutral-700' : 'border-stone-100'}`}>
@@ -1910,7 +1912,7 @@ If you're not sure what the user wants, ask for clarification.
                   </div>
               </div>
           </div>
-      </>
+      </div>
       )}
 
       {/* Expand Sidebar Button */}
