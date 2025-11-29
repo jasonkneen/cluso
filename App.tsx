@@ -1223,10 +1223,10 @@ export default function App() {
         type: log.type,
         message: log.message,
       })) || [],
-      projectPath: projectPath,
+      projectPath: activeTab?.projectPath || null,
       recentMessages: messages.slice(-10) as any[],
     });
-  }, [selectedElement, selectedFiles, selectedLogs, projectPath, messages, updateCodingContext]);
+  }, [selectedElement, selectedFiles, selectedLogs, activeTab?.projectPath, messages, updateCodingContext]);
 
   // Clear selected logs when console is cleared
   const handleClearConsole = useCallback(() => {
