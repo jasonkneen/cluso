@@ -456,7 +456,9 @@ export function createCodingAgentTools(): ToolsMap {
     // Git operations
     git_status: {
       description: 'Get current git status (modified files, etc)',
-      parameters: z.object({}),
+      parameters: z.object({
+        includeUntracked: z.boolean().optional().describe('Include untracked files (default: true)'),
+      }),
       execute: async () => {
         if (!window.electronAPI?.git?.getStatus) {
           return { error: 'Git operations not available (not in Electron)' }
