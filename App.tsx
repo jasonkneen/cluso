@@ -1360,7 +1360,7 @@ If you're not sure what the user wants, ask for clarification.
 
         {/* --- Left Pane: Browser, New Tab Page, or Project Setup --- */}
         {setupProject ? (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700' : 'bg-white border-stone-200'}`}>
+          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
             <ProjectSetupFlow
               projectPath={setupProject.path}
               projectName={setupProject.name}
@@ -1370,7 +1370,7 @@ If you're not sure what the user wants, ask for clarification.
             />
           </div>
         ) : isNewTabPage ? (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700' : 'bg-white border-stone-200'}`}>
+          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
             <NewTabPage
               onOpenProject={handleOpenProject}
               onOpenUrl={handleOpenUrl}
@@ -1378,7 +1378,7 @@ If you're not sure what the user wants, ask for clarification.
             />
           </div>
         ) : (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700' : 'bg-white border-stone-200'}`}>
+          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
 
             {/* Browser Toolbar */}
             <div className={`h-12 border-b flex items-center gap-2 px-3 flex-shrink-0 ${isDarkMode ? 'border-neutral-700 bg-neutral-800' : 'border-stone-100 bg-stone-50'}`}>
@@ -1935,7 +1935,7 @@ If you're not sure what the user wants, ask for clarification.
 
         {/* --- Right Pane: Chat --- */}
       {isSidebarOpen && (
-      <div className={`flex flex-col rounded-xl shadow-sm flex-shrink-0 border ${isDarkMode ? 'bg-neutral-800 border-neutral-700' : 'bg-white border-stone-200'}`} style={{ width: sidebarWidth }}>
+      <div className={`flex flex-col rounded-xl shadow-sm flex-shrink-0 border ${isDarkMode ? 'bg-neutral-800 border-neutral-800' : 'bg-white border-stone-100'}`} style={{ width: sidebarWidth }}>
 
           {/* Git Header */}
           <div className={`h-12 border-b flex items-center justify-between px-3 flex-shrink-0 ${isDarkMode ? 'border-neutral-700' : 'border-stone-100'}`}>
@@ -2097,7 +2097,7 @@ If you're not sure what the user wants, ask for clarification.
           </div>
 
           {/* Input Area */}
-          <div className={`p-4 border-t ${isDarkMode ? 'border-neutral-700' : 'border-stone-100'}`} style={{ overflow: 'visible' }}>
+          <div className="p-4" style={{ overflow: 'visible' }}>
               <div className={`rounded-2xl border ${isDarkMode ? 'bg-neutral-700 border-neutral-600' : 'bg-stone-50 border-stone-200'}`} style={{ overflow: 'visible' }}>
                   {/* Selection Chips */}
                   {(selectedElement || screenshotElement || attachLogs) && (
