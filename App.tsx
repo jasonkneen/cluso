@@ -1102,7 +1102,7 @@ If you're not sure what the user wants, ask for clarification.
   const isNewTabPage = !activeTab.url;
 
   return (
-    <div className={`flex flex-col h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'bg-neutral-900 text-neutral-100' : 'bg-stone-100 text-neutral-900'}`}>
+    <div className={`flex flex-col h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'dark bg-neutral-900 text-neutral-100' : 'bg-stone-100 text-neutral-900'}`}>
 
       {/* Tab Bar - at the very top with traffic light area */}
       <TabBar
@@ -1539,23 +1539,16 @@ If you're not sure what the user wants, ask for clarification.
               )}
               {messages.map((msg) => (
                   <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                      <div className={`flex gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'} max-w-full`}>
-                          {msg.role === 'assistant' && (
-                              <div className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-xs ${isDarkMode ? 'bg-neutral-700' : 'bg-stone-100'}`}>
-                                  ✨
-                              </div>
-                          )}
-                          <div className={`text-sm leading-relaxed overflow-hidden ${
-                              msg.role === 'user'
-                                  ? `px-3 py-2 max-w-[85%] ${isDarkMode ? 'bg-white text-neutral-900 rounded-xl' : 'bg-stone-900 text-white rounded-xl'}`
-                                  : msg.role === 'system'
-                                  ? `px-4 py-3 ${isDarkMode ? 'bg-yellow-500/20 text-yellow-200 rounded-2xl' : 'bg-yellow-50 text-yellow-800 rounded-2xl'}`
-                                  : `${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`
-                          }`}>
-                              <MessageResponse>{msg.content}</MessageResponse>
-                          </div>
+                      <div className={`text-sm leading-relaxed overflow-hidden ${
+                          msg.role === 'user'
+                              ? `px-3 py-2 max-w-[85%] ${isDarkMode ? 'bg-white text-neutral-900 rounded-xl' : 'bg-stone-900 text-white rounded-xl'}`
+                              : msg.role === 'system'
+                              ? `px-4 py-3 ${isDarkMode ? 'bg-yellow-500/20 text-yellow-200 rounded-2xl' : 'bg-yellow-50 text-yellow-800 rounded-2xl'}`
+                              : `w-full ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`
+                      }`}>
+                          <MessageResponse>{msg.content}</MessageResponse>
                       </div>
-                      <div className={`text-[10px] mt-1 px-2 ${msg.role === 'user' ? 'text-right' : 'text-left ml-9'} ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                      <div className={`text-[10px] mt-1 ${msg.role === 'user' ? 'text-right pr-1' : 'text-left'} ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
                           {formatRelativeTime(msg.timestamp)}{msg.role === 'assistant' && msg.model && ` · ${msg.model}`}
                       </div>
                   </div>
@@ -1823,8 +1816,8 @@ If you're not sure what the user wants, ask for clarification.
                                   onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
                                   className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-full border transition ${isDarkMode ? 'border-neutral-600 hover:bg-neutral-600 text-neutral-200 bg-neutral-700' : 'border-stone-200 hover:bg-stone-50 text-stone-700 bg-white'}`}
                               >
-                                  <Box size={16} />
-                                  <span>Cursor</span>
+                                  <selectedModel.Icon size={16} />
+                                  <span>{selectedModel.name}</span>
                                   <ChevronDown size={12} className={isDarkMode ? 'text-neutral-400' : 'text-stone-400'} />
                               </button>
 
