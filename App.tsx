@@ -3,10 +3,13 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useLiveGemini } from './hooks/useLiveGemini';
 import { useGit } from './hooks/useGit';
 import { INJECTION_SCRIPT } from './utils/iframe-injection';
-import { SelectedElement, Message } from './types';
+import { SelectedElement, Message as ChatMessage } from './types';
 import { TabState, createNewTab } from './types/tab';
 import { TabBar, Tab } from './components/TabBar';
 import { NewTabPage, RecentProject } from './components/NewTabPage';
+import { CodeBlock, CodeBlockCopyButton } from '@/components/ai-elements/code-block';
+import { Tool, ToolContent, ToolHeader, ToolOutput } from '@/components/ai-elements/tool';
+import { MessageResponse } from '@/components/ai-elements/message';
 import { GoogleGenAI } from '@google/genai';
 import {
   ChevronLeft,
@@ -41,6 +44,24 @@ import {
   Folder,
   File,
 } from 'lucide-react';
+
+// --- Helper Functions ---
+
+// Format relative time (e.g., "2m ago", "1h ago", "just now")
+function formatRelativeTime(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHour = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHour / 24);
+
+  if (diffSec < 30) return 'just now';
+  if (diffSec < 60) return `${diffSec}s ago`;
+  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffHour < 24) return `${diffHour}h ago`;
+  return `${diffDay}d ago`;
+}
 
 // --- Constants ---
 
@@ -133,7 +154,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [pageTitle, setPageTitle] = useState('');
 
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
 
   // Selection States
@@ -144,6 +165,8 @@ export default function App() {
 
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(420);
+  const [isResizing, setIsResizing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Inspector & Context State
@@ -219,6 +242,14 @@ export default function App() {
     elements?: SelectedElement[];
   } | null>(null);
 
+  // Source code snippet display state
+  const [displayedSourceCode, setDisplayedSourceCode] = useState<{
+    code: string;
+    fileName: string;
+    startLine: number;
+    endLine: number;
+  } | null>(null);
+
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -241,6 +272,34 @@ export default function App() {
   const toggleDarkMode = useCallback(() => {
     setIsDarkMode(prev => !prev);
   }, []);
+
+  // Sidebar resize handlers
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = window.innerWidth - e.clientX;
+      // Clamp between 300 and 800 pixels
+      setSidebarWidth(Math.max(300, Math.min(800, newWidth)));
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
 
   // Stash with optional message
   const handleStash = useCallback(async (message?: string) => {
@@ -750,7 +809,7 @@ export default function App() {
   const processPrompt = async (promptText: string) => {
     if (!promptText.trim() && !selectedElement && !attachedImage && !screenshotElement) return;
 
-    const userMessage: Message = {
+    const userMessage: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
       content: promptText,
@@ -807,7 +866,13 @@ ${screenshotElement ? `Context: User selected element for visual reference: <${s
         fullPromptText += `\n\nRecent Console Logs:\n${logs.join('\n')}`;
     }
 
-    fullPromptText += `
+    // Only include code execution instructions if user has selected an element
+    // OR explicitly asks to modify the page (change, update, modify, etc.)
+    const modifyKeywords = /\b(change|modify|update|edit|delete|remove|add|make|set|fix|replace|style|color|size|font|width|height|margin|padding|border)\b/i;
+    const wantsModification = selectedElement || modifyKeywords.test(userMessage.content);
+
+    if (wantsModification) {
+      fullPromptText += `
 Instructions:
 You are an AI UI assistant that can modify web pages in real-time.
 
@@ -829,7 +894,15 @@ For the selected element, you can use:
 IMPORTANT: Always provide the ORIGINAL value in the "undo" code so the user can preview before/after.
 
 Be concise. Confirm what you changed.
-    `;
+      `;
+    } else {
+      fullPromptText += `
+Instructions:
+You are a helpful AI assistant. Answer the user's question conversationally.
+DO NOT modify the page or execute any code unless the user explicitly asks you to change something.
+If you're not sure what the user wants, ask for clarification.
+      `;
+    }
 
     if (attachedImage) {
         const base64Data = attachedImage.split(',')[1];
@@ -968,6 +1041,43 @@ Be concise. Confirm what you changed.
       });
     }
   }, [isElectron]);
+
+  // Handle showing source code for selected element
+  const handleShowSourceCode = useCallback(async () => {
+    if (!selectedElement?.sourceLocation?.sources?.[0]) return;
+
+    const src = selectedElement.sourceLocation.sources[0];
+    const filePath = src.file;
+    const startLine = src.line || 1;
+    const endLine = src.endLine || startLine + 10;
+
+    if (!filePath || !isElectron || !window.electronAPI?.readFile) {
+      console.log('Cannot read file:', { filePath, isElectron });
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI.readFile(filePath);
+      if (result.success && result.data) {
+        const lines = result.data.split('\n');
+        // Get lines around the target (with some context)
+        const contextBefore = 3;
+        const contextAfter = 7;
+        const actualStart = Math.max(1, startLine - contextBefore);
+        const actualEnd = Math.min(lines.length, endLine + contextAfter);
+        const codeLines = lines.slice(actualStart - 1, actualEnd);
+
+        setDisplayedSourceCode({
+          code: codeLines.join('\n'),
+          fileName: filePath.split('/').pop() || 'unknown',
+          startLine: actualStart,
+          endLine: actualEnd
+        });
+      }
+    } catch (error) {
+      console.error('Failed to read source file:', error);
+    }
+  }, [selectedElement, isElectron]);
 
   // Handle opening a project from new tab page
   const handleOpenProject = useCallback((projectPath: string) => {
@@ -1266,7 +1376,13 @@ Be concise. Confirm what you changed.
 
         {/* --- Right Pane: Chat --- */}
       {isSidebarOpen && (
-      <div className={`w-[420px] flex-shrink-0 flex flex-col rounded-xl shadow-sm ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`}>
+      <>
+          {/* Resize Handle */}
+          <div
+            className={`w-1 cursor-ew-resize z-10 transition-colors flex-shrink-0 ${isResizing ? 'bg-blue-500' : 'hover:bg-blue-400'}`}
+            onMouseDown={handleResizeStart}
+          />
+          <div className={`flex flex-col rounded-xl shadow-sm flex-shrink-0 ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`} style={{ width: sidebarWidth }}>
 
           {/* Git Header */}
           <div className={`h-12 border-b flex items-center justify-between px-3 flex-shrink-0 ${isDarkMode ? 'border-neutral-700' : 'border-stone-100'}`}>
@@ -1417,18 +1533,25 @@ Be concise. Confirm what you changed.
                   </div>
               )}
               {messages.map((msg) => (
-                  <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
-                      {msg.role === 'assistant' && (
-                          <div className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-xs ${isDarkMode ? 'bg-neutral-700' : 'bg-stone-100'}`}>
-                              ✨
+                  <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                      <div className={`flex gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'} max-w-full`}>
+                          {msg.role === 'assistant' && (
+                              <div className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-xs ${isDarkMode ? 'bg-neutral-700' : 'bg-stone-100'}`}>
+                                  ✨
+                              </div>
+                          )}
+                          <div className={`text-sm leading-relaxed overflow-hidden ${
+                              msg.role === 'user'
+                                  ? `px-4 py-3 max-w-[85%] ${isDarkMode ? 'bg-blue-600 text-white rounded-3xl' : 'bg-stone-900 text-white rounded-3xl'}`
+                                  : msg.role === 'system'
+                                  ? `px-4 py-3 ${isDarkMode ? 'bg-yellow-500/20 text-yellow-200 rounded-2xl' : 'bg-yellow-50 text-yellow-800 rounded-2xl'}`
+                                  : `${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`
+                          }`}>
+                              <MessageResponse>{msg.content}</MessageResponse>
                           </div>
-                      )}
-                      <div className={`max-w-[85%] text-sm leading-relaxed px-3 py-2 rounded-2xl ${
-                          msg.role === 'user'
-                              ? (isDarkMode ? 'bg-blue-600 text-white' : 'bg-stone-900 text-white')
-                              : (isDarkMode ? 'bg-neutral-700 text-neutral-200' : 'bg-stone-50 text-stone-700')
-                      }`}>
-                          {msg.content}
+                      </div>
+                      <div className={`text-[10px] mt-1 px-2 ${msg.role === 'user' ? 'text-right' : 'text-left ml-9'} ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                          {formatRelativeTime(msg.timestamp)}
                       </div>
                   </div>
               ))}
@@ -1454,10 +1577,14 @@ Be concise. Confirm what you changed.
                               </div>
                           )}
                           {selectedElement && (
-                              <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs border border-blue-200">
+                              <div
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs border border-blue-200 cursor-pointer hover:bg-blue-100 transition-colors"
+                                onClick={handleShowSourceCode}
+                                title="Click to view source code"
+                              >
                                   <Check size={12} />
                                   {selectedElement.sourceLocation ? (
-                                      <span className="font-mono font-medium" title={selectedElement.sourceLocation.summary}>
+                                      <span className="font-mono font-medium">
                                           {(() => {
                                             const src = selectedElement.sourceLocation.sources?.[0];
                                             if (!src) return selectedElement.sourceLocation.summary;
@@ -1471,7 +1598,11 @@ Be concise. Confirm what you changed.
                                       <span className="font-medium">{selectedElement.tagName.toLowerCase()}</span>
                                   )}
                                   <button
-                                      onClick={() => setSelectedElement(null)}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedElement(null);
+                                        setDisplayedSourceCode(null);
+                                      }}
                                       className="ml-0.5 hover:text-blue-900"
                                   >
                                       <X size={12} />
@@ -1511,6 +1642,22 @@ Be concise. Confirm what you changed.
                                   </button>
                               </div>
                           ))}
+                      </div>
+                  )}
+
+                  {/* Source Code Preview */}
+                  {displayedSourceCode && (
+                      <div className="px-3 pt-3">
+                          <div className={`text-xs font-mono mb-1 ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                            {displayedSourceCode.fileName} ({displayedSourceCode.startLine}-{displayedSourceCode.endLine})
+                          </div>
+                          <CodeBlock
+                            code={displayedSourceCode.code}
+                            language="tsx"
+                            showLineNumbers={true}
+                          >
+                            <CodeBlockCopyButton />
+                          </CodeBlock>
                       </div>
                   )}
 
@@ -1763,7 +1910,7 @@ Be concise. Confirm what you changed.
                   </div>
               </div>
           </div>
-      </div>
+      </>
       )}
 
       {/* Expand Sidebar Button */}
