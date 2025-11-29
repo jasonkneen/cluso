@@ -133,6 +133,8 @@ export function SettingsDialog({
     authenticated: false,
     expiresAt: null
   })
+  const [apiTestResult, setApiTestResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [apiTestLoading, setApiTestLoading] = useState(false)
 
   // Check Claude Code OAuth status on mount and when dialog opens
   useEffect(() => {
@@ -239,8 +241,36 @@ export function SettingsDialog({
     try {
       const result = await window.electronAPI.oauth.startLogin(mode)
       if (result.success) {
-        setAwaitingOAuthCode({ mode, createKey })
-        setOauthCode('')
+        // Check if OAuth completed automatically via callback server
+        if (result.autoCompleted) {
+          // OAuth flow completed automatically - update status
+          if (result.mode === 'api-key' && result.apiKey) {
+            // Update Anthropic provider with the new API key
+            updateSettings({
+              providers: settings.providers.map(p =>
+                p.id === 'anthropic' ? { ...p, apiKey: result.apiKey!, verified: true, enabled: true } : p
+              )
+            })
+          } else if (result.mode === 'oauth') {
+            // Update Claude Code status
+            const status = await window.electronAPI.oauth.getStatus()
+            setClaudeCodeStatus(status)
+            updateSettings({
+              claudeCodeAuthenticated: true,
+              claudeCodeExpiresAt: status.expiresAt,
+              models: settings.models.map(m =>
+                m.id === 'claude-code' ? { ...m, enabled: true } : m
+              )
+            })
+          }
+          // Don't show manual code entry dialog
+          setAwaitingOAuthCode(null)
+          setOauthCode('')
+        } else {
+          // Fallback to manual code entry (shouldn't happen with callback server)
+          setAwaitingOAuthCode({ mode, createKey })
+          setOauthCode('')
+        }
       } else {
         setOauthError(result.error || 'Failed to start OAuth flow')
       }
@@ -315,6 +345,29 @@ export function SettingsDialog({
       })
     } catch (err) {
       setOauthError(err instanceof Error ? err.message : 'Unknown error')
+    }
+  }
+
+  // Test API call directly (bypasses AI SDK)
+  const testApiCall = async () => {
+    if (!window.electronAPI?.oauth?.testApi) return
+
+    setApiTestLoading(true)
+    setApiTestResult(null)
+
+    try {
+      const result = await window.electronAPI.oauth.testApi()
+      if (result.success) {
+        setApiTestResult({ success: true, message: 'API call succeeded! Check console for response.' })
+        console.log('[API Test] Response:', result.response)
+      } else {
+        setApiTestResult({ success: false, message: result.error || 'API call failed' })
+        console.log('[API Test] Error:', result.error)
+      }
+    } catch (err) {
+      setApiTestResult({ success: false, message: err instanceof Error ? err.message : 'Unknown error' })
+    } finally {
+      setApiTestLoading(false)
     }
   }
 
@@ -767,6 +820,32 @@ export function SettingsDialog({
                       {claudeCodeStatus.expiresAt && (
                         <p className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
                           Token expires: {new Date(claudeCodeStatus.expiresAt).toLocaleString()}
+                        </p>
+                      )}
+                      {/* Test API Button */}
+                      <button
+                        onClick={testApiCall}
+                        disabled={apiTestLoading}
+                        className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          apiTestLoading
+                            ? isDarkMode
+                              ? 'bg-neutral-700 text-neutral-500 cursor-not-allowed'
+                              : 'bg-stone-100 text-stone-400 cursor-not-allowed'
+                            : isDarkMode
+                              ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20'
+                              : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                        }`}
+                      >
+                        {apiTestLoading ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                        Test API Call (Direct)
+                      </button>
+                      {apiTestResult && (
+                        <p className={`text-xs ${
+                          apiTestResult.success
+                            ? isDarkMode ? 'text-green-400' : 'text-green-600'
+                            : isDarkMode ? 'text-red-400' : 'text-red-600'
+                        }`}>
+                          {apiTestResult.message}
                         </p>
                       )}
                       <button

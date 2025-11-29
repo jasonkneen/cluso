@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAccessToken: () => ipcRenderer.invoke('oauth:get-access-token'),
     // Get Claude Code API key (created from OAuth)
     getClaudeCodeApiKey: () => ipcRenderer.invoke('oauth:get-claude-code-api-key'),
+    // Direct test of Anthropic API with OAuth token (bypasses AI SDK)
+    testApi: () => ipcRenderer.invoke('oauth:test-api'),
   },
 
   // API proxy to bypass CORS restrictions
@@ -55,6 +57,41 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Dialog operations
   dialog: {
     openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
+  },
+
+  // Claude Code SDK operations (uses Claude Agent SDK with OAuth)
+  claudeCode: {
+    // Start a session with initial prompt
+    startSession: (options) => ipcRenderer.invoke('claude-code:start-session', options),
+    // Send a message to active session
+    sendMessage: (text) => ipcRenderer.invoke('claude-code:send-message', text),
+    // Check if session is active
+    isActive: () => ipcRenderer.invoke('claude-code:is-active'),
+    // Stop current response
+    stop: () => ipcRenderer.invoke('claude-code:stop'),
+    // Reset session
+    reset: () => ipcRenderer.invoke('claude-code:reset'),
+    // Listen for streaming events
+    onTextChunk: (callback) => {
+      ipcRenderer.on('claude-code:text-chunk', (_event, text) => callback(text))
+      return () => ipcRenderer.removeAllListeners('claude-code:text-chunk')
+    },
+    onToolUse: (callback) => {
+      ipcRenderer.on('claude-code:tool-use', (_event, toolUse) => callback(toolUse))
+      return () => ipcRenderer.removeAllListeners('claude-code:tool-use')
+    },
+    onToolResult: (callback) => {
+      ipcRenderer.on('claude-code:tool-result', (_event, result) => callback(result))
+      return () => ipcRenderer.removeAllListeners('claude-code:tool-result')
+    },
+    onComplete: (callback) => {
+      ipcRenderer.on('claude-code:complete', () => callback())
+      return () => ipcRenderer.removeAllListeners('claude-code:complete')
+    },
+    onError: (callback) => {
+      ipcRenderer.on('claude-code:error', (_event, error) => callback(error))
+      return () => ipcRenderer.removeAllListeners('claude-code:error')
+    },
   },
 
   // Check if running in Electron

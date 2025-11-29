@@ -3,8 +3,12 @@ const path = require('path')
 const { execSync, exec } = require('child_process')
 const fs = require('fs').promises
 const oauth = require('./oauth.cjs')
+const claudeSession = require('./claude-session.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
+
+// Track the main window for sending events
+let mainWindow = null
 
 // Git helper - execute git commands
 function gitExec(command) {
@@ -27,25 +31,82 @@ function registerHandlers() {
 
 // Register OAuth IPC handlers
 function registerOAuthHandlers() {
-  // Start OAuth login flow
+  // Start OAuth login flow with automatic callback capture
   ipcMain.handle('oauth:start-login', async (_event, mode) => {
     try {
       // Generate PKCE challenge
       const pkce = oauth.generatePKCEChallenge()
       oauth.setPKCEVerifier(pkce.verifier)
 
-      // Get authorization URL
-      const authUrl = oauth.getAuthorizationUrl(mode, pkce)
+      // Get authorization URL with local callback
+      const authUrl = oauth.getAuthorizationUrl(mode, pkce, true)
+
+      console.log('[OAuth] Starting login flow with local callback server')
+      console.log('[OAuth] Auth URL:', authUrl)
+
+      // Start the callback server to capture the code automatically
+      const codePromise = oauth.startCallbackServer()
 
       // Open the authorization URL in the default browser
       await shell.openExternal(authUrl)
 
-      return {
-        success: true,
-        authUrl
+      // Wait for the callback with the code and state
+      try {
+        const { code, state } = await codePromise
+        console.log('[OAuth] Received code from callback server')
+        console.log('[OAuth] State from callback:', state ? state.substring(0, 20) + '...' : 'none')
+
+        // Automatically exchange code for tokens
+        const verifier = oauth.getPKCEVerifier()
+        const tokens = await oauth.exchangeCodeForTokens(code, verifier, state, true)
+
+        if (!tokens) {
+          oauth.clearPKCEVerifier()
+          return {
+            success: false,
+            error: 'Failed to exchange authorization code for tokens'
+          }
+        }
+
+        // Clear the temporary verifier
+        oauth.clearPKCEVerifier()
+
+        // Save OAuth tokens
+        oauth.saveOAuthTokens(tokens)
+        console.log('[OAuth] Saved OAuth tokens for Claude Code')
+
+        // Try to create API key (only works with Console OAuth, not Max)
+        const apiKey = await oauth.createApiKey(tokens.access)
+        if (apiKey) {
+          oauth.saveClaudeCodeApiKey(apiKey)
+          console.log('[OAuth] Also created and saved API key')
+          return {
+            success: true,
+            apiKey,
+            mode: 'api-key',
+            autoCompleted: true
+          }
+        }
+
+        // Max OAuth doesn't have org:create_api_key scope
+        console.log('[OAuth] Claude Max OAuth - using Bearer token auth')
+        return {
+          success: true,
+          mode: 'oauth',
+          autoCompleted: true
+        }
+      } catch (callbackError) {
+        console.error('[OAuth] Callback server error:', callbackError)
+        oauth.stopCallbackServer()
+        oauth.clearPKCEVerifier()
+        return {
+          success: false,
+          error: callbackError instanceof Error ? callbackError.message : 'OAuth callback failed'
+        }
       }
     } catch (error) {
       console.error('Error starting OAuth login:', error)
+      oauth.stopCallbackServer()
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -94,32 +155,30 @@ function registerOAuthHandlers() {
         }
       }
 
-      // For Claude Code (createKey=false): Try to create API key, but fall back to access token
-      // Claude Max OAuth (claude.ai) doesn't have org:create_api_key scope, but can use user:inference
-      const apiKey = await oauth.createApiKey(tokens.access)
-
-      // Save OAuth tokens for refresh capability
+      // For Claude Code (createKey=false): Save OAuth tokens for direct API use
+      // Claude Max OAuth tokens can be used directly with the API using Bearer auth
+      // and the anthropic-beta: oauth-2025-04-20 header
       oauth.saveOAuthTokens(tokens)
+      console.log('[OAuth] Saved OAuth tokens for Claude Code (direct API access)')
 
+      // Try to create API key (only works with Console OAuth, not Max)
+      const apiKey = await oauth.createApiKey(tokens.access)
       if (apiKey) {
-        // Console OAuth - save the API key
         oauth.saveClaudeCodeApiKey(apiKey)
-        console.log('[OAuth] Created and saved API key from OAuth tokens')
+        console.log('[OAuth] Also created and saved API key from Console OAuth tokens')
         return {
           success: true,
           apiKey,
-          mode: 'oauth-apikey'
+          mode: 'api-key'
         }
-      } else {
-        // Max OAuth - save the access token as "API key" (it will work with user:inference scope)
-        // The Anthropic API accepts OAuth access tokens directly for inference
-        oauth.saveClaudeCodeApiKey(tokens.access)
-        console.log('[OAuth] Using access token directly for Claude Code (Max OAuth)')
-        return {
-          success: true,
-          accessToken: tokens.access,
-          mode: 'oauth-token'
-        }
+      }
+
+      // Max OAuth (claude.ai) doesn't have org:create_api_key scope
+      // But OAuth tokens can be used directly with Bearer auth
+      console.log('[OAuth] Claude Max OAuth - using Bearer token auth (no API key needed)')
+      return {
+        success: true,
+        mode: 'oauth'
       }
     } catch (error) {
       console.error('Error completing OAuth login:', error)
@@ -133,6 +192,7 @@ function registerOAuthHandlers() {
 
   // Cancel OAuth flow
   ipcMain.handle('oauth:cancel', () => {
+    oauth.stopCallbackServer()
     oauth.clearPKCEVerifier()
     return { success: true }
   })
@@ -177,14 +237,83 @@ function registerOAuthHandlers() {
     }
   })
 
-  // Get Claude Code API key (created from OAuth or direct access token)
+  // Get Claude Code API key (created from OAuth)
   ipcMain.handle('oauth:get-claude-code-api-key', () => {
     const apiKey = oauth.getClaudeCodeApiKey()
-    const isOAuthToken = oauth.isClaudeCodeOAuthTokenMode()
     return {
       success: !!apiKey,
-      apiKey,
-      isOAuthToken  // true = use Bearer auth, false = use x-api-key auth
+      apiKey
+    }
+  })
+
+  // Direct test of Anthropic API with OAuth token (bypasses AI SDK)
+  ipcMain.handle('oauth:test-api', async () => {
+    try {
+      // Get fresh access token
+      const accessToken = await oauth.getValidAccessToken()
+      if (!accessToken) {
+        return {
+          success: false,
+          error: 'No valid access token available'
+        }
+      }
+
+      console.log('[OAuth Test] Testing direct API call with OAuth token...')
+      console.log('[OAuth Test] Access token (first 20):', accessToken.substring(0, 20) + '...')
+
+      // Make a minimal test request to the Anthropic API
+      // CRITICAL: The system prompt "You are Claude Code..." is what makes the server
+      // accept the OAuth token as a valid Claude Code request!
+      const testBody = {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 10,
+        system: "You are Claude Code, Anthropic's official CLI for Claude.",
+        messages: [
+          { role: 'user', content: 'Reply with OK only.' }
+        ]
+      }
+
+      // Match vibe-kit/auth's exact header format for Claude Code OAuth
+      const headers = {
+        'Content-Type': 'application/json',
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'oauth-2025-04-20',
+        'Authorization': `Bearer ${accessToken}`,
+        'X-API-Key': ''
+      }
+
+      console.log('[OAuth Test] Request headers:', JSON.stringify({ ...headers, Authorization: 'Bearer [REDACTED]' }, null, 2))
+      console.log('[OAuth Test] Request body:', JSON.stringify(testBody))
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(testBody)
+      })
+
+      console.log('[OAuth Test] Response status:', response.status, response.statusText)
+
+      const responseText = await response.text()
+      console.log('[OAuth Test] Response body:', responseText)
+
+      if (response.ok) {
+        return {
+          success: true,
+          response: JSON.parse(responseText)
+        }
+      } else {
+        return {
+          success: false,
+          error: responseText,
+          status: response.status
+        }
+      }
+    } catch (error) {
+      console.error('[OAuth Test] Error:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
     }
   })
 
@@ -399,8 +528,112 @@ function registerGitHandlers() {
   })
 }
 
+// Register Claude Code session handlers
+function registerClaudeCodeHandlers() {
+  // Start a Claude Code session
+  ipcMain.handle('claude-code:start-session', async (_event, { prompt, model, cwd }) => {
+    try {
+      // Check if OAuth is authenticated
+      const tokens = oauth.getOAuthTokens()
+      if (!tokens) {
+        return {
+          success: false,
+          error: 'Claude Code requires OAuth authentication. Please login in Settings.'
+        }
+      }
+
+      // Start the session - responses will be streamed via events
+      claudeSession.startStreamingSession({
+        prompt,
+        model: model || 'smart',
+        cwd: cwd || process.cwd(),
+        onTextChunk: (text) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('claude-code:text-chunk', text)
+          }
+        },
+        onToolUse: (toolUse) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('claude-code:tool-use', toolUse)
+          }
+        },
+        onToolResult: (toolResult) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('claude-code:tool-result', toolResult)
+          }
+        },
+        onComplete: () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('claude-code:complete')
+          }
+        },
+        onError: (error) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('claude-code:error', error)
+          }
+        },
+      })
+
+      return { success: true }
+    } catch (error) {
+      console.error('Error starting Claude Code session:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // Send a message to active session
+  ipcMain.handle('claude-code:send-message', async (_event, text) => {
+    try {
+      await claudeSession.sendMessage(text)
+      return { success: true }
+    } catch (error) {
+      console.error('Error sending message:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // Check if session is active
+  ipcMain.handle('claude-code:is-active', () => {
+    return { active: claudeSession.isSessionActive() }
+  })
+
+  // Stop current response
+  ipcMain.handle('claude-code:stop', async () => {
+    try {
+      const stopped = await claudeSession.interruptCurrentResponse()
+      return { success: stopped }
+    } catch (error) {
+      console.error('Error stopping response:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // Reset session
+  ipcMain.handle('claude-code:reset', async () => {
+    try {
+      await claudeSession.resetSession()
+      return { success: true }
+    } catch (error) {
+      console.error('Error resetting session:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+}
+
 function createWindow() {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     backgroundColor: '#1a1a1a',
@@ -451,6 +684,7 @@ app.whenReady().then(() => {
   registerHandlers()
   registerGitHandlers()
   registerOAuthHandlers()
+  registerClaudeCodeHandlers()
   createWindow()
 
   app.on('activate', () => {

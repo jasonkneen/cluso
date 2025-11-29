@@ -44,6 +44,12 @@ interface OAuthStartResult {
   success: boolean
   authUrl?: string
   error?: string
+  // When autoCompleted is true, OAuth flow completed via callback server automatically
+  autoCompleted?: boolean
+  // The mode of authentication that was completed
+  mode?: 'api-key' | 'oauth'
+  // If mode is 'api-key', this contains the created API key
+  apiKey?: string
 }
 
 interface OAuthCompleteResult {
@@ -67,13 +73,60 @@ interface OAuthAccessTokenResult {
 interface OAuthApiKeyResult {
   success: boolean
   apiKey?: string
-  isOAuthToken?: boolean  // true = use Bearer auth, false = use x-api-key auth
   error?: string
+}
+
+interface OAuthTestApiResult {
+  success: boolean
+  response?: unknown
+  error?: string
+  status?: number
 }
 
 interface OAuthResult {
   success: boolean
   error?: string
+}
+
+// Claude Code SDK types
+interface ClaudeCodeStartOptions {
+  prompt: string
+  model?: 'fast' | 'smart'
+  cwd?: string
+}
+
+interface ClaudeCodeResult {
+  success: boolean
+  error?: string
+}
+
+interface ClaudeCodeActiveResult {
+  active: boolean
+}
+
+interface ClaudeCodeToolUse {
+  id: string
+  name: string
+  input: Record<string, unknown>
+}
+
+interface ClaudeCodeToolResult {
+  toolUseId: string
+  content: string
+  isError: boolean
+}
+
+interface ElectronClaudeCodeAPI {
+  startSession: (options: ClaudeCodeStartOptions) => Promise<ClaudeCodeResult>
+  sendMessage: (text: string) => Promise<ClaudeCodeResult>
+  isActive: () => Promise<ClaudeCodeActiveResult>
+  stop: () => Promise<ClaudeCodeResult>
+  reset: () => Promise<ClaudeCodeResult>
+  onTextChunk: (callback: (text: string) => void) => () => void
+  onToolUse: (callback: (toolUse: ClaudeCodeToolUse) => void) => () => void
+  onToolResult: (callback: (result: ClaudeCodeToolResult) => void) => () => void
+  onComplete: (callback: () => void) => () => void
+  onError: (callback: (error: string) => void) => () => void
 }
 
 interface ElectronOAuthAPI {
@@ -92,6 +145,8 @@ interface ElectronOAuthAPI {
   getAccessToken: () => Promise<OAuthAccessTokenResult>
   // Get Claude Code API key (created from OAuth)
   getClaudeCodeApiKey: () => Promise<OAuthApiKeyResult>
+  // Direct test of Anthropic API with OAuth token (bypasses AI SDK)
+  testApi: () => Promise<OAuthTestApiResult>
 }
 
 interface ApiProxyRequest {
@@ -120,6 +175,7 @@ interface ElectronAPI {
   files: ElectronFilesAPI
   oauth: ElectronOAuthAPI
   api: ElectronApiAPI
+  claudeCode: ElectronClaudeCodeAPI
   getWebviewPreloadPath: () => Promise<string>
   isElectron: boolean
 }

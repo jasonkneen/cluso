@@ -14,9 +14,110 @@ import { createAnthropic } from '@ai-sdk/anthropic'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { z } from 'zod'
 
+// Anthropic beta header for OAuth support
+const ANTHROPIC_BETA_HEADER = 'oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14'
+
+// Create a custom fetch for Claude Code OAuth that:
+// 1. Uses Bearer authorization (not x-api-key)
+// 2. Adds the anthropic-beta header with oauth flag
+// 3. Removes x-api-key header
+// 4. Handles token refresh when expired
+// 5. Proxies through Electron to bypass CORS
+const createClaudeCodeOAuthFetch = (getAccessToken: () => Promise<{ success: boolean; accessToken?: string | null }>): typeof fetch => {
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    // Get fresh access token (handles refresh internally via Electron IPC)
+    const result = await getAccessToken()
+    if (!result.success || !result.accessToken) {
+      throw new Error('Claude Code OAuth: No valid access token available. Please authenticate first.')
+    }
+
+    const accessToken = result.accessToken
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+
+    // Build headers from init
+    const headers: Record<string, string> = {}
+    if (init?.headers) {
+      if (init.headers instanceof Headers) {
+        init.headers.forEach((value, key) => {
+          headers[key] = value
+        })
+      } else if (Array.isArray(init.headers)) {
+        init.headers.forEach(([key, value]) => {
+          headers[key] = value
+        })
+      } else {
+        Object.assign(headers, init.headers)
+      }
+    }
+
+    // Debug: Log the headers we received from the SDK before modification
+    console.log('[Claude Code OAuth] Headers from SDK (before modification):', JSON.stringify(headers, null, 2))
+
+    // Remove all variations of x-api-key - OAuth uses Bearer auth instead
+    // HTTP headers are case-insensitive, but JS objects are case-sensitive
+    const headersToDelete = ['x-api-key', 'X-Api-Key', 'X-API-Key', 'X-API-KEY',
+                             'anthropic-beta', 'Anthropic-Beta', 'Anthropic-beta',
+                             'authorization', 'Authorization']
+    for (const key of headersToDelete) {
+      delete headers[key]
+    }
+
+    // Set Bearer authorization and all required headers for Claude Code OAuth
+    headers['authorization'] = `Bearer ${accessToken}`
+    headers['anthropic-beta'] = ANTHROPIC_BETA_HEADER
+    // Ensure anthropic-version is set (Claude Code uses 2023-06-01)
+    headers['anthropic-version'] = '2023-06-01'
+    // Override User-Agent to identify as a Claude Code compatible client (like opencode)
+    headers['user-agent'] = 'opencode/latest/1.0.0'
+
+    // Parse body first so we can log it
+    let body: unknown = undefined
+    if (init?.body) {
+      if (typeof init.body === 'string') {
+        try {
+          body = JSON.parse(init.body)
+        } catch {
+          body = init.body
+        }
+      } else {
+        body = init.body
+      }
+    }
+
+    console.log('[Claude Code OAuth] Making request to:', url)
+    console.log('[Claude Code OAuth] Method:', init?.method || 'POST')
+    console.log('[Claude Code OAuth] Headers:', JSON.stringify({ ...headers, authorization: 'Bearer [REDACTED]' }, null, 2))
+    console.log('[Claude Code OAuth] Body (first 500 chars):', JSON.stringify(body)?.substring(0, 500))
+
+    // Proxy through Electron to bypass CORS
+    const proxyResult = await window.electronAPI!.api.proxy({
+      url,
+      method: init?.method || 'POST',
+      headers,
+      body,
+    })
+
+    console.log('[Claude Code OAuth] Response status:', proxyResult.status, proxyResult.statusText)
+    console.log('[Claude Code OAuth] Response ok:', proxyResult.ok)
+    if (!proxyResult.ok) {
+      console.log('[Claude Code OAuth] Error response body:', JSON.stringify(proxyResult.body)?.substring(0, 1000))
+    }
+
+    // Convert proxy response to a proper Response object
+    const responseBody = typeof proxyResult.body === 'string'
+      ? proxyResult.body
+      : JSON.stringify(proxyResult.body)
+
+    return new Response(responseBody, {
+      status: proxyResult.status,
+      statusText: proxyResult.statusText,
+      headers: new Headers(proxyResult.headers || {}),
+    })
+  }
+}
+
 // Create a custom fetch that proxies through Electron to bypass CORS
-// useOAuthToken: if true, replaces x-api-key with Authorization: Bearer for OAuth tokens
-const createElectronProxyFetch = (useOAuthToken = false): typeof fetch => {
+const createElectronProxyFetch = (): typeof fetch => {
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
     const method = init?.method || 'GET'
@@ -34,13 +135,6 @@ const createElectronProxyFetch = (useOAuthToken = false): typeof fetch => {
       } else {
         Object.assign(headers, init.headers)
       }
-    }
-
-    // For OAuth tokens, replace x-api-key with Authorization: Bearer
-    if (useOAuthToken && headers['x-api-key']) {
-      const token = headers['x-api-key']
-      delete headers['x-api-key']
-      headers['Authorization'] = `Bearer ${token}`
     }
 
     let body: unknown = undefined
@@ -136,7 +230,8 @@ const MODEL_PROVIDER_MAP: Record<string, ProviderType> = {
   'claude-3-opus-20240229': 'anthropic',
   'claude-3-sonnet-20240229': 'anthropic',
   'claude-3-haiku-20240307': 'anthropic',
-  // Claude Code (OAuth) - uses Anthropic API with OAuth token
+  // Claude Code (OAuth) - uses direct Anthropic API with OAuth Bearer token
+  // Requires OAuth authentication via Electron
   'claude-code': 'claude-code',
 }
 
@@ -163,9 +258,9 @@ const normalizeModelId = (modelId: string, provider: ProviderType): string => {
     return anthropicModelMap[modelId] || modelId
   }
 
-  // Claude Code uses Claude Sonnet 4 by default via OAuth
+  // Claude Code - use Claude Opus 4.5 via OAuth
   if (provider === 'claude-code') {
-    return 'claude-sonnet-4-20250514'
+    return 'claude-opus-4-5'
   }
 
   return modelId
@@ -195,8 +290,7 @@ export function useAIChat(options: UseAIChatOptions = {}) {
   const [error, setError] = useState<Error | null>(null)
 
   // Create provider instance based on type and API key
-  // useOAuthToken: for claude-code, indicates if we should use Bearer auth vs x-api-key
-  const createProvider = useCallback((provider: ProviderType, apiKey: string, useOAuthToken = false) => {
+  const createProvider = useCallback((provider: ProviderType, apiKey: string) => {
     switch (provider) {
       case 'openai':
         return createOpenAI({ apiKey })
@@ -205,15 +299,20 @@ export function useAIChat(options: UseAIChatOptions = {}) {
       case 'google':
         return createGoogleGenerativeAI({ apiKey })
       case 'claude-code':
-        // Claude Code uses either API key (Console OAuth) or Bearer token (Max OAuth)
-        // Use Electron proxy fetch to bypass CORS
-        const proxyFetch = window.electronAPI?.api ? createElectronProxyFetch(useOAuthToken) : undefined
+        // Claude Code uses OAuth with direct Anthropic API
+        // The custom fetch handles Bearer auth and proper headers
+        if (!window.electronAPI?.oauth?.getAccessToken) {
+          throw new Error('Claude Code OAuth requires Electron environment')
+        }
         return createAnthropic({
-          apiKey,
+          apiKey: '', // Empty - auth comes from Bearer header in custom fetch
+          // Pass headers option directly to the provider (in addition to fetch modification)
           headers: {
-            'anthropic-beta': 'interleaved-thinking-2025-05-14',
+            'anthropic-beta': ANTHROPIC_BETA_HEADER,
           },
-          fetch: proxyFetch,
+          fetch: createClaudeCodeOAuthFetch(async () => {
+            return window.electronAPI!.oauth.getAccessToken()
+          }),
         })
       default:
         throw new Error(`Unknown provider: ${provider}`)
@@ -253,20 +352,11 @@ export function useAIChat(options: UseAIChatOptions = {}) {
       // Find provider config
       const providerConfig = providers.find(p => p.id === providerType)
 
-      // For claude-code, get API key created from OAuth
+      // Claude Code uses OAuth, doesn't need API key from config
       let apiKey: string
-      let useOAuthToken = false
       if (providerType === 'claude-code') {
-        if (window.electronAPI?.oauth) {
-          const keyResult = await window.electronAPI.oauth.getClaudeCodeApiKey()
-          if (!keyResult.success || !keyResult.apiKey) {
-            throw new Error('Claude Code requires OAuth authentication. Please login in Settings.')
-          }
-          apiKey = keyResult.apiKey
-          useOAuthToken = keyResult.isOAuthToken || false
-        } else {
-          throw new Error('Claude Code OAuth is only available in the desktop app')
-        }
+        // OAuth-based auth - no API key needed, handled by custom fetch
+        apiKey = ''
       } else if (!providerConfig || !providerConfig.apiKey) {
         throw new Error(`No API key configured for provider: ${providerType}`)
       } else {
@@ -274,7 +364,7 @@ export function useAIChat(options: UseAIChatOptions = {}) {
       }
 
       // Create provider instance
-      const provider = createProvider(providerType, apiKey, useOAuthToken)
+      const provider = createProvider(providerType, apiKey)
       const normalizedModelId = normalizeModelId(modelId, providerType)
 
       // Build generation options
@@ -381,20 +471,11 @@ export function useAIChat(options: UseAIChatOptions = {}) {
       // Find provider config
       const providerConfig = providers.find(p => p.id === providerType)
 
-      // For claude-code, get API key created from OAuth
+      // Claude Code uses OAuth, doesn't need API key from config
       let apiKey: string
-      let useOAuthToken = false
       if (providerType === 'claude-code') {
-        if (window.electronAPI?.oauth) {
-          const keyResult = await window.electronAPI.oauth.getClaudeCodeApiKey()
-          if (!keyResult.success || !keyResult.apiKey) {
-            throw new Error('Claude Code requires OAuth authentication. Please login in Settings.')
-          }
-          apiKey = keyResult.apiKey
-          useOAuthToken = keyResult.isOAuthToken || false
-        } else {
-          throw new Error('Claude Code OAuth is only available in the desktop app')
-        }
+        // OAuth-based auth - no API key needed, handled by custom fetch
+        apiKey = ''
       } else if (!providerConfig || !providerConfig.apiKey) {
         throw new Error(`No API key configured for provider: ${providerType}`)
       } else {
@@ -402,7 +483,7 @@ export function useAIChat(options: UseAIChatOptions = {}) {
       }
 
       // Create provider instance
-      const provider = createProvider(providerType, apiKey, useOAuthToken)
+      const provider = createProvider(providerType, apiKey)
       const normalizedModelId = normalizeModelId(modelId, providerType)
 
       // Build stream options

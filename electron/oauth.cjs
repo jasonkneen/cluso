@@ -4,6 +4,7 @@
  */
 
 const crypto = require('crypto')
+const http = require('http')
 const { app } = require('electron')
 const fs = require('fs')
 const path = require('path')
@@ -13,12 +14,20 @@ const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
 const AUTHORIZATION_ENDPOINT_MAX = 'https://claude.ai/oauth/authorize'
 const AUTHORIZATION_ENDPOINT_CONSOLE = 'https://console.anthropic.com/oauth/authorize'
 const TOKEN_ENDPOINT = 'https://console.anthropic.com/v1/oauth/token'
-const REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback'
+// Use local callback for Claude Code OAuth (like open-claude-code does)
+const REDIRECT_PORT = 54545
+const REDIRECT_URI_LOCAL = `http://localhost:${REDIRECT_PORT}/callback`
+// Fallback to hosted callback for manual code entry
+const REDIRECT_URI_HOSTED = 'https://console.anthropic.com/oauth/code/callback'
 const CREATE_API_KEY_ENDPOINT = 'https://api.anthropic.com/api/oauth/claude_cli/create_api_key'
 const SCOPES = 'org:create_api_key user:profile user:inference'
 
 // Store PKCE verifier temporarily during OAuth flow
 let currentPKCEVerifier = null
+// Store callback server
+let callbackServer = null
+// Store callback promise resolver
+let callbackResolver = null
 
 /**
  * Get the config file path
@@ -80,15 +89,17 @@ function generatePKCEChallenge() {
  * Generate the OAuth authorization URL
  * @param {'max' | 'console'} mode - 'max' for Claude Pro/Max, 'console' for Console API
  * @param {Object} pkce - The PKCE challenge object
+ * @param {boolean} useLocalCallback - Whether to use local callback server (default: true)
  */
-function getAuthorizationUrl(mode, pkce) {
+function getAuthorizationUrl(mode, pkce, useLocalCallback = true) {
   const baseUrl = mode === 'max' ? AUTHORIZATION_ENDPOINT_MAX : AUTHORIZATION_ENDPOINT_CONSOLE
+  const redirectUri = useLocalCallback ? REDIRECT_URI_LOCAL : REDIRECT_URI_HOSTED
   const url = new URL(baseUrl)
 
   url.searchParams.set('code', 'true')
   url.searchParams.set('client_id', CLIENT_ID)
   url.searchParams.set('response_type', 'code')
-  url.searchParams.set('redirect_uri', REDIRECT_URI)
+  url.searchParams.set('redirect_uri', redirectUri)
   url.searchParams.set('scope', SCOPES)
   url.searchParams.set('code_challenge', pkce.challenge)
   url.searchParams.set('code_challenge_method', 'S256')
@@ -99,17 +110,20 @@ function getAuthorizationUrl(mode, pkce) {
 
 /**
  * Exchange authorization code for access and refresh tokens
+ * @param {string} code - The authorization code
+ * @param {string} verifier - The PKCE verifier
+ * @param {string|null} state - The state parameter from callback
+ * @param {boolean} useLocalCallback - Whether local callback was used (default: true)
  */
-async function exchangeCodeForTokens(code, verifier) {
+async function exchangeCodeForTokens(code, verifier, state = null, useLocalCallback = true) {
   try {
-    // The code might contain the state appended with #
-    const splits = code.split('#')
-    const authCode = splits[0]
-    const state = splits[1]
+    const redirectUri = useLocalCallback ? REDIRECT_URI_LOCAL : REDIRECT_URI_HOSTED
 
     console.log('[OAuth] Exchanging code for tokens...')
-    console.log('[OAuth] Code:', authCode.substring(0, 20) + '...')
+    console.log('[OAuth] Code:', code.substring(0, 20) + '...')
+    console.log('[OAuth] Verifier:', verifier ? verifier.substring(0, 20) + '...' : 'none')
     console.log('[OAuth] State:', state ? state.substring(0, 20) + '...' : 'none')
+    console.log('[OAuth] Redirect URI:', redirectUri)
 
     const response = await fetch(TOKEN_ENDPOINT, {
       method: 'POST',
@@ -117,11 +131,11 @@ async function exchangeCodeForTokens(code, verifier) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        code: authCode,
-        state: state,
         grant_type: 'authorization_code',
+        code: code,
+        state: state,
         client_id: CLIENT_ID,
-        redirect_uri: REDIRECT_URI,
+        redirect_uri: redirectUri,
         code_verifier: verifier
       })
     })
@@ -257,25 +271,6 @@ function getClaudeCodeApiKey() {
 }
 
 /**
- * Check if Claude Code is using OAuth token mode (vs API key mode)
- * Returns true if we're using an access token directly (Max OAuth)
- * Returns false if we have a created API key (Console OAuth)
- */
-function isClaudeCodeOAuthTokenMode() {
-  const config = loadOAuthConfig()
-  const apiKey = config.claudeCodeApiKey
-  if (!apiKey) return false
-
-  // If we have OAuth tokens saved AND the stored key is NOT a sk- API key,
-  // then we're using the access token directly (OAuth token mode)
-  const hasOAuthTokens = !!config.oauthTokens
-  const isApiKey = apiKey.startsWith('sk-')
-
-  // OAuth token mode = we have OAuth tokens and NOT using a created API key
-  return hasOAuthTokens && !isApiKey
-}
-
-/**
  * Clear Claude Code API key from config
  */
 function clearClaudeCodeApiKey() {
@@ -336,6 +331,147 @@ function clearPKCEVerifier() {
   currentPKCEVerifier = null
 }
 
+/**
+ * Start local HTTP server to capture OAuth callback
+ * Returns a promise that resolves with the authorization code
+ */
+function startCallbackServer() {
+  return new Promise((resolve, reject) => {
+    // Clean up any existing server
+    if (callbackServer) {
+      try {
+        callbackServer.close()
+      } catch (e) {
+        // Ignore
+      }
+      callbackServer = null
+    }
+
+    callbackServer = http.createServer((req, res) => {
+      const url = new URL(req.url, `http://localhost:${REDIRECT_PORT}`)
+
+      if (url.pathname === '/callback') {
+        const code = url.searchParams.get('code')
+        const state = url.searchParams.get('state')
+        const error = url.searchParams.get('error')
+        const errorDescription = url.searchParams.get('error_description')
+
+        // Send success HTML response
+        res.writeHead(200, { 'Content-Type': 'text/html' })
+
+        if (error) {
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+              <head><title>OAuth Error</title></head>
+              <body style="font-family: system-ui; padding: 40px; text-align: center;">
+                <h1 style="color: #dc2626;">Authentication Failed</h1>
+                <p>${errorDescription || error}</p>
+                <p>You can close this window.</p>
+              </body>
+            </html>
+          `)
+
+          // Clean up and reject
+          setTimeout(() => {
+            if (callbackServer) {
+              callbackServer.close()
+              callbackServer = null
+            }
+          }, 1000)
+
+          reject(new Error(errorDescription || error))
+        } else if (code) {
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+              <head><title>OAuth Success</title></head>
+              <body style="font-family: system-ui; padding: 40px; text-align: center;">
+                <h1 style="color: #16a34a;">✓ Authentication Successful</h1>
+                <p>You can close this window and return to the application.</p>
+                <script>window.close()</script>
+              </body>
+            </html>
+          `)
+
+          // Clean up and resolve
+          setTimeout(() => {
+            if (callbackServer) {
+              callbackServer.close()
+              callbackServer = null
+            }
+          }, 1000)
+
+          resolve({ code, state })
+        } else {
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+              <head><title>OAuth Error</title></head>
+              <body style="font-family: system-ui; padding: 40px; text-align: center;">
+                <h1 style="color: #dc2626;">Authentication Failed</h1>
+                <p>No authorization code received.</p>
+                <p>You can close this window.</p>
+              </body>
+            </html>
+          `)
+
+          reject(new Error('No authorization code received'))
+        }
+      } else {
+        res.writeHead(404)
+        res.end('Not found')
+      }
+    })
+
+    callbackServer.on('error', (err) => {
+      console.error('[OAuth] Callback server error:', err)
+      reject(err)
+    })
+
+    callbackServer.listen(REDIRECT_PORT, () => {
+      console.log(`[OAuth] Callback server listening on port ${REDIRECT_PORT}`)
+    })
+
+    // Timeout after 5 minutes
+    setTimeout(() => {
+      if (callbackServer) {
+        callbackServer.close()
+        callbackServer = null
+        reject(new Error('OAuth callback timeout'))
+      }
+    }, 5 * 60 * 1000)
+  })
+}
+
+/**
+ * Stop the callback server if running
+ */
+function stopCallbackServer() {
+  if (callbackServer) {
+    try {
+      callbackServer.close()
+    } catch (e) {
+      // Ignore
+    }
+    callbackServer = null
+  }
+}
+
+/**
+ * Get the redirect port for the local callback
+ */
+function getRedirectPort() {
+  return REDIRECT_PORT
+}
+
+/**
+ * Get the local redirect URI
+ */
+function getLocalRedirectUri() {
+  return REDIRECT_URI_LOCAL
+}
+
 module.exports = {
   generatePKCEChallenge,
   getAuthorizationUrl,
@@ -348,10 +484,13 @@ module.exports = {
   saveClaudeCodeApiKey,
   getClaudeCodeApiKey,
   clearClaudeCodeApiKey,
-  isClaudeCodeOAuthTokenMode,
   isTokenExpired,
   getValidAccessToken,
   getPKCEVerifier,
   setPKCEVerifier,
   clearPKCEVerifier,
+  startCallbackServer,
+  stopCallbackServer,
+  getRedirectPort,
+  getLocalRedirectUri,
 }
