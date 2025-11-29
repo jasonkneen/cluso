@@ -29,12 +29,37 @@ interface DirectoryEntry {
   isDirectory: boolean
 }
 
+interface FileStat {
+  size: number
+  isFile: boolean
+  isDirectory: boolean
+  created: string
+  modified: string
+}
+
+interface FileExistsResult {
+  success: boolean
+  exists: boolean
+}
+
 interface ElectronFilesAPI {
+  // Read operations
   readFile: (path: string) => Promise<GitResult>
   selectFile: (path: string) => Promise<GitResult<{path: string; content: string}>>
   listDirectory: (path?: string) => Promise<GitResult<DirectoryEntry[]>>
   listPrompts: () => Promise<GitResult<string[]>>
   readPrompt: (name: string) => Promise<GitResult>
+  // Write operations
+  writeFile: (path: string, content: string) => Promise<GitResult>
+  createFile: (path: string, content?: string) => Promise<GitResult>
+  deleteFile: (path: string) => Promise<GitResult>
+  renameFile: (oldPath: string, newPath: string) => Promise<GitResult>
+  // Directory operations
+  createDirectory: (path: string) => Promise<GitResult>
+  deleteDirectory: (path: string) => Promise<GitResult>
+  // Utility operations
+  exists: (path: string) => Promise<FileExistsResult>
+  stat: (path: string) => Promise<GitResult<FileStat>>
 }
 
 // OAuth types

@@ -658,6 +658,114 @@ function registerGitHandlers() {
     }
   })
 
+  // Write file
+  ipcMain.handle('files:writeFile', async (event, filePath, content) => {
+    try {
+      await fs.writeFile(filePath, content, 'utf-8')
+      console.log('[Files] Wrote file:', filePath)
+      return { success: true }
+    } catch (error) {
+      console.error('[Files] Error writing file:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Create file (fails if exists)
+  ipcMain.handle('files:createFile', async (event, filePath, content = '') => {
+    try {
+      // Check if file exists
+      try {
+        await fs.access(filePath)
+        return { success: false, error: 'File already exists' }
+      } catch {
+        // File doesn't exist, good to create
+      }
+      await fs.writeFile(filePath, content, 'utf-8')
+      console.log('[Files] Created file:', filePath)
+      return { success: true }
+    } catch (error) {
+      console.error('[Files] Error creating file:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Delete file
+  ipcMain.handle('files:deleteFile', async (event, filePath) => {
+    try {
+      await fs.unlink(filePath)
+      console.log('[Files] Deleted file:', filePath)
+      return { success: true }
+    } catch (error) {
+      console.error('[Files] Error deleting file:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Rename/move file
+  ipcMain.handle('files:renameFile', async (event, oldPath, newPath) => {
+    try {
+      await fs.rename(oldPath, newPath)
+      console.log('[Files] Renamed file:', oldPath, '->', newPath)
+      return { success: true }
+    } catch (error) {
+      console.error('[Files] Error renaming file:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Create directory
+  ipcMain.handle('files:createDirectory', async (event, dirPath) => {
+    try {
+      await fs.mkdir(dirPath, { recursive: true })
+      console.log('[Files] Created directory:', dirPath)
+      return { success: true }
+    } catch (error) {
+      console.error('[Files] Error creating directory:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Delete directory
+  ipcMain.handle('files:deleteDirectory', async (event, dirPath) => {
+    try {
+      await fs.rm(dirPath, { recursive: true, force: true })
+      console.log('[Files] Deleted directory:', dirPath)
+      return { success: true }
+    } catch (error) {
+      console.error('[Files] Error deleting directory:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Check if path exists
+  ipcMain.handle('files:exists', async (event, filePath) => {
+    try {
+      await fs.access(filePath)
+      return { success: true, exists: true }
+    } catch {
+      return { success: true, exists: false }
+    }
+  })
+
+  // Get file stats (size, modified time, etc)
+  ipcMain.handle('files:stat', async (event, filePath) => {
+    try {
+      const stats = await fs.stat(filePath)
+      return {
+        success: true,
+        data: {
+          size: stats.size,
+          isFile: stats.isFile(),
+          isDirectory: stats.isDirectory(),
+          created: stats.birthtime.toISOString(),
+          modified: stats.mtime.toISOString(),
+        }
+      }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
   // Folder picker dialog
   ipcMain.handle('dialog:openFolder', async () => {
     const result = await dialog.showOpenDialog({

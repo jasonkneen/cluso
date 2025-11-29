@@ -63,11 +63,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // File operations
   files: {
+    // Read operations
     readFile: (path) => ipcRenderer.invoke('files:readFile', path),
     selectFile: (path) => ipcRenderer.invoke('files:selectFile', path),
     listDirectory: (path) => ipcRenderer.invoke('files:listDirectory', path),
     listPrompts: () => ipcRenderer.invoke('files:listPrompts'),
     readPrompt: (name) => ipcRenderer.invoke('files:readPrompt', name),
+    // Write operations
+    writeFile: (path, content) => ipcRenderer.invoke('files:writeFile', path, content),
+    createFile: (path, content) => ipcRenderer.invoke('files:createFile', path, content),
+    deleteFile: (path) => ipcRenderer.invoke('files:deleteFile', path),
+    renameFile: (oldPath, newPath) => ipcRenderer.invoke('files:renameFile', oldPath, newPath),
+    // Directory operations
+    createDirectory: (path) => ipcRenderer.invoke('files:createDirectory', path),
+    deleteDirectory: (path) => ipcRenderer.invoke('files:deleteDirectory', path),
+    // Utility operations
+    exists: (path) => ipcRenderer.invoke('files:exists', path),
+    stat: (path) => ipcRenderer.invoke('files:stat', path),
   },
 
   // Dialog operations
