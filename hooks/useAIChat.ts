@@ -21,6 +21,11 @@ const ANTHROPIC_BETA_HEADER = 'oauth-2025-04-20'
 // This is what makes the API accept the request as a "Claude Code" request
 const CLAUDE_CODE_SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for Claude."
 
+// Codex (OpenAI ChatGPT Plus/Pro) constants
+const CODEX_BASE_URL = 'https://chatgpt.com/backend-api'
+const CODEX_BETA_HEADER = 'responses=experimental'
+const CODEX_ORIGINATOR = 'codex_cli_rs'
+
 // Create a custom fetch for Claude Code OAuth that:
 // 1. Uses Bearer authorization (not x-api-key)
 // 2. Adds the anthropic-beta header with oauth flag
@@ -166,7 +171,143 @@ const createElectronProxyFetch = (): typeof fetch => {
   }
 }
 
-export type ProviderType = 'google' | 'openai' | 'anthropic' | 'claude-code'
+// Helper to decode JWT and extract account ID for Codex
+function decodeCodexJWT(token: string): { accountId?: string } {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return {}
+    const payload = JSON.parse(atob(parts[1]))
+    // Extract account ID from OpenAI-specific claim
+    const authClaim = payload['https://api.openai.com/auth']
+    if (authClaim && authClaim.user_id) {
+      return { accountId: authClaim.user_id }
+    }
+    return {}
+  } catch {
+    return {}
+  }
+}
+
+// Create a custom fetch for Codex (OpenAI ChatGPT Plus/Pro via OAuth)
+// 1. Uses Bearer authorization
+// 2. Transforms /responses to /codex/responses
+// 3. Adds OpenAI-Beta header
+// 4. Adds chatgpt-account-id header
+// 5. Proxies through Electron to bypass CORS
+const createCodexOAuthFetch = (
+  getAccessToken: () => Promise<{ success: boolean; accessToken?: string | null }>,
+  getAccountId: () => string | null
+): typeof fetch => {
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    // Get fresh access token
+    const result = await getAccessToken()
+    if (!result.success || !result.accessToken) {
+      throw new Error('Codex OAuth: No valid access token available. Please authenticate first.')
+    }
+
+    const accessToken = result.accessToken
+    let url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+
+    // Transform URL: /responses -> /codex/responses for ChatGPT backend
+    // And redirect to ChatGPT backend API
+    if (url.includes('/responses')) {
+      // Replace OpenAI API URL with ChatGPT backend
+      url = url.replace('https://api.openai.com/v1/responses', `${CODEX_BASE_URL}/codex/responses`)
+      url = url.replace('/v1/responses', '/codex/responses')
+    }
+
+    // If not already pointing to ChatGPT backend, prepend it
+    if (!url.startsWith(CODEX_BASE_URL) && !url.startsWith('https://api.openai.com')) {
+      url = `${CODEX_BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`
+    }
+
+    // Build headers from init
+    const headers: Record<string, string> = {}
+    if (init?.headers) {
+      if (init.headers instanceof Headers) {
+        init.headers.forEach((value, key) => {
+          headers[key] = value
+        })
+      } else if (Array.isArray(init.headers)) {
+        init.headers.forEach(([key, value]) => {
+          headers[key] = value
+        })
+      } else {
+        Object.assign(headers, init.headers)
+      }
+    }
+
+    // Remove API key headers - we use Bearer token
+    const headersToDelete = ['x-api-key', 'X-Api-Key', 'X-API-Key', 'X-API-KEY',
+                             'authorization', 'Authorization', 'openai-beta', 'OpenAI-Beta']
+    for (const key of headersToDelete) {
+      delete headers[key]
+    }
+
+    // Set Codex-specific headers
+    headers['Authorization'] = `Bearer ${accessToken}`
+    headers['OpenAI-Beta'] = CODEX_BETA_HEADER
+    headers['originator'] = CODEX_ORIGINATOR
+
+    // Get account ID from token or stored value
+    let accountId = getAccountId()
+    if (!accountId) {
+      const decoded = decodeCodexJWT(accessToken)
+      accountId = decoded.accountId || null
+    }
+    if (accountId) {
+      headers['chatgpt-account-id'] = accountId
+    }
+
+    // Generate session ID for tracking
+    headers['session_id'] = crypto.randomUUID()
+
+    // Parse body and strip unsupported parameters for Codex responses endpoint
+    let body: Record<string, unknown> | undefined = undefined
+    if (init?.body) {
+      if (typeof init.body === 'string') {
+        try {
+          body = JSON.parse(init.body) as Record<string, unknown>
+        } catch {
+          body = { raw: init.body }
+        }
+      } else {
+        body = init.body as Record<string, unknown>
+      }
+
+      // IMPORTANT: Strip temperature and max_tokens for Codex models
+      // The responses endpoint does NOT support these parameters
+      if (body) {
+        delete body.temperature
+        delete body.max_tokens
+        delete body.maxTokens
+        delete body.top_p
+        delete body.topP
+      }
+    }
+
+    // Proxy through Electron to bypass CORS
+    const proxyResult = await window.electronAPI!.api.proxy({
+      url,
+      method: init?.method || 'POST',
+      headers,
+      body,
+    })
+
+    // Convert proxy response to a proper Response object
+    const responseBody = typeof proxyResult.body === 'string'
+      ? proxyResult.body
+      : JSON.stringify(proxyResult.body)
+
+    return new Response(responseBody, {
+      status: proxyResult.status,
+      statusText: proxyResult.statusText,
+      headers: new Headers(proxyResult.headers || {}),
+    })
+  }
+}
+
+export type ProviderType = 'google' | 'openai' | 'anthropic' | 'claude-code' | 'codex'
 
 export interface ProviderConfig {
   id: ProviderType
@@ -229,6 +370,20 @@ const MODEL_PROVIDER_MAP: Record<string, ProviderType> = {
   // Claude Code (OAuth) - uses direct Anthropic API with OAuth Bearer token
   // Requires OAuth authentication via Electron
   'claude-code': 'claude-code',
+  'claude-sonnet-4-5': 'claude-code',
+  'claude-opus-4-5': 'claude-code',
+  'claude-haiku-4-5': 'claude-code',
+  // Codex (ChatGPT Plus/Pro via OAuth) - uses ChatGPT backend API
+  // Requires Codex OAuth authentication via Electron
+  // These models use the responses endpoint and do NOT support temperature/max_tokens
+  'codex': 'codex',
+  'codex-gpt-4o': 'codex',
+  'codex-o1': 'codex',
+  'codex-o1-pro': 'codex',
+  'gpt-5': 'codex',
+  'gpt-5-mini': 'codex',
+  'gpt-5-nano': 'codex',
+  'gpt-5-codex': 'codex',
 }
 
 // Normalize model IDs to what each provider expects
@@ -254,9 +409,33 @@ const normalizeModelId = (modelId: string, provider: ProviderType): string => {
     return anthropicModelMap[modelId] || modelId
   }
 
-  // Claude Code - use Claude Opus 4.5 via OAuth
+  // Claude Code - map to actual Anthropic model names
+  // Note: User-friendly names map to actual Anthropic API model IDs
   if (provider === 'claude-code') {
-    return 'claude-opus-4-5'
+    const claudeCodeModelMap: Record<string, string> = {
+      'claude-code': 'claude-sonnet-4-20250514', // Default to Claude 4 Sonnet
+      'claude-sonnet-4-5': 'claude-sonnet-4-20250514', // Claude 4 Sonnet (actual model)
+      'claude-opus-4-5': 'claude-opus-4-20250514', // Claude 4 Opus (actual model)
+      'claude-haiku-4-5': 'claude-3-5-haiku-20241022', // Claude 3.5 Haiku (no Claude 4 Haiku yet)
+    }
+    return claudeCodeModelMap[modelId] || 'claude-sonnet-4-20250514'
+  }
+
+  // Codex - map to actual model names for ChatGPT backend responses endpoint
+  // These models do NOT support temperature or max_tokens
+  if (provider === 'codex') {
+    const codexModelMap: Record<string, string> = {
+      'codex': 'gpt-4o', // Default to GPT-4o
+      'codex-gpt-4o': 'gpt-4o',
+      'codex-o1': 'o1',
+      'codex-o1-pro': 'o1-pro',
+      // GPT-5 family - pass through as-is (these are the actual model names)
+      'gpt-5': 'gpt-5',
+      'gpt-5-mini': 'gpt-5-mini',
+      'gpt-5-nano': 'gpt-5-nano',
+      'gpt-5-codex': 'gpt-5-codex',
+    }
+    return codexModelMap[modelId] || modelId
   }
 
   return modelId
@@ -310,6 +489,30 @@ export function useAIChat(options: UseAIChatOptions = {}) {
             return window.electronAPI!.oauth.getAccessToken()
           }),
         })
+      case 'codex':
+        // Codex uses OAuth with ChatGPT backend API
+        // The custom fetch handles Bearer auth, URL transformation, and proper headers
+        if (!window.electronAPI?.codex?.getAccessToken) {
+          throw new Error('Codex OAuth requires Electron environment')
+        }
+        // Store account ID to avoid decoding JWT on every request
+        let codexAccountId: string | null = null
+        return createOpenAI({
+          apiKey: 'chatgpt-oauth', // Dummy key - auth comes from Bearer header in custom fetch
+          baseURL: CODEX_BASE_URL,
+          fetch: createCodexOAuthFetch(
+            async () => {
+              const result = await window.electronAPI!.codex.getAccessToken()
+              // Extract account ID on first successful token fetch
+              if (result.success && result.accessToken && !codexAccountId) {
+                const decoded = decodeCodexJWT(result.accessToken)
+                codexAccountId = decoded.accountId || null
+              }
+              return result
+            },
+            () => codexAccountId
+          ),
+        })
       default:
         throw new Error(`Unknown provider: ${provider}`)
     }
@@ -348,9 +551,9 @@ export function useAIChat(options: UseAIChatOptions = {}) {
       // Find provider config
       const providerConfig = providers.find(p => p.id === providerType)
 
-      // Claude Code uses OAuth, doesn't need API key from config
+      // Claude Code and Codex use OAuth, don't need API key from config
       let apiKey: string
-      if (providerType === 'claude-code') {
+      if (providerType === 'claude-code' || providerType === 'codex') {
         // OAuth-based auth - no API key needed, handled by custom fetch
         apiKey = ''
       } else if (!providerConfig || !providerConfig.apiKey) {
@@ -467,9 +670,9 @@ export function useAIChat(options: UseAIChatOptions = {}) {
       // Find provider config
       const providerConfig = providers.find(p => p.id === providerType)
 
-      // Claude Code uses OAuth, doesn't need API key from config
+      // Claude Code and Codex use OAuth, don't need API key from config
       let apiKey: string
-      if (providerType === 'claude-code') {
+      if (providerType === 'claude-code' || providerType === 'codex') {
         // OAuth-based auth - no API key needed, handled by custom fetch
         apiKey = ''
       } else if (!providerConfig || !providerConfig.apiKey) {

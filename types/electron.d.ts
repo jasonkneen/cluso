@@ -149,6 +149,52 @@ interface ElectronOAuthAPI {
   testApi: () => Promise<OAuthTestApiResult>
 }
 
+// Codex OAuth types (for OpenAI ChatGPT Plus/Pro)
+interface CodexStartResult {
+  success: boolean
+  authUrl?: string
+  error?: string
+  autoCompleted?: boolean
+}
+
+interface CodexStatusResult {
+  authenticated: boolean
+  expiresAt: number | null
+}
+
+interface CodexAccessTokenResult {
+  success: boolean
+  accessToken?: string
+  error?: string
+}
+
+interface CodexTestApiResult {
+  success: boolean
+  response?: unknown
+  error?: string
+  status?: number
+}
+
+interface CodexResult {
+  success: boolean
+  error?: string
+}
+
+interface ElectronCodexAPI {
+  // Start Codex OAuth login flow
+  startLogin: () => Promise<CodexStartResult>
+  // Cancel OAuth flow
+  cancel: () => Promise<CodexResult>
+  // Get OAuth status
+  getStatus: () => Promise<CodexStatusResult>
+  // Logout (clear OAuth tokens)
+  logout: () => Promise<CodexResult>
+  // Get valid access token (handles refresh if needed)
+  getAccessToken: () => Promise<CodexAccessTokenResult>
+  // Direct test of Codex API with OAuth token
+  testApi: () => Promise<CodexTestApiResult>
+}
+
 interface ApiProxyRequest {
   url: string
   method?: string
@@ -174,6 +220,7 @@ interface ElectronAPI {
   git: ElectronGitAPI
   files: ElectronFilesAPI
   oauth: ElectronOAuthAPI
+  codex: ElectronCodexAPI
   api: ElectronApiAPI
   claudeCode: ElectronClaudeCodeAPI
   getWebviewPreloadPath: () => Promise<string>

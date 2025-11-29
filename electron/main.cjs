@@ -3,6 +3,7 @@ const path = require('path')
 const { execSync, exec } = require('child_process')
 const fs = require('fs').promises
 const oauth = require('./oauth.cjs')
+const codex = require('./codex-oauth.cjs')
 const claudeSession = require('./claude-session.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
@@ -359,6 +360,159 @@ function registerOAuthHandlers() {
   })
 }
 
+// Register Codex (OpenAI) OAuth IPC handlers
+function registerCodexHandlers() {
+  // Start Codex OAuth login flow with automatic callback capture
+  ipcMain.handle('codex:start-login', async () => {
+    try {
+      // Generate PKCE challenge and state
+      const pkce = codex.generatePKCEChallenge()
+      const state = codex.createState()
+      codex.setPKCEVerifier(pkce.verifier)
+      codex.setState(state)
+
+      // Get authorization URL
+      const authUrl = codex.getAuthorizationUrl(pkce, state)
+
+      // Start the callback server to capture the code automatically
+      const codePromise = codex.startCallbackServer(state)
+
+      // Open the authorization URL in the default browser
+      shell.openExternal(authUrl)
+
+      // Wait for the code from the callback server
+      const result = await codePromise
+
+      if (result && result.code) {
+        // Exchange code for tokens
+        const verifier = codex.getPKCEVerifier()
+        const tokens = await codex.exchangeCodeForTokens(result.code, verifier)
+
+        if (tokens) {
+          codex.saveCodexTokens(tokens)
+          codex.clearPKCEVerifier()
+          codex.clearState()
+          return {
+            success: true,
+            autoCompleted: true
+          }
+        } else {
+          return {
+            success: false,
+            error: 'Failed to exchange code for tokens'
+          }
+        }
+      }
+
+      return {
+        success: false,
+        authUrl,
+        error: 'Failed to capture authorization code'
+      }
+    } catch (error) {
+      codex.stopCallbackServer()
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // Cancel Codex OAuth flow
+  ipcMain.handle('codex:cancel', async () => {
+    codex.stopCallbackServer()
+    codex.clearPKCEVerifier()
+    codex.clearState()
+    return { success: true }
+  })
+
+  // Get Codex OAuth status
+  ipcMain.handle('codex:get-status', async () => {
+    const tokens = codex.getCodexTokens()
+    if (!tokens) {
+      return { authenticated: false, expiresAt: null }
+    }
+    return {
+      authenticated: true,
+      expiresAt: tokens.expires
+    }
+  })
+
+  // Logout (clear Codex OAuth tokens)
+  ipcMain.handle('codex:logout', async () => {
+    codex.clearCodexTokens()
+    return { success: true }
+  })
+
+  // Get valid access token (handles refresh if needed)
+  ipcMain.handle('codex:get-access-token', async () => {
+    const accessToken = await codex.getValidAccessToken()
+    if (!accessToken) {
+      return {
+        success: false,
+        error: 'No valid access token available'
+      }
+    }
+    return {
+      success: true,
+      accessToken
+    }
+  })
+
+  // Test Codex API with OAuth token
+  ipcMain.handle('codex:test-api', async () => {
+    try {
+      const accessToken = await codex.getValidAccessToken()
+      if (!accessToken) {
+        return {
+          success: false,
+          error: 'No valid access token available'
+        }
+      }
+
+      // Extract account ID from JWT token
+      const accountId = codex.extractAccountId(accessToken)
+
+      // Make a test request to the Codex backend API
+      const response = await fetch(`${codex.CODEX_BASE_URL}/codex/responses`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+          'OpenAI-Beta': 'responses=experimental',
+          'chatgpt-account-id': accountId || '',
+          'originator': 'codex_cli_rs'
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          input: 'Reply with OK only.',
+          instructions: 'You are a helpful assistant. Reply concisely.'
+        })
+      })
+
+      const responseText = await response.text()
+
+      if (response.ok) {
+        return {
+          success: true,
+          response: JSON.parse(responseText)
+        }
+      } else {
+        return {
+          success: false,
+          error: responseText,
+          status: response.status
+        }
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+}
+
 // Register git IPC handlers
 function registerGitHandlers() {
   ipcMain.handle('git:getCurrentBranch', async () => {
@@ -675,6 +829,7 @@ app.whenReady().then(() => {
   registerHandlers()
   registerGitHandlers()
   registerOAuthHandlers()
+  registerCodexHandlers()
   registerClaudeCodeHandlers()
   createWindow()
 

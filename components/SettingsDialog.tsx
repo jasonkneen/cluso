@@ -21,6 +21,7 @@ import {
   LogOut,
   Key,
   Sparkles,
+  Zap,
 } from 'lucide-react'
 
 type SettingsSection = 'general' | 'display' | 'providers' | 'models' | 'connections'
@@ -62,6 +63,9 @@ export interface AppSettings {
   // Claude Code OAuth state
   claudeCodeAuthenticated?: boolean
   claudeCodeExpiresAt?: number | null
+  // Codex OAuth state (OpenAI ChatGPT Plus/Pro)
+  codexAuthenticated?: boolean
+  codexExpiresAt?: number | null
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -83,7 +87,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai', enabled: false },
     { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'anthropic', enabled: false },
     { id: 'claude-3-opus', name: 'Claude 3 Opus', provider: 'anthropic', enabled: false },
-    { id: 'claude-code', name: 'Claude Code (OAuth)', provider: 'claude-code', enabled: false },
+    // Claude Code OAuth models
+    { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', provider: 'claude-code', enabled: false },
+    { id: 'claude-opus-4-5', name: 'Claude Opus 4.5', provider: 'claude-code', enabled: false },
+    { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', provider: 'claude-code', enabled: false },
+    // Codex OAuth models (ChatGPT Plus/Pro)
+    { id: 'gpt-5', name: 'GPT-5', provider: 'codex', enabled: false },
+    { id: 'gpt-5-mini', name: 'GPT-5 Mini', provider: 'codex', enabled: false },
+    { id: 'gpt-5-nano', name: 'GPT-5 Nano', provider: 'codex', enabled: false },
+    { id: 'gpt-5-codex', name: 'GPT-5 Codex', provider: 'codex', enabled: false },
   ],
   connections: [
     { id: '1', name: 'Local MCP Server', type: 'mcp', url: 'http://localhost:3001', enabled: false },
@@ -136,6 +148,15 @@ export function SettingsDialog({
   const [apiTestResult, setApiTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [apiTestLoading, setApiTestLoading] = useState(false)
 
+  // Codex OAuth state (OpenAI ChatGPT Plus/Pro)
+  const [codexStatus, setCodexStatus] = useState<{ authenticated: boolean; expiresAt: number | null }>({
+    authenticated: false,
+    expiresAt: null
+  })
+  const [codexLoading, setCodexLoading] = useState(false)
+  const [codexTestResult, setCodexTestResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [codexTestLoading, setCodexTestLoading] = useState(false)
+
   // Check Claude Code OAuth status on mount and when dialog opens
   useEffect(() => {
     if (isOpen && window.electronAPI?.oauth) {
@@ -147,9 +168,27 @@ export function SettingsDialog({
             ...settings,
             claudeCodeAuthenticated: status.authenticated,
             claudeCodeExpiresAt: status.expiresAt,
-            // Enable Claude Code model if authenticated
+            // Enable ALL Claude Code provider models if authenticated
             models: settings.models.map(m =>
-              m.id === 'claude-code' ? { ...m, enabled: status.authenticated } : m
+              m.provider === 'claude-code' ? { ...m, enabled: status.authenticated } : m
+            )
+          })
+        }
+      })
+    }
+    // Also check Codex OAuth status
+    if (isOpen && window.electronAPI?.codex) {
+      window.electronAPI.codex.getStatus().then(status => {
+        setCodexStatus(status)
+        // Update settings with Codex OAuth status
+        if (status.authenticated !== settings.codexAuthenticated) {
+          onSettingsChange({
+            ...settings,
+            codexAuthenticated: status.authenticated,
+            codexExpiresAt: status.expiresAt,
+            // Enable ALL Codex provider models if authenticated
+            models: settings.models.map(m =>
+              m.provider === 'codex' ? { ...m, enabled: status.authenticated } : m
             )
           })
         }
@@ -258,8 +297,9 @@ export function SettingsDialog({
             updateSettings({
               claudeCodeAuthenticated: true,
               claudeCodeExpiresAt: status.expiresAt,
+              // Enable ALL Claude Code provider models
               models: settings.models.map(m =>
-                m.id === 'claude-code' ? { ...m, enabled: true } : m
+                m.provider === 'claude-code' ? { ...m, enabled: true } : m
               )
             })
           }
@@ -304,8 +344,9 @@ export function SettingsDialog({
           updateSettings({
             claudeCodeAuthenticated: true,
             claudeCodeExpiresAt: status.expiresAt,
+            // Enable ALL Claude Code provider models
             models: settings.models.map(m =>
-              m.id === 'claude-code' ? { ...m, enabled: true } : m
+              m.provider === 'claude-code' ? { ...m, enabled: true } : m
             )
           })
         }
@@ -339,8 +380,9 @@ export function SettingsDialog({
       updateSettings({
         claudeCodeAuthenticated: false,
         claudeCodeExpiresAt: null,
+        // Disable ALL Claude Code provider models
         models: settings.models.map(m =>
-          m.id === 'claude-code' ? { ...m, enabled: false } : m
+          m.provider === 'claude-code' ? { ...m, enabled: false } : m
         )
       })
     } catch (err) {
@@ -371,6 +413,85 @@ export function SettingsDialog({
     }
   }
 
+  // Codex OAuth handlers
+  const startCodexLogin = async () => {
+    if (!window.electronAPI?.codex) {
+      setOauthError('Codex OAuth is only available in the desktop app')
+      return
+    }
+
+    setCodexLoading(true)
+    setOauthError(null)
+
+    try {
+      const result = await window.electronAPI.codex.startLogin()
+      if (result.success) {
+        // Check if OAuth completed automatically via callback server
+        if (result.autoCompleted) {
+          // OAuth flow completed automatically - update status
+          const status = await window.electronAPI.codex.getStatus()
+          setCodexStatus(status)
+          updateSettings({
+            codexAuthenticated: true,
+            codexExpiresAt: status.expiresAt,
+            // Enable ALL Codex provider models
+            models: settings.models.map(m =>
+              m.provider === 'codex' ? { ...m, enabled: true } : m
+            )
+          })
+        }
+      } else {
+        setOauthError(result.error || 'Failed to start Codex OAuth flow')
+      }
+    } catch (err) {
+      setOauthError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setCodexLoading(false)
+    }
+  }
+
+  const logoutCodex = async () => {
+    if (!window.electronAPI?.codex) return
+
+    try {
+      await window.electronAPI.codex.logout()
+      setCodexStatus({ authenticated: false, expiresAt: null })
+      updateSettings({
+        codexAuthenticated: false,
+        codexExpiresAt: null,
+        // Disable ALL Codex provider models
+        models: settings.models.map(m =>
+          m.provider === 'codex' ? { ...m, enabled: false } : m
+        )
+      })
+    } catch (err) {
+      setOauthError(err instanceof Error ? err.message : 'Unknown error')
+    }
+  }
+
+  // Test Codex API call directly
+  const testCodexApiCall = async () => {
+    if (!window.electronAPI?.codex?.testApi) return
+
+    setCodexTestLoading(true)
+    setCodexTestResult(null)
+
+    try {
+      const result = await window.electronAPI.codex.testApi()
+      if (result.success) {
+        setCodexTestResult({ success: true, message: 'Codex API call succeeded! Check console for response.' })
+        console.log('[Codex API Test] Response:', result.response)
+      } else {
+        setCodexTestResult({ success: false, message: result.error || 'Codex API call failed' })
+        console.log('[Codex API Test] Error:', result.error)
+      }
+    } catch (err) {
+      setCodexTestResult({ success: false, message: err instanceof Error ? err.message : 'Unknown error' })
+    } finally {
+      setCodexTestLoading(false)
+    }
+  }
+
   const toggleModelEnabled = (id: string) => {
     updateSettings({
       models: settings.models.map(m =>
@@ -395,6 +516,7 @@ export function SettingsDialog({
 
   const getProviderName = (providerId: string) => {
     if (providerId === 'claude-code') return 'Claude Code (OAuth)'
+    if (providerId === 'codex') return 'Codex (ChatGPT Plus/Pro)'
     const provider = settings.providers.find(p => p.id === providerId)
     return provider?.name || providerId
   }
@@ -881,6 +1003,111 @@ export function SettingsDialog({
                 </div>
               </>
             )}
+
+            {/* Codex OAuth Section (OpenAI ChatGPT Plus/Pro) */}
+            {window.electronAPI?.codex && (
+              <>
+                <div className={`border-t ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'} my-4`} />
+
+                <div className={`p-4 rounded-xl border ${
+                  codexStatus.authenticated
+                    ? isDarkMode ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-emerald-200 bg-emerald-50'
+                    : isDarkMode ? 'border-neutral-700 bg-neutral-800/50' : 'border-stone-200 bg-stone-50'
+                }`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                        codexStatus.authenticated
+                          ? 'bg-emerald-500/20 text-emerald-500'
+                          : isDarkMode ? 'bg-neutral-700 text-neutral-400' : 'bg-stone-200 text-stone-400'
+                      }`}>
+                        <Zap size={16} />
+                      </div>
+                      <div>
+                        <span className={`font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                          Codex
+                        </span>
+                        <p className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                          Use ChatGPT with your Plus/Pro subscription
+                        </p>
+                      </div>
+                    </div>
+                    {codexStatus.authenticated && (
+                      <div className="flex items-center gap-2">
+                        <CheckCircle size={16} className="text-emerald-500" />
+                        <span className={`text-xs ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                          Connected
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {codexStatus.authenticated ? (
+                    <div className="space-y-3">
+                      {codexStatus.expiresAt && (
+                        <p className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                          Token expires: {new Date(codexStatus.expiresAt).toLocaleString()}
+                        </p>
+                      )}
+                      {/* Test Codex API Button */}
+                      <button
+                        onClick={testCodexApiCall}
+                        disabled={codexTestLoading}
+                        className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          codexTestLoading
+                            ? isDarkMode
+                              ? 'bg-neutral-700 text-neutral-500 cursor-not-allowed'
+                              : 'bg-stone-100 text-stone-400 cursor-not-allowed'
+                            : isDarkMode
+                              ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20'
+                              : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                        }`}
+                      >
+                        {codexTestLoading ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                        Test API Call (Direct)
+                      </button>
+                      {codexTestResult && (
+                        <p className={`text-xs ${
+                          codexTestResult.success
+                            ? isDarkMode ? 'text-green-400' : 'text-green-600'
+                            : isDarkMode ? 'text-red-400' : 'text-red-600'
+                        }`}>
+                          {codexTestResult.message}
+                        </p>
+                      )}
+                      <button
+                        onClick={logoutCodex}
+                        className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          isDarkMode
+                            ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
+                            : 'bg-red-50 text-red-600 hover:bg-red-100'
+                        }`}
+                      >
+                        <LogOut size={14} />
+                        Disconnect
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={startCodexLogin}
+                      disabled={codexLoading}
+                      className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        codexLoading
+                          ? isDarkMode
+                            ? 'bg-neutral-700 text-neutral-500 cursor-not-allowed'
+                            : 'bg-stone-100 text-stone-400 cursor-not-allowed'
+                          : isDarkMode
+                            ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                            : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                      }`}
+                    >
+                      {codexLoading ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
+                      Login with ChatGPT Plus/Pro
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )
 
@@ -892,12 +1119,14 @@ export function SettingsDialog({
             </p>
 
             {/* Group models by provider */}
-            {['google', 'openai', 'anthropic', 'claude-code'].map((providerId) => {
+            {['google', 'openai', 'anthropic', 'claude-code', 'codex'].map((providerId) => {
               const providerModels = settings.models.filter(m => m.provider === providerId)
               if (providerModels.length === 0) return null
               const providerEnabled = providerId === 'claude-code'
                 ? claudeCodeStatus.authenticated
-                : isProviderEnabled(providerId)
+                : providerId === 'codex'
+                  ? codexStatus.authenticated
+                  : isProviderEnabled(providerId)
 
               return (
                 <div key={providerId} className="space-y-2">
@@ -909,7 +1138,7 @@ export function SettingsDialog({
                       <span className={`text-xs px-1.5 py-0.5 rounded ${
                         isDarkMode ? 'bg-yellow-500/10 text-yellow-400' : 'bg-yellow-50 text-yellow-600'
                       }`}>
-                        {providerId === 'claude-code' ? 'Login with OAuth first' : 'Configure API key first'}
+                        {providerId === 'claude-code' || providerId === 'codex' ? 'Login with OAuth first' : 'Configure API key first'}
                       </span>
                     )}
                   </div>

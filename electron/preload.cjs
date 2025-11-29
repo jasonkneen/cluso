@@ -37,6 +37,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     testApi: () => ipcRenderer.invoke('oauth:test-api'),
   },
 
+  // Codex OAuth operations (for OpenAI ChatGPT Plus/Pro via Codex)
+  codex: {
+    // Start Codex OAuth login flow
+    startLogin: () => ipcRenderer.invoke('codex:start-login'),
+    // Cancel OAuth flow
+    cancel: () => ipcRenderer.invoke('codex:cancel'),
+    // Get OAuth status
+    getStatus: () => ipcRenderer.invoke('codex:get-status'),
+    // Logout (clear OAuth tokens)
+    logout: () => ipcRenderer.invoke('codex:logout'),
+    // Get valid access token (handles refresh if needed)
+    getAccessToken: () => ipcRenderer.invoke('codex:get-access-token'),
+    // Direct test of Codex API with OAuth token
+    testApi: () => ipcRenderer.invoke('codex:test-api'),
+  },
+
   // API proxy to bypass CORS restrictions
   api: {
     proxy: (request) => ipcRenderer.invoke('api:proxy', request),
