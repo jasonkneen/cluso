@@ -1320,7 +1320,7 @@ If you're not sure what the user wants, ask for clarification.
       />
 
       {/* Main Content Area */}
-      <div className="flex flex-1 overflow-hidden p-2 gap-2">
+      <div className="flex flex-1 overflow-hidden p-1 gap-1">
 
         {/* --- Left Pane: Browser, New Tab Page, or Project Setup --- */}
         {setupProject ? (
@@ -1875,7 +1875,7 @@ If you're not sure what the user wants, ask for clarification.
         {/* Resize Handle */}
         {isSidebarOpen && (
           <div
-            className={`w-1 cursor-ew-resize z-10 transition-colors flex-shrink-0 ${isResizing ? 'bg-blue-500' : 'hover:bg-blue-400'}`}
+            className={`w-1 cursor-ew-resize z-10 transition-colors flex-shrink-0 ${isResizing ? (isDarkMode ? 'bg-neutral-500' : 'bg-stone-400') : (isDarkMode ? 'hover:bg-neutral-600' : 'hover:bg-stone-300')}`}
             onMouseDown={handleResizeStart}
           />
         )}
