@@ -14,6 +14,7 @@ export interface Message {
   content: string;
   timestamp: Date;
   selectedElement?: SelectedElement;
+  model?: string;
 }
 
 export interface ComponentSource {

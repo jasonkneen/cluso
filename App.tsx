@@ -66,8 +66,9 @@ function formatRelativeTime(date: Date): string {
 // --- Constants ---
 
 const MODELS = [
+  { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro', Icon: Sparkles },
   { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', Icon: Zap },
-  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', Icon: Sparkles },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', Icon: Rocket },
   { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', Icon: Rocket },
 ];
 
@@ -960,7 +961,8 @@ If you're not sure what the user wants, ask for clarification.
           id: (Date.now() + 1).toString(),
           role: 'assistant',
           content: cleanedText || 'Changes applied.',
-          timestamp: new Date()
+          timestamp: new Date(),
+          model: selectedModel.name
         }]);
 
         // If we have code to execute, execute immediately and show toolbar
@@ -988,7 +990,8 @@ If you're not sure what the user wants, ask for clarification.
         id: Date.now().toString(),
         role: 'assistant',
         content: "Sorry, I encountered an error processing that.",
-        timestamp: new Date()
+        timestamp: new Date(),
+        model: selectedModel.name
       }]);
     }
   };
@@ -1544,7 +1547,7 @@ If you're not sure what the user wants, ask for clarification.
                           )}
                           <div className={`text-sm leading-relaxed overflow-hidden ${
                               msg.role === 'user'
-                                  ? `px-4 py-3 max-w-[85%] ${isDarkMode ? 'bg-blue-600 text-white rounded-3xl' : 'bg-stone-900 text-white rounded-3xl'}`
+                                  ? `px-3 py-2 max-w-[85%] ${isDarkMode ? 'bg-white text-neutral-900 rounded-xl' : 'bg-stone-900 text-white rounded-xl'}`
                                   : msg.role === 'system'
                                   ? `px-4 py-3 ${isDarkMode ? 'bg-yellow-500/20 text-yellow-200 rounded-2xl' : 'bg-yellow-50 text-yellow-800 rounded-2xl'}`
                                   : `${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`
@@ -1553,7 +1556,7 @@ If you're not sure what the user wants, ask for clarification.
                           </div>
                       </div>
                       <div className={`text-[10px] mt-1 px-2 ${msg.role === 'user' ? 'text-right' : 'text-left ml-9'} ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-                          {formatRelativeTime(msg.timestamp)}
+                          {formatRelativeTime(msg.timestamp)}{msg.role === 'assistant' && msg.model && ` · ${msg.model}`}
                       </div>
                   </div>
               ))}
@@ -1657,6 +1660,7 @@ If you're not sure what the user wants, ask for clarification.
                             code={displayedSourceCode.code}
                             language="tsx"
                             showLineNumbers={true}
+                            isDarkMode={isDarkMode}
                           >
                             <CodeBlockCopyButton />
                           </CodeBlock>

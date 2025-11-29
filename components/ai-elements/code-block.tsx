@@ -18,6 +18,7 @@ type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   code: string;
   language: BundledLanguage;
   showLineNumbers?: boolean;
+  isDarkMode?: boolean;
 };
 
 type CodeBlockContextType = {
@@ -76,6 +77,7 @@ export const CodeBlock = ({
   code,
   language,
   showLineNumbers = false,
+  isDarkMode = false,
   className,
   children,
   ...props
@@ -102,22 +104,28 @@ export const CodeBlock = ({
     <CodeBlockContext.Provider value={{ code }}>
       <div
         className={cn(
-          "group relative w-full overflow-hidden rounded-md border bg-background text-foreground",
+          "group relative w-full rounded-lg border overflow-hidden",
+          isDarkMode
+            ? "bg-neutral-900 border-neutral-700 text-neutral-100"
+            : "bg-stone-50 border-stone-200 text-stone-900",
           className
         )}
         {...props}
       >
         <div className="relative">
-          <div
-            className="overflow-hidden dark:hidden [&>pre]:m-0 [&>pre]:bg-background! [&>pre]:p-4 [&>pre]:text-foreground! [&>pre]:text-sm [&_code]:font-mono [&_code]:text-sm"
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: "this is needed."
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
-          <div
-            className="hidden overflow-hidden dark:block [&>pre]:m-0 [&>pre]:bg-background! [&>pre]:p-4 [&>pre]:text-foreground! [&>pre]:text-sm [&_code]:font-mono [&_code]:text-sm"
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: "this is needed."
-            dangerouslySetInnerHTML={{ __html: darkHtml }}
-          />
+          {isDarkMode ? (
+            <div
+              className="overflow-x-auto [&>pre]:m-0 [&>pre]:p-4 [&>pre]:text-sm [&>pre]:bg-transparent [&_code]:font-mono [&_code]:text-sm"
+              // biome-ignore lint/security/noDangerouslySetInnerHtml: "this is needed."
+              dangerouslySetInnerHTML={{ __html: darkHtml }}
+            />
+          ) : (
+            <div
+              className="overflow-x-auto [&>pre]:m-0 [&>pre]:p-4 [&>pre]:text-sm [&>pre]:bg-transparent [&_code]:font-mono [&_code]:text-sm"
+              // biome-ignore lint/security/noDangerouslySetInnerHtml: "this is needed."
+              dangerouslySetInnerHTML={{ __html: html }}
+            />
+          )}
           {children && (
             <div className="absolute top-2 right-2 flex items-center gap-2">
               {children}
