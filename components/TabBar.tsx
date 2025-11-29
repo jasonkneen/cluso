@@ -136,7 +136,7 @@ export function TabBar({
           {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
         </button>
 
-        {/* Settings Button */}
+        {/* Settings */}
         <button
           onClick={onOpenSettings}
           className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
