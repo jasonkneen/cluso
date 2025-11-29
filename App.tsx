@@ -1545,14 +1545,26 @@ If you're not sure what the user wants, ask for clarification.
         console.log(`[AI SDK] Using provider: ${providerType} for model: ${selectedModel.id}`);
         console.log(`[AI SDK] Using tools: ${shouldUseTools}`);
 
+        // Build conversation history for context (last 10 messages)
+        const conversationHistory = messages.slice(-10).map(msg => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content,
+        }));
+
+        // Add current message with full context
+        const allMessages = [
+          ...conversationHistory,
+          { role: 'user' as const, content: fullPromptText }
+        ];
+
         setAgentProcessing(true);
         const result = await generateAI({
           modelId: selectedModel.id,
-          messages: [{ role: 'user', content: fullPromptText }],
+          messages: allMessages,
           providers: providerConfigs,
           system: shouldUseTools ? agentSystemPrompt : undefined,
           tools: shouldUseTools ? tools : undefined,
-          maxSteps: 10,
+          maxSteps: 15, // Allow more steps for complex operations
         });
         setAgentProcessing(false);
         text = result.text;
