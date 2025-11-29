@@ -91,10 +91,12 @@ const INTENT_PATTERNS: Array<{
   {
     type: 'file_operation',
     patterns: [
-      /(?:list|show|find)\s+(?:files|folders|directories)/i,
+      /(?:list|show|find|what)\s+(?:files|folders|directories)/i,
       /(?:rename|move|copy)\s+(?:the\s+)?(?:file|folder)/i,
+      /(?:what(?:'s| is)?\s+in)\s+(?:the\s+)?(?:folder|directory|\.)/i,
+      /(?:ls|dir)\b/i,
     ],
-    keywords: ['list files', 'show files', 'rename', 'move file', 'copy file'],
+    keywords: ['list files', 'show files', 'rename', 'move file', 'copy file', 'what files', 'whats in', 'folder contents', 'directory', 'ls'],
   },
   {
     type: 'ui_inspect',
@@ -205,8 +207,27 @@ function classifyIntent(message: string, context: CodingContext): ClassifiedInte
 function buildSystemPrompt(context: CodingContext, intent: ClassifiedIntent): string {
   const parts: string[] = []
 
-  parts.push(`You are a coding assistant integrated into a development environment.
-You have access to tools that can read and write files, inspect UI elements, and more.
+  parts.push(`You are a coding assistant with direct access to the local file system.
+
+IMPORTANT: You have tools to interact with the file system. USE THEM.
+Do NOT suggest terminal commands like 'ls', 'cat', 'mkdir', etc.
+Instead, use the tools provided:
+
+Available tools:
+- list_directory: List files and folders in a directory
+- read_file: Read file contents
+- write_file: Write/update a file
+- create_file: Create a new file
+- delete_file: Delete a file
+- rename_file: Rename or move a file
+- create_directory: Create a directory
+- file_exists: Check if a path exists
+- file_stat: Get file info (size, modified time)
+- git_status: Get git status
+- git_commit: Commit changes
+
+When asked to list files, read files, or modify files - USE THE TOOLS.
+Do not tell the user to run commands themselves.
 
 Current intent: ${intent.type} (${intent.description})
 Confidence: ${Math.round(intent.confidence * 100)}%`)
