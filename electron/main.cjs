@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
 const { execSync, exec } = require('child_process')
 const fs = require('fs').promises
@@ -167,6 +167,20 @@ function registerGitHandlers() {
     } catch (error) {
       return { success: false, error: error.message }
     }
+  })
+
+  // Folder picker dialog
+  ipcMain.handle('dialog:openFolder', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      title: 'Select Project Folder'
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, canceled: true }
+    }
+    const folderPath = result.filePaths[0]
+    const folderName = path.basename(folderPath)
+    return { success: true, data: { path: folderPath, name: folderName } }
   })
 }
 

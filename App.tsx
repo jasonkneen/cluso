@@ -6,7 +6,8 @@ import { INJECTION_SCRIPT } from './utils/iframe-injection';
 import { SelectedElement, Message as ChatMessage } from './types';
 import { TabState, createNewTab } from './types/tab';
 import { TabBar, Tab } from './components/TabBar';
-import { NewTabPage, RecentProject } from './components/NewTabPage';
+import { NewTabPage } from './components/NewTabPage';
+import { ProjectSetupFlow } from './components/ProjectSetupFlow';
 import { CodeBlock, CodeBlockCopyButton } from '@/components/ai-elements/code-block';
 import { Tool, ToolContent, ToolHeader, ToolOutput } from '@/components/ai-elements/tool';
 import { MessageResponse } from '@/components/ai-elements/message';
@@ -75,7 +76,7 @@ const MODELS = [
   { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', Icon: Rocket },
 ];
 
-const DEFAULT_URL = 'http://localhost:3000/landing/index.html';
+const DEFAULT_URL = ''; // Empty string shows project selection (NewTabPage)
 
 // Type for webview element (Electron)
 interface WebviewElement extends HTMLElement {
@@ -100,7 +101,7 @@ export default function App() {
   const [tabs, setTabs] = useState<TabState[]>(() => [{
     ...createNewTab('tab-1'),
     url: DEFAULT_URL,
-    title: 'localhost'
+    title: 'New Tab'
   }]);
   const [activeTabId, setActiveTabId] = useState('tab-1');
 
@@ -151,7 +152,6 @@ export default function App() {
   }));
 
   // Browser State
-  const [browserUrl, setBrowserUrl] = useState(DEFAULT_URL);
   const [urlInput, setUrlInput] = useState(DEFAULT_URL);
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
@@ -212,6 +212,9 @@ export default function App() {
   const [newBranchName, setNewBranchName] = useState('');
   const [isCreatingBranch, setIsCreatingBranch] = useState(false);
   const [gitLoading, setGitLoading] = useState<string | null>(null);
+
+  // Project Setup Flow State
+  const [setupProject, setSetupProject] = useState<{ path: string; name: string } | null>(null);
 
   // Dark Mode State
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -379,7 +382,7 @@ export default function App() {
     console.log('Navigating to:', finalUrl);
     setUrlInput(finalUrl);
 
-    // Only use loadURL - don't update browserUrl state which changes src attribute
+    // Use loadURL for navigation to avoid React re-renders
     if (webviewRef.current) {
       try {
         webviewRef.current.loadURL(finalUrl);
@@ -668,6 +671,14 @@ export default function App() {
         console.log('Stopped loading');
         setIsLoading(false);
       };
+      const handleDidFinishLoad = () => {
+        console.log('Page finished loading, URL:', webview.getURL());
+        // Update URL input to reflect actual loaded URL
+        const currentUrl = webview.getURL();
+        if (currentUrl && currentUrl !== 'about:blank') {
+          setUrlInput(currentUrl);
+        }
+      };
 
       const handleDidFailLoad = (e: { errorCode: number; errorDescription: string; validatedURL: string }) => {
         console.error('Failed to load:', e.errorCode, e.errorDescription, e.validatedURL);
@@ -769,6 +780,7 @@ export default function App() {
       webview.addEventListener('did-navigate-in-page', handleDidNavigate);
       webview.addEventListener('did-start-loading', handleDidStartLoading);
       webview.addEventListener('did-stop-loading', handleDidStopLoading);
+      webview.addEventListener('did-finish-load', handleDidFinishLoad);
       webview.addEventListener('did-fail-load', handleDidFailLoad as (e: unknown) => void);
       webview.addEventListener('page-title-updated', handlePageTitleUpdated as (e: unknown) => void);
       webview.addEventListener('ipc-message', handleIpcMessage as (e: unknown) => void);
@@ -781,6 +793,7 @@ export default function App() {
         webview.removeEventListener('did-navigate-in-page', handleDidNavigate);
         webview.removeEventListener('did-start-loading', handleDidStartLoading);
         webview.removeEventListener('did-stop-loading', handleDidStopLoading);
+        webview.removeEventListener('did-finish-load', handleDidFinishLoad);
         webview.removeEventListener('did-fail-load', handleDidFailLoad as (e: unknown) => void);
         webview.removeEventListener('page-title-updated', handlePageTitleUpdated as (e: unknown) => void);
         webview.removeEventListener('ipc-message', handleIpcMessage as (e: unknown) => void);
@@ -909,7 +922,7 @@ ${f.content}
     }
 
     let fullPromptText = `
-Current Page: ${browserUrl}
+Current Page: ${urlInput}
 ${pageTitle ? `Page Title: ${pageTitle}` : ''}
 
 User Request: ${userMessage.content}
@@ -1144,20 +1157,38 @@ If you're not sure what the user wants, ask for clarification.
     }
   }, [selectedElement, isElectron]);
 
-  // Handle opening a project from new tab page
-  const handleOpenProject = useCallback((projectPath: string) => {
-    // For now, just open localhost - in the future could scan for running dev servers
-    const url = 'http://localhost:3000';
-    updateCurrentTab({ url, title: projectPath.split('/').pop() || 'Project' });
-    setBrowserUrl(url);
-    setUrlInput(url);
-  }, [updateCurrentTab]);
+  // Handle opening a project from new tab page - triggers setup flow
+  const handleOpenProject = useCallback((projectPath: string, projectName: string) => {
+    console.log('Starting project setup flow:', projectPath, projectName);
+    setSetupProject({ path: projectPath, name: projectName });
+  }, []);
+
+  // Handle setup flow completion - actually opens the browser
+  const handleSetupComplete = useCallback((url: string) => {
+    if (setupProject) {
+      updateCurrentTab({ url, title: setupProject.name });
+      setUrlInput(url);
+      // Use loadURL for navigation (not src attribute change)
+      if (webviewRef.current) {
+        webviewRef.current.loadURL(url);
+      }
+      setSetupProject(null);
+    }
+  }, [setupProject, updateCurrentTab]);
+
+  // Handle setup flow cancel - go back to new tab page
+  const handleSetupCancel = useCallback(() => {
+    setSetupProject(null);
+  }, []);
 
   // Handle opening a URL from new tab page
   const handleOpenUrl = useCallback((url: string) => {
     updateCurrentTab({ url, title: new URL(url).hostname });
-    setBrowserUrl(url);
     setUrlInput(url);
+    // Use loadURL for navigation (not src attribute change)
+    if (webviewRef.current) {
+      webviewRef.current.loadURL(url);
+    }
   }, [updateCurrentTab]);
 
   // Check if current tab is "new tab" (no URL)
@@ -1179,8 +1210,18 @@ If you're not sure what the user wants, ask for clarification.
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden p-2 gap-2">
 
-        {/* --- Left Pane: Browser or New Tab Page --- */}
-        {isNewTabPage ? (
+        {/* --- Left Pane: Browser, New Tab Page, or Project Setup --- */}
+        {setupProject ? (
+          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`}>
+            <ProjectSetupFlow
+              projectPath={setupProject.path}
+              projectName={setupProject.name}
+              isDarkMode={isDarkMode}
+              onComplete={handleSetupComplete}
+              onCancel={handleSetupCancel}
+            />
+          </div>
+        ) : isNewTabPage ? (
           <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`}>
             <NewTabPage
               onOpenProject={handleOpenProject}
@@ -1331,7 +1372,7 @@ If you're not sure what the user wants, ask for clarification.
             {isElectron && webviewPreloadPath ? (
               <webview
                 ref={webviewRef as React.RefObject<HTMLElement>}
-                src={browserUrl}
+                src="about:blank"
                 preload={`file://${webviewPreloadPath}`}
                 className="h-full transition-all duration-300"
                 style={{

@@ -28,6 +28,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     readPrompt: (name) => ipcRenderer.invoke('files:readPrompt', name),
   },
 
+  // Dialog operations
+  dialog: {
+    openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
+  },
+
   // Check if running in Electron
   isElectron: true,
 })
