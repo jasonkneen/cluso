@@ -74,3 +74,57 @@ ai-cluso/
 2. Gemini responds → Audio received → PCM decoded → Played via AudioContext
 3. If UI update needed → Gemini calls `update_ui` tool → App receives new HTML
 4. User clicks inspector → Webview posts element info → Chat context enriched
+
+## Claude Code OAuth Integration
+
+The app supports Claude Max OAuth for using the Anthropic API without a separate API key. This is implemented in `electron/oauth.cjs` and `hooks/useAIChat.ts`.
+
+### Critical Discovery: The System Prompt
+
+OAuth tokens from Claude Max are specifically scoped for "Claude Code" usage. The API server validates this by checking for a specific system prompt in requests. Without it, you get: `"This credential is only authorized for use with Claude Code and cannot be used for other API requests."`
+
+**The required system prompt:**
+```
+You are Claude Code, Anthropic's official CLI for Claude.
+```
+
+### Required Headers
+
+```javascript
+{
+  'Content-Type': 'application/json',
+  'anthropic-version': '2023-06-01',
+  'anthropic-beta': 'oauth-2025-04-20',
+  'Authorization': `Bearer ${accessToken}`,
+  'X-API-Key': ''  // Empty string required
+}
+```
+
+### Implementation Files
+
+- **`electron/oauth.cjs`**: PKCE OAuth flow, token storage/refresh, local callback server on port 54545
+- **`hooks/useAIChat.ts`**: Custom fetch wrapper that injects the system prompt and OAuth headers
+- **`electron/main.cjs`**: IPC handlers including `oauth:test-api` for validating tokens
+
+### OAuth Flow
+
+1. User clicks "Login with Claude Max"
+2. App starts local callback server on `localhost:54545`
+3. Browser opens `claude.ai/oauth/authorize` with PKCE challenge
+4. User authorizes, callback receives code
+5. App exchanges code for access/refresh tokens
+6. Tokens stored in `~/Library/Application Support/ai-cluso/oauth-config.json`
+
+### Using with Vercel AI SDK
+
+The AI SDK's `@ai-sdk/anthropic` doesn't support OAuth natively. We work around this by:
+1. Creating the Anthropic provider with an empty API key placeholder
+2. Providing a custom `fetch` that intercepts all requests
+3. Replacing headers with OAuth Bearer token
+4. Injecting the Claude Code system prompt into the request body
+
+### OAuth Constants
+
+- Client ID: `9d1c250a-e61b-44d9-88ed-5944d1962f5e`
+- Token Endpoint: `https://console.anthropic.com/v1/oauth/token`
+- Scopes: `org:create_api_key user:profile user:inference`

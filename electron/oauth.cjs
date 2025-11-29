@@ -119,12 +119,6 @@ async function exchangeCodeForTokens(code, verifier, state = null, useLocalCallb
   try {
     const redirectUri = useLocalCallback ? REDIRECT_URI_LOCAL : REDIRECT_URI_HOSTED
 
-    console.log('[OAuth] Exchanging code for tokens...')
-    console.log('[OAuth] Code:', code.substring(0, 20) + '...')
-    console.log('[OAuth] Verifier:', verifier ? verifier.substring(0, 20) + '...' : 'none')
-    console.log('[OAuth] State:', state ? state.substring(0, 20) + '...' : 'none')
-    console.log('[OAuth] Redirect URI:', redirectUri)
-
     const response = await fetch(TOKEN_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -202,7 +196,6 @@ async function refreshAccessToken(refreshToken) {
  */
 async function createApiKey(accessToken) {
   try {
-    console.log('[OAuth] Creating API key with access token...')
     const response = await fetch(CREATE_API_KEY_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -219,7 +212,6 @@ async function createApiKey(accessToken) {
     }
 
     const json = await response.json()
-    console.log('[OAuth] API key created successfully')
     return json.raw_key
   } catch (error) {
     console.error('Error creating API key:', error)

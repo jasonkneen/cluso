@@ -258,9 +258,6 @@ function registerOAuthHandlers() {
         }
       }
 
-      console.log('[OAuth Test] Testing direct API call with OAuth token...')
-      console.log('[OAuth Test] Access token (first 20):', accessToken.substring(0, 20) + '...')
-
       // Make a minimal test request to the Anthropic API
       // CRITICAL: The system prompt "You are Claude Code..." is what makes the server
       // accept the OAuth token as a valid Claude Code request!
@@ -282,19 +279,13 @@ function registerOAuthHandlers() {
         'X-API-Key': ''
       }
 
-      console.log('[OAuth Test] Request headers:', JSON.stringify({ ...headers, Authorization: 'Bearer [REDACTED]' }, null, 2))
-      console.log('[OAuth Test] Request body:', JSON.stringify(testBody))
-
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers,
         body: JSON.stringify(testBody)
       })
 
-      console.log('[OAuth Test] Response status:', response.status, response.statusText)
-
       const responseText = await response.text()
-      console.log('[OAuth Test] Response body:', responseText)
 
       if (response.ok) {
         return {

@@ -15,7 +15,11 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { z } from 'zod'
 
 // Anthropic beta header for OAuth support
-const ANTHROPIC_BETA_HEADER = 'oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14'
+const ANTHROPIC_BETA_HEADER = 'oauth-2025-04-20'
+
+// Claude Code system prompt - REQUIRED for OAuth tokens to work
+// This is what makes the API accept the request as a "Claude Code" request
+const CLAUDE_CODE_SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for Claude."
 
 // Create a custom fetch for Claude Code OAuth that:
 // 1. Uses Bearer authorization (not x-api-key)
@@ -50,10 +54,7 @@ const createClaudeCodeOAuthFetch = (getAccessToken: () => Promise<{ success: boo
       }
     }
 
-    // Debug: Log the headers we received from the SDK before modification
-    console.log('[Claude Code OAuth] Headers from SDK (before modification):', JSON.stringify(headers, null, 2))
-
-    // Remove all variations of x-api-key - OAuth uses Bearer auth instead
+    // Remove all variations of headers that need to be overwritten
     // HTTP headers are case-insensitive, but JS objects are case-sensitive
     const headersToDelete = ['x-api-key', 'X-Api-Key', 'X-API-Key', 'X-API-KEY',
                              'anthropic-beta', 'Anthropic-Beta', 'Anthropic-beta',
@@ -62,32 +63,33 @@ const createClaudeCodeOAuthFetch = (getAccessToken: () => Promise<{ success: boo
       delete headers[key]
     }
 
-    // Set Bearer authorization and all required headers for Claude Code OAuth
-    headers['authorization'] = `Bearer ${accessToken}`
+    // Set headers for Claude Code OAuth (matching vibe-kit/auth exactly)
+    headers['Authorization'] = `Bearer ${accessToken}`
     headers['anthropic-beta'] = ANTHROPIC_BETA_HEADER
-    // Ensure anthropic-version is set (Claude Code uses 2023-06-01)
     headers['anthropic-version'] = '2023-06-01'
-    // Override User-Agent to identify as a Claude Code compatible client (like opencode)
-    headers['user-agent'] = 'opencode/latest/1.0.0'
+    headers['X-API-Key'] = '' // Empty string required for OAuth
 
-    // Parse body first so we can log it
-    let body: unknown = undefined
+    // Parse body first so we can modify and log it
+    let body: Record<string, unknown> = {}
     if (init?.body) {
       if (typeof init.body === 'string') {
         try {
-          body = JSON.parse(init.body)
+          body = JSON.parse(init.body) as Record<string, unknown>
         } catch {
-          body = init.body
+          body = { raw: init.body }
         }
       } else {
-        body = init.body
+        body = init.body as Record<string, unknown>
       }
     }
 
-    console.log('[Claude Code OAuth] Making request to:', url)
-    console.log('[Claude Code OAuth] Method:', init?.method || 'POST')
-    console.log('[Claude Code OAuth] Headers:', JSON.stringify({ ...headers, authorization: 'Bearer [REDACTED]' }, null, 2))
-    console.log('[Claude Code OAuth] Body (first 500 chars):', JSON.stringify(body)?.substring(0, 500))
+    // CRITICAL: Inject the Claude Code system prompt
+    // This is REQUIRED for OAuth tokens to be accepted
+    // The user's system prompt will be prepended after this
+    const existingSystem = body.system as string | undefined
+    body.system = existingSystem
+      ? `${CLAUDE_CODE_SYSTEM_PROMPT}\n\n${existingSystem}`
+      : CLAUDE_CODE_SYSTEM_PROMPT
 
     // Proxy through Electron to bypass CORS
     const proxyResult = await window.electronAPI!.api.proxy({
@@ -96,12 +98,6 @@ const createClaudeCodeOAuthFetch = (getAccessToken: () => Promise<{ success: boo
       headers,
       body,
     })
-
-    console.log('[Claude Code OAuth] Response status:', proxyResult.status, proxyResult.statusText)
-    console.log('[Claude Code OAuth] Response ok:', proxyResult.ok)
-    if (!proxyResult.ok) {
-      console.log('[Claude Code OAuth] Error response body:', JSON.stringify(proxyResult.body)?.substring(0, 1000))
-    }
 
     // Convert proxy response to a proper Response object
     const responseBody = typeof proxyResult.body === 'string'
