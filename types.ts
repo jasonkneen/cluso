@@ -8,6 +8,14 @@ export interface AudioVisualizerData {
   volume: number;
 }
 
+export interface ToolUsage {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  result?: unknown;
+  isError?: boolean;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -15,6 +23,8 @@ export interface Message {
   timestamp: Date;
   selectedElement?: SelectedElement;
   model?: string;
+  intent?: string;
+  toolUsage?: ToolUsage[];
 }
 
 export interface ComponentSource {

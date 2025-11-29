@@ -3,7 +3,7 @@ import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { useLiveGemini } from './hooks/useLiveGemini';
 import { useGit } from './hooks/useGit';
 import { INJECTION_SCRIPT } from './utils/iframe-injection';
-import { SelectedElement, Message as ChatMessage } from './types';
+import { SelectedElement, Message as ChatMessage, ToolUsage } from './types';
 import { TabState, createNewTab } from './types/tab';
 import { TabBar, Tab } from './components/TabBar';
 import { NewTabPage } from './components/NewTabPage';
@@ -1557,10 +1557,26 @@ If you're not sure what the user wants, ask for clarification.
         setAgentProcessing(false);
         text = result.text;
 
-        // Log tool usage if any
+        // Collect tool usage for the message
+        const toolUsage: ToolUsage[] = [];
         if (result.toolCalls && result.toolCalls.length > 0) {
           console.log(`[AI SDK] Tool calls:`, result.toolCalls);
+          for (let i = 0; i < result.toolCalls.length; i++) {
+            const tc = result.toolCalls[i];
+            const tr = result.toolResults?.[i];
+            toolUsage.push({
+              id: tc.toolCallId,
+              name: tc.toolName,
+              args: tc.args as Record<string, unknown>,
+              result: tr?.result,
+              isError: tr ? (tr.result as any)?.error !== undefined : false,
+            });
+          }
         }
+
+        // Store tool usage and intent for the response message
+        (window as any).__pendingToolUsage = toolUsage.length > 0 ? toolUsage : undefined;
+        (window as any).__pendingIntent = intent.type !== 'unknown' ? intent.type : undefined;
       } else {
         // Fallback to GoogleGenAI for backwards compatibility or if no provider configured
         console.log('[AI SDK] Falling back to GoogleGenAI');
@@ -1599,12 +1615,20 @@ If you're not sure what the user wants, ask for clarification.
         // Clean up the response for display
         const cleanedText = text.replace(/```json-exec\s*\{[\s\S]*?\}\s*```/g, '').trim();
 
+        // Get stored tool usage and intent from the request
+        const pendingToolUsage = (window as any).__pendingToolUsage as ToolUsage[] | undefined;
+        const pendingIntent = (window as any).__pendingIntent as string | undefined;
+        delete (window as any).__pendingToolUsage;
+        delete (window as any).__pendingIntent;
+
         setMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
           content: cleanedText || 'Changes applied.',
           timestamp: new Date(),
-          model: selectedModel.name
+          model: selectedModel.name,
+          intent: pendingIntent,
+          toolUsage: pendingToolUsage,
         }]);
 
         // If we have code to execute, execute immediately and show toolbar
@@ -2597,6 +2621,33 @@ If you're not sure what the user wants, ask for clarification.
               )}
               {messages.map((msg) => (
                   <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                      {/* Tool Usage Display for Assistant Messages */}
+                      {msg.role === 'assistant' && msg.toolUsage && msg.toolUsage.length > 0 && (
+                        <div className={`mb-2 w-full space-y-1`}>
+                          {msg.toolUsage.map((tool, idx) => (
+                            <div
+                              key={tool.id || idx}
+                              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
+                                tool.isError
+                                  ? isDarkMode ? 'bg-red-500/20 text-red-300 border border-red-500/30' : 'bg-red-50 text-red-700 border border-red-200'
+                                  : isDarkMode ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              }`}
+                            >
+                              <span className="font-mono font-medium">{tool.name}</span>
+                              {tool.args && Object.keys(tool.args).length > 0 && (
+                                <span className="opacity-70">
+                                  ({Object.entries(tool.args).map(([k, v]) =>
+                                    `${k}: ${typeof v === 'string' ? (v.length > 30 ? v.slice(0, 30) + '...' : v) : JSON.stringify(v)}`
+                                  ).join(', ')})
+                                </span>
+                              )}
+                              <span className="ml-auto">
+                                {tool.isError ? '❌' : '✓'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <div
                           className={`leading-relaxed overflow-hidden ${
                               msg.role === 'user'
@@ -2610,7 +2661,7 @@ If you're not sure what the user wants, ask for clarification.
                           <MessageResponse>{msg.content}</MessageResponse>
                       </div>
                       <div className={`text-[10px] mt-1 ${msg.role === 'user' ? 'text-right pr-1' : 'text-left'} ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-                          {formatRelativeTime(msg.timestamp)}{msg.role === 'assistant' && msg.model && ` · ${msg.model}`}
+                          {formatRelativeTime(msg.timestamp)}{msg.role === 'assistant' && msg.model && ` · ${msg.model}`}{msg.role === 'assistant' && msg.intent && ` · ${msg.intent}`}
                       </div>
                   </div>
               ))}
