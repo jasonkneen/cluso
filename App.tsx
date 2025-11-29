@@ -323,6 +323,10 @@ export default function App() {
   // Console Panel State
   const [consoleLogs, setConsoleLogs] = useState<Array<{type: 'log' | 'warn' | 'error' | 'info'; message: string; timestamp: Date}>>([]);
   const [isConsolePanelOpen, setIsConsolePanelOpen] = useState(false);
+  const [consoleHeight, setConsoleHeight] = useState(192); // 192px = h-48
+  const [isConsoleResizing, setIsConsoleResizing] = useState(false);
+  const consoleResizeStartY = useRef<number>(0);
+  const consoleResizeStartHeight = useRef<number>(192);
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
   // Webview ready state (for sending messages)
@@ -403,6 +407,38 @@ export default function App() {
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isResizing]);
+
+  // Console panel resize handlers
+  const handleConsoleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    consoleResizeStartY.current = e.clientY;
+    consoleResizeStartHeight.current = consoleHeight;
+    setIsConsoleResizing(true);
+  }, [consoleHeight]);
+
+  useEffect(() => {
+    if (!isConsoleResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      // Calculate delta from start position (negative = dragging up = bigger)
+      const delta = consoleResizeStartY.current - e.clientY;
+      const newHeight = consoleResizeStartHeight.current + delta;
+      // Clamp between 100 and 500 pixels
+      setConsoleHeight(Math.max(100, Math.min(500, newHeight)));
+    };
+
+    const handleMouseUp = () => {
+      setIsConsoleResizing(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isConsoleResizing]);
 
   // Stash with optional message
   const handleStash = useCallback(async (message?: string) => {
@@ -1466,7 +1502,7 @@ If you're not sure what the user wants, ask for clarification.
         </div>
 
         {/* Browser Content */}
-        <div className={`flex-1 relative overflow-hidden flex flex-col ${isConsolePanelOpen ? '' : ''}`}>
+        <div data-browser-content className={`flex-1 relative overflow-hidden flex flex-col ${isConsolePanelOpen ? '' : ''}`}>
           <div className={`flex-1 relative overflow-hidden flex flex-col justify-center items-center ${viewportSize === 'desktop' ? '' : 'py-4 gap-3'} ${isDarkMode ? 'bg-neutral-900' : 'bg-stone-200'}`}>
 
             {/* Device Selector & Zoom - only show in mobile/tablet mode */}
@@ -1810,9 +1846,21 @@ If you're not sure what the user wants, ask for clarification.
             )}
           </div>
 
+          {/* Resize overlay - captures mouse events during console resize */}
+          {isConsoleResizing && (
+            <div className="fixed inset-0 z-50 cursor-ns-resize" />
+          )}
+
           {/* Console Panel */}
           {isConsolePanelOpen && (
-            <div className={`h-48 border-t flex flex-col ${isDarkMode ? 'border-neutral-700 bg-neutral-900' : 'border-stone-200 bg-stone-50'}`}>
+            <div className={`flex flex-col rounded-t-2xl overflow-hidden ${isDarkMode ? 'bg-neutral-900' : 'bg-stone-50'}`} style={{ height: consoleHeight }}>
+              {/* Resize Handle */}
+              <div
+                className={`h-2 cursor-ns-resize flex-shrink-0 flex items-center justify-center group ${isDarkMode ? 'bg-neutral-900' : 'bg-stone-50'}`}
+                onMouseDown={handleConsoleResizeStart}
+              >
+                <div className={`w-8 h-0.5 rounded-full transition-colors ${isConsoleResizing ? (isDarkMode ? 'bg-neutral-400' : 'bg-stone-500') : (isDarkMode ? 'bg-neutral-600 group-hover:bg-neutral-500' : 'bg-stone-300 group-hover:bg-stone-400')}`} />
+              </div>
               <div className={`flex items-center justify-between px-3 py-1.5 border-b ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
                 <div className="flex items-center gap-2">
                   <Terminal size={14} className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'} />
@@ -1870,6 +1918,11 @@ If you're not sure what the user wants, ask for clarification.
           )}
         </div>
         </div>
+        )}
+
+        {/* Resize overlay - captures mouse events during sidebar resize */}
+        {isResizing && (
+          <div className="fixed inset-0 z-50 cursor-ew-resize" />
         )}
 
         {/* Resize Handle */}
