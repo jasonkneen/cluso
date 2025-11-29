@@ -1,5 +1,5 @@
 import React from 'react'
-import { Plus, X } from 'lucide-react'
+import { Plus, X, Sun, Moon, Settings } from 'lucide-react'
 
 export interface Tab {
   id: string
@@ -15,6 +15,8 @@ interface TabBarProps {
   onTabClose: (tabId: string) => void
   onNewTab: () => void
   isDarkMode: boolean
+  onToggleDarkMode: () => void
+  onOpenSettings: () => void
 }
 
 export function TabBar({
@@ -23,11 +25,13 @@ export function TabBar({
   onTabSelect,
   onTabClose,
   onNewTab,
-  isDarkMode
+  isDarkMode,
+  onToggleDarkMode,
+  onOpenSettings
 }: TabBarProps) {
   return (
     <div
-      className={`h-11 flex items-center border-b select-none ${
+      className={`h-11 flex items-center justify-between border-b select-none ${
         isDarkMode
           ? 'bg-neutral-900 border-neutral-800'
           : 'bg-stone-100 border-stone-200'
@@ -114,8 +118,37 @@ export function TabBar({
         </button>
       </div>
 
-      {/* Right spacer for symmetry */}
-      <div className="w-4 flex-shrink-0" />
+      {/* Right side - Dark Mode & Settings */}
+      <div
+        className="flex items-center gap-1 pr-3 flex-shrink-0"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      >
+        {/* Dark Mode Toggle */}
+        <button
+          onClick={onToggleDarkMode}
+          className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${
+            isDarkMode
+              ? 'hover:bg-neutral-700 text-yellow-400'
+              : 'hover:bg-stone-200 text-stone-500'
+          }`}
+          title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+        >
+          {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
+        </button>
+
+        {/* Settings Button */}
+        <button
+          onClick={onOpenSettings}
+          className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${
+            isDarkMode
+              ? 'hover:bg-neutral-700 text-neutral-400'
+              : 'hover:bg-stone-200 text-stone-500'
+          }`}
+          title="Settings"
+        >
+          <Settings size={14} />
+        </button>
+      </div>
     </div>
   )
 }

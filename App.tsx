@@ -1249,6 +1249,8 @@ If you're not sure what the user wants, ask for clarification.
         onTabClose={handleCloseTab}
         onNewTab={handleNewTab}
         isDarkMode={isDarkMode}
+        onToggleDarkMode={toggleDarkMode}
+        onOpenSettings={() => {/* TODO: Open settings panel */}}
       />
 
       {/* Main Content Area */}
@@ -1380,34 +1382,21 @@ If you're not sure what the user wants, ask for clarification.
           {/* Console Toggle */}
           <button
             onClick={() => setIsConsolePanelOpen(!isConsolePanelOpen)}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors relative ${isConsolePanelOpen ? 'bg-blue-100 text-blue-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500')}`}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isConsolePanelOpen ? 'bg-blue-100 text-blue-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500')}`}
             title="Toggle Console"
           >
             <Terminal size={16} />
-            {consoleLogs.filter(l => l.type === 'error').length > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center">
-                {consoleLogs.filter(l => l.type === 'error').length}
-              </span>
-            )}
           </button>
 
-          {/* Dark Mode Toggle */}
+          {/* Sidebar Toggle */}
           <button
-            onClick={toggleDarkMode}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isDarkMode ? 'hover:bg-neutral-700 text-yellow-400' : 'hover:bg-stone-200 text-stone-500'}`}
-            title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-          >
-            {isDarkMode ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
-
-          {/* Settings Button */}
-          <button
-            onClick={() => {/* TODO: Open settings panel */}}
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'}`}
-            title="Settings"
+            title={isSidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
           >
-            <Settings size={16} />
+            <PanelRight size={16} />
           </button>
+
         </div>
 
         {/* Browser Content */}
@@ -1779,14 +1768,6 @@ If you're not sure what the user wants, ask for clarification.
                       <ArrowUp size={14} />
                   </button>
 
-                  {/* Collapse */}
-                  <button
-                      onClick={() => setIsSidebarOpen(false)}
-                      className={`p-1.5 rounded transition ml-1 ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400 hover:text-neutral-200' : 'hover:bg-stone-100 text-stone-400 hover:text-stone-600'}`}
-                      title="Collapse sidebar"
-                  >
-                      <PanelRight size={14} />
-                  </button>
               </div>
           </div>
 
