@@ -15,7 +15,8 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { z } from 'zod'
 
 // Create a custom fetch that proxies through Electron to bypass CORS
-const createElectronProxyFetch = (): typeof fetch => {
+// useOAuthToken: if true, replaces x-api-key with Authorization: Bearer for OAuth tokens
+const createElectronProxyFetch = (useOAuthToken = false): typeof fetch => {
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
     const method = init?.method || 'GET'
@@ -33,6 +34,13 @@ const createElectronProxyFetch = (): typeof fetch => {
       } else {
         Object.assign(headers, init.headers)
       }
+    }
+
+    // For OAuth tokens, replace x-api-key with Authorization: Bearer
+    if (useOAuthToken && headers['x-api-key']) {
+      const token = headers['x-api-key']
+      delete headers['x-api-key']
+      headers['Authorization'] = `Bearer ${token}`
     }
 
     let body: unknown = undefined
@@ -73,8 +81,6 @@ export type ProviderType = 'google' | 'openai' | 'anthropic' | 'claude-code'
 export interface ProviderConfig {
   id: ProviderType
   apiKey: string
-  // For claude-code, this will be the OAuth access token
-  accessToken?: string
 }
 
 export interface ChatMessage {
@@ -188,8 +194,9 @@ export function useAIChat(options: UseAIChatOptions = {}) {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 
-  // Create provider instance based on type and API key or access token
-  const createProvider = useCallback((provider: ProviderType, apiKey: string, accessToken?: string) => {
+  // Create provider instance based on type and API key
+  // useOAuthToken: for claude-code, indicates if we should use Bearer auth vs x-api-key
+  const createProvider = useCallback((provider: ProviderType, apiKey: string, useOAuthToken = false) => {
     switch (provider) {
       case 'openai':
         return createOpenAI({ apiKey })
@@ -198,11 +205,11 @@ export function useAIChat(options: UseAIChatOptions = {}) {
       case 'google':
         return createGoogleGenerativeAI({ apiKey })
       case 'claude-code':
-        // Claude Code uses the Anthropic API with an OAuth access token
-        // Use Electron proxy fetch to bypass CORS restrictions
-        const proxyFetch = window.electronAPI?.api ? createElectronProxyFetch() : undefined
+        // Claude Code uses either API key (Console OAuth) or Bearer token (Max OAuth)
+        // Use Electron proxy fetch to bypass CORS
+        const proxyFetch = window.electronAPI?.api ? createElectronProxyFetch(useOAuthToken) : undefined
         return createAnthropic({
-          apiKey: accessToken || apiKey,
+          apiKey,
           headers: {
             'anthropic-beta': 'interleaved-thinking-2025-05-14',
           },
@@ -246,24 +253,28 @@ export function useAIChat(options: UseAIChatOptions = {}) {
       // Find provider config
       const providerConfig = providers.find(p => p.id === providerType)
 
-      // For claude-code, get access token via OAuth
-      let accessToken: string | undefined
+      // For claude-code, get API key created from OAuth
+      let apiKey: string
+      let useOAuthToken = false
       if (providerType === 'claude-code') {
         if (window.electronAPI?.oauth) {
-          const tokenResult = await window.electronAPI.oauth.getAccessToken()
-          if (!tokenResult.success || !tokenResult.accessToken) {
+          const keyResult = await window.electronAPI.oauth.getClaudeCodeApiKey()
+          if (!keyResult.success || !keyResult.apiKey) {
             throw new Error('Claude Code requires OAuth authentication. Please login in Settings.')
           }
-          accessToken = tokenResult.accessToken
+          apiKey = keyResult.apiKey
+          useOAuthToken = keyResult.isOAuthToken || false
         } else {
           throw new Error('Claude Code OAuth is only available in the desktop app')
         }
       } else if (!providerConfig || !providerConfig.apiKey) {
         throw new Error(`No API key configured for provider: ${providerType}`)
+      } else {
+        apiKey = providerConfig.apiKey
       }
 
       // Create provider instance
-      const provider = createProvider(providerType, providerConfig?.apiKey || '', accessToken)
+      const provider = createProvider(providerType, apiKey, useOAuthToken)
       const normalizedModelId = normalizeModelId(modelId, providerType)
 
       // Build generation options
@@ -370,24 +381,28 @@ export function useAIChat(options: UseAIChatOptions = {}) {
       // Find provider config
       const providerConfig = providers.find(p => p.id === providerType)
 
-      // For claude-code, get access token via OAuth
-      let accessToken: string | undefined
+      // For claude-code, get API key created from OAuth
+      let apiKey: string
+      let useOAuthToken = false
       if (providerType === 'claude-code') {
         if (window.electronAPI?.oauth) {
-          const tokenResult = await window.electronAPI.oauth.getAccessToken()
-          if (!tokenResult.success || !tokenResult.accessToken) {
+          const keyResult = await window.electronAPI.oauth.getClaudeCodeApiKey()
+          if (!keyResult.success || !keyResult.apiKey) {
             throw new Error('Claude Code requires OAuth authentication. Please login in Settings.')
           }
-          accessToken = tokenResult.accessToken
+          apiKey = keyResult.apiKey
+          useOAuthToken = keyResult.isOAuthToken || false
         } else {
           throw new Error('Claude Code OAuth is only available in the desktop app')
         }
       } else if (!providerConfig || !providerConfig.apiKey) {
         throw new Error(`No API key configured for provider: ${providerType}`)
+      } else {
+        apiKey = providerConfig.apiKey
       }
 
       // Create provider instance
-      const provider = createProvider(providerType, providerConfig?.apiKey || '', accessToken)
+      const provider = createProvider(providerType, apiKey, useOAuthToken)
       const normalizedModelId = normalizeModelId(modelId, providerType)
 
       // Build stream options

@@ -74,19 +74,19 @@ function registerOAuthHandlers() {
         }
       }
 
-      // If creating an API key instead of using OAuth directly
+      // Clear the temporary verifier
+      oauth.clearPKCEVerifier()
+
+      // If creating an API key for Anthropic provider (createKey=true)
+      // This only works with Console OAuth (console.anthropic.com) which has org:create_api_key scope
       if (createKey) {
         const apiKey = await oauth.createApiKey(tokens.access)
         if (!apiKey) {
           return {
             success: false,
-            error: 'Failed to create API key'
+            error: 'Failed to create API key. Make sure you authorized via Console (not Claude Max).'
           }
         }
-
-        // Clear the temporary verifier
-        oauth.clearPKCEVerifier()
-
         return {
           success: true,
           apiKey,
@@ -94,15 +94,32 @@ function registerOAuthHandlers() {
         }
       }
 
-      // Save OAuth tokens for Claude Code usage
+      // For Claude Code (createKey=false): Try to create API key, but fall back to access token
+      // Claude Max OAuth (claude.ai) doesn't have org:create_api_key scope, but can use user:inference
+      const apiKey = await oauth.createApiKey(tokens.access)
+
+      // Save OAuth tokens for refresh capability
       oauth.saveOAuthTokens(tokens)
 
-      // Clear the temporary verifier
-      oauth.clearPKCEVerifier()
-
-      return {
-        success: true,
-        mode: 'oauth'
+      if (apiKey) {
+        // Console OAuth - save the API key
+        oauth.saveClaudeCodeApiKey(apiKey)
+        console.log('[OAuth] Created and saved API key from OAuth tokens')
+        return {
+          success: true,
+          apiKey,
+          mode: 'oauth-apikey'
+        }
+      } else {
+        // Max OAuth - save the access token as "API key" (it will work with user:inference scope)
+        // The Anthropic API accepts OAuth access tokens directly for inference
+        oauth.saveClaudeCodeApiKey(tokens.access)
+        console.log('[OAuth] Using access token directly for Claude Code (Max OAuth)')
+        return {
+          success: true,
+          accessToken: tokens.access,
+          mode: 'oauth-token'
+        }
       }
     } catch (error) {
       console.error('Error completing OAuth login:', error)
@@ -157,6 +174,17 @@ function registerOAuthHandlers() {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       }
+    }
+  })
+
+  // Get Claude Code API key (created from OAuth or direct access token)
+  ipcMain.handle('oauth:get-claude-code-api-key', () => {
+    const apiKey = oauth.getClaudeCodeApiKey()
+    const isOAuthToken = oauth.isClaudeCodeOAuthTokenMode()
+    return {
+      success: !!apiKey,
+      apiKey,
+      isOAuthToken  // true = use Bearer auth, false = use x-api-key auth
     }
   })
 

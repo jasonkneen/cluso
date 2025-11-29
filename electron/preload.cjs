@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     logout: () => ipcRenderer.invoke('oauth:logout'),
     // Get valid access token (handles refresh if needed)
     getAccessToken: () => ipcRenderer.invoke('oauth:get-access-token'),
+    // Get Claude Code API key (created from OAuth)
+    getClaudeCodeApiKey: () => ipcRenderer.invoke('oauth:get-claude-code-api-key'),
   },
 
   // API proxy to bypass CORS restrictions

@@ -64,6 +64,13 @@ interface OAuthAccessTokenResult {
   error?: string
 }
 
+interface OAuthApiKeyResult {
+  success: boolean
+  apiKey?: string
+  isOAuthToken?: boolean  // true = use Bearer auth, false = use x-api-key auth
+  error?: string
+}
+
 interface OAuthResult {
   success: boolean
   error?: string
@@ -83,6 +90,8 @@ interface ElectronOAuthAPI {
   logout: () => Promise<OAuthResult>
   // Get valid access token (handles refresh if needed)
   getAccessToken: () => Promise<OAuthAccessTokenResult>
+  // Get Claude Code API key (created from OAuth)
+  getClaudeCodeApiKey: () => Promise<OAuthApiKeyResult>
 }
 
 interface ApiProxyRequest {

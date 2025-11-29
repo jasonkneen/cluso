@@ -107,6 +107,10 @@ async function exchangeCodeForTokens(code, verifier) {
     const authCode = splits[0]
     const state = splits[1]
 
+    console.log('[OAuth] Exchanging code for tokens...')
+    console.log('[OAuth] Code:', authCode.substring(0, 20) + '...')
+    console.log('[OAuth] State:', state ? state.substring(0, 20) + '...' : 'none')
+
     const response = await fetch(TOKEN_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -123,7 +127,9 @@ async function exchangeCodeForTokens(code, verifier) {
     })
 
     if (!response.ok) {
-      console.error('Failed to exchange code for tokens:', response.statusText)
+      const errorText = await response.text()
+      console.error('Failed to exchange code for tokens:', response.status, response.statusText)
+      console.error('Error response:', errorText)
       return null
     }
 
@@ -182,6 +188,7 @@ async function refreshAccessToken(refreshToken) {
  */
 async function createApiKey(accessToken) {
   try {
+    console.log('[OAuth] Creating API key with access token...')
     const response = await fetch(CREATE_API_KEY_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -191,11 +198,14 @@ async function createApiKey(accessToken) {
     })
 
     if (!response.ok) {
-      console.error('Failed to create API key:', response.statusText)
+      const errorText = await response.text()
+      console.error('Failed to create API key:', response.status, response.statusText)
+      console.error('Error response:', errorText)
       return null
     }
 
     const json = await response.json()
+    console.log('[OAuth] API key created successfully')
     return json.raw_key
   } catch (error) {
     console.error('Error creating API key:', error)
@@ -226,6 +236,51 @@ function getOAuthTokens() {
 function clearOAuthTokens() {
   const config = loadOAuthConfig()
   delete config.oauthTokens
+  saveOAuthConfig(config)
+}
+
+/**
+ * Save Claude Code API key to config
+ */
+function saveClaudeCodeApiKey(apiKey) {
+  const config = loadOAuthConfig()
+  config.claudeCodeApiKey = apiKey
+  saveOAuthConfig(config)
+}
+
+/**
+ * Get Claude Code API key from config
+ */
+function getClaudeCodeApiKey() {
+  const config = loadOAuthConfig()
+  return config.claudeCodeApiKey || null
+}
+
+/**
+ * Check if Claude Code is using OAuth token mode (vs API key mode)
+ * Returns true if we're using an access token directly (Max OAuth)
+ * Returns false if we have a created API key (Console OAuth)
+ */
+function isClaudeCodeOAuthTokenMode() {
+  const config = loadOAuthConfig()
+  const apiKey = config.claudeCodeApiKey
+  if (!apiKey) return false
+
+  // If we have OAuth tokens saved AND the stored key is NOT a sk- API key,
+  // then we're using the access token directly (OAuth token mode)
+  const hasOAuthTokens = !!config.oauthTokens
+  const isApiKey = apiKey.startsWith('sk-')
+
+  // OAuth token mode = we have OAuth tokens and NOT using a created API key
+  return hasOAuthTokens && !isApiKey
+}
+
+/**
+ * Clear Claude Code API key from config
+ */
+function clearClaudeCodeApiKey() {
+  const config = loadOAuthConfig()
+  delete config.claudeCodeApiKey
   saveOAuthConfig(config)
 }
 
@@ -290,6 +345,10 @@ module.exports = {
   saveOAuthTokens,
   getOAuthTokens,
   clearOAuthTokens,
+  saveClaudeCodeApiKey,
+  getClaudeCodeApiKey,
+  clearClaudeCodeApiKey,
+  isClaudeCodeOAuthTokenMode,
   isTokenExpired,
   getValidAccessToken,
   getPKCEVerifier,
