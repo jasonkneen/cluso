@@ -126,7 +126,7 @@ export function TabBar({
         {/* Dark Mode Toggle */}
         <button
           onClick={onToggleDarkMode}
-          className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${
+          className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
             isDarkMode
               ? 'hover:bg-neutral-700 text-yellow-400'
               : 'hover:bg-stone-200 text-stone-500'
@@ -139,7 +139,7 @@ export function TabBar({
         {/* Settings Button */}
         <button
           onClick={onOpenSettings}
-          className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${
+          className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
             isDarkMode
               ? 'hover:bg-neutral-700 text-neutral-400'
               : 'hover:bg-stone-200 text-stone-500'
