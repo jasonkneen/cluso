@@ -2,13 +2,11 @@ import {
   getFiberFromHostInstance,
   getLatestFiber,
   isCompositeFiber,
-  traverseFiber,
   type Fiber,
 } from 'bippy';
 
 import {
-  getSource,
-  type FiberSource,
+  getSourceFromHostInstance,
 } from 'bippy/source';
 
 export interface ComponentSource {
@@ -20,79 +18,72 @@ export interface ComponentSource {
 
 export interface ElementSourceInfo {
   sources: ComponentSource[];
-  summary: string; // e.g., "App.tsx (45-120)"
+  summary: string; // e.g., "App.tsx:45"
 }
 
 /**
  * Get source location information for a DOM element
- * Returns the component stack with file locations
+ * Uses bippy's built-in getSourceFromHostInstance for accurate source mapping
  */
-export function getElementSourceLocation(element: HTMLElement): ElementSourceInfo | null {
+export async function getElementSourceLocation(element: HTMLElement): Promise<ElementSourceInfo | null> {
   try {
     console.log('[SourceLocation] Attempting to get source for element:', element.tagName, element.id || element.className);
 
-    // Get the React Fiber associated with this DOM element
-    const fiber = getFiberFromHostInstance(element);
+    // Use bippy's getSourceFromHostInstance - this handles all the complexity
+    const sourceInfo = await getSourceFromHostInstance(element);
 
-    console.log('[SourceLocation] Fiber found:', !!fiber, fiber?.type);
+    console.log('[SourceLocation] Source info from bippy:', sourceInfo);
 
-    if (!fiber) {
-      console.warn('[SourceLocation] No fiber found for element', element.tagName, element.id || element.className);
-      console.warn('[SourceLocation] This usually means React is not rendering this element, or bippy is not properly configured');
+    if (!sourceInfo || !sourceInfo.fileName) {
+      console.warn('[SourceLocation] No source info found');
       return null;
     }
 
-    // Collect source locations by traversing up the fiber tree
-    const sources: ComponentSource[] = [];
-    let currentFiber: Fiber | null = fiber;
+    const source: ComponentSource = {
+      name: sourceInfo.functionName || 'Unknown',
+      file: sourceInfo.fileName,
+      line: sourceInfo.lineNumber || 0,
+      column: sourceInfo.columnNumber || 0,
+    };
 
-    // Traverse up to find all component fibers with source info
-    while (currentFiber) {
-      // Get the latest version of this fiber
-      const latestFiber = getLatestFiber(currentFiber);
-
-      // Only process composite fibers (components, not DOM elements)
-      if (isCompositeFiber(latestFiber)) {
-        const source = getSource(latestFiber);
-
-        if (source && source.filename) {
-          // Get component name
-          const name = getComponentName(latestFiber);
-
-          // Filter out framework internals
-          if (name && !isFrameworkComponent(name)) {
-            sources.push({
-              name,
-              file: normalizeFilename(source.filename),
-              line: source.line || 0,
-              column: source.column || 0,
-            });
-          }
-        }
-      }
-
-      // Move up the tree
-      currentFiber = traverseFiber(latestFiber, 'parent');
-    }
-
-    if (sources.length === 0) {
-      return null;
-    }
-
-    // Create summary from the most immediate component (first in stack)
-    const primary = sources[0];
-    const lineRange = sources.length > 1
-      ? `${primary.line}-${sources[sources.length - 1].line}`
-      : `${primary.line}`;
-
-    const summary = `${primary.file} (${lineRange})`;
+    const summary = `${source.file}:${source.line}`;
 
     return {
-      sources,
+      sources: [source],
       summary,
     };
   } catch (error) {
     console.error('[SourceLocation] Error getting source location:', error);
+    return null;
+  }
+}
+
+/**
+ * Synchronous version that gets basic fiber info without source mapping
+ * Use this for quick lookups, the async version for full source info
+ */
+export function getElementFiberInfo(element: HTMLElement): { name: string; type: string } | null {
+  try {
+    const fiber = getFiberFromHostInstance(element);
+    if (!fiber) return null;
+
+    const latestFiber = getLatestFiber(fiber);
+
+    // Walk up to find the nearest composite (component) fiber
+    let current: Fiber | null = latestFiber;
+    while (current) {
+      if (isCompositeFiber(current)) {
+        const name = getComponentName(current);
+        if (name) {
+          return { name, type: current.type?.name || 'Component' };
+        }
+      }
+      current = current.return;
+    }
+
+    return null;
+  } catch (error) {
+    console.error('[SourceLocation] Error getting fiber info:', error);
     return null;
   }
 }
@@ -124,51 +115,6 @@ function getComponentName(fiber: Fiber): string | null {
 }
 
 /**
- * Normalize filename to relative path
- */
-function normalizeFilename(filename: string): string {
-  // Remove webpack/vite internal prefixes
-  let normalized = filename
-    .replace(/^webpack:\/\/\//g, '')
-    .replace(/^\/\//g, '')
-    .replace(/^\.\//g, '');
-
-  // Extract relative path (remove absolute path prefix)
-  const match = normalized.match(/(?:src|components|pages|app)\/.+/);
-  if (match) {
-    return match[0];
-  }
-
-  // Return basename if no pattern matches
-  const parts = normalized.split('/');
-  return parts[parts.length - 1];
-}
-
-/**
- * Check if component name is from framework internals
- */
-function isFrameworkComponent(name: string): boolean {
-  const frameworkPrefixes = [
-    '_',           // Internal React components
-    'Router',      // React Router internals
-    'Provider',    // Context providers (usually framework)
-    'ErrorBoundary', // Error boundaries (usually framework)
-  ];
-
-  const frameworkNames = [
-    'App',         // Skip root App for cleaner output
-    'StrictMode',
-    'Suspense',
-    'Fragment',
-  ];
-
-  return (
-    frameworkPrefixes.some(prefix => name.startsWith(prefix)) ||
-    frameworkNames.includes(name)
-  );
-}
-
-/**
  * Initialize source location tracking
  * Call this once when the app loads
  */
@@ -176,13 +122,14 @@ export function initSourceLocationTracking() {
   // Expose API globally for webview preload script to use
   (window as any).__SOURCE_LOCATION__ = {
     getElementSourceLocation,
+    getElementFiberInfo,
   };
 
   console.log('[SourceLocation] Tracking initialized');
   console.log('[SourceLocation] API available at window.__SOURCE_LOCATION__');
   console.log('[SourceLocation] Testing bippy availability:', {
     getFiberFromHostInstance: typeof getFiberFromHostInstance,
-    getSource: typeof getSource,
+    getSourceFromHostInstance: typeof getSourceFromHostInstance,
   });
 
   // Test if React is available

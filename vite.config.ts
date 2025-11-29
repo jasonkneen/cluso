@@ -28,6 +28,11 @@ export default defineConfig(({ mode }) => {
       build: {
         outDir: 'dist',
         emptyOutDir: true,
+        sourcemap: true, // Enable source maps for production builds
+      },
+      // Enable source maps in dev mode (should be on by default but let's be explicit)
+      css: {
+        devSourcemap: true,
       }
     };
 });

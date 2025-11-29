@@ -342,38 +342,114 @@ function createNumberBadge(number) {
 }
 
 // Get source location from page context (async)
+// This tries multiple approaches:
+// 1. Custom __SOURCE_LOCATION__ API (if app has bippy installed)
+// 2. React's internal _debugSource (works in dev mode for any React app)
+// 3. React DevTools hook fiber data
 function getSourceLocation(el) {
   return new Promise((resolve) => {
     try {
       const uniqueId = `source-${Date.now()}-${Math.random().toString(36).substring(7)}`
       el.setAttribute('data-source-id', uniqueId)
 
-      // Inject script into page context to access window.__SOURCE_LOCATION__
+      // Inject script into page context
       const script = document.createElement('script')
       script.textContent = `
-        (function() {
+        (async function() {
           const el = document.querySelector('[data-source-id="${uniqueId}"]');
-          if (el && window.__SOURCE_LOCATION__) {
+          if (!el) return;
+
+          let sourceInfo = null;
+
+          // Approach 1: Custom SOURCE_LOCATION API (bippy-based)
+          if (window.__SOURCE_LOCATION__ && !sourceInfo) {
             try {
-              const sourceInfo = window.__SOURCE_LOCATION__.getElementSourceLocation(el);
+              sourceInfo = await window.__SOURCE_LOCATION__.getElementSourceLocation(el);
               if (sourceInfo) {
-                el.setAttribute('data-source-info', JSON.stringify(sourceInfo));
-                console.log('[Page] Source location extracted:', sourceInfo.summary);
-              } else {
-                console.log('[Page] No source location found for element');
+                console.log('[Page] Source from bippy API:', sourceInfo.summary);
               }
             } catch (e) {
-              console.error('[Page] Error extracting source:', e);
+              console.log('[Page] bippy API error:', e.message);
             }
+          }
+
+          // Approach 2: React DevTools hook (works for most React apps in dev)
+          if (!sourceInfo && window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
+            try {
+              const hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+              // Find fiber from element
+              for (const key of Object.keys(el)) {
+                if (key.startsWith('__reactFiber$') || key.startsWith('__reactInternalInstance$')) {
+                  let fiber = el[key];
+                  // Walk up to find component with _debugSource
+                  while (fiber) {
+                    if (fiber._debugSource) {
+                      const src = fiber._debugSource;
+                      sourceInfo = {
+                        sources: [{
+                          name: fiber.type?.name || fiber.type?.displayName || 'Component',
+                          file: src.fileName || src.filename || '',
+                          line: src.lineNumber || src.line || 0,
+                          column: src.columnNumber || src.column || 0
+                        }],
+                        summary: (src.fileName || src.filename || 'unknown') + ':' + (src.lineNumber || src.line || 0)
+                      };
+                      console.log('[Page] Source from _debugSource:', sourceInfo.summary);
+                      break;
+                    }
+                    fiber = fiber.return;
+                  }
+                  if (sourceInfo) break;
+                }
+              }
+            } catch (e) {
+              console.log('[Page] React fiber approach error:', e.message);
+            }
+          }
+
+          // Approach 3: Direct fiber key access (fallback)
+          if (!sourceInfo) {
+            try {
+              for (const key of Object.keys(el)) {
+                if (key.startsWith('__reactFiber$')) {
+                  let fiber = el[key];
+                  while (fiber) {
+                    // Check for _debugOwner which might have source
+                    if (fiber._debugOwner && fiber._debugOwner._debugSource) {
+                      const src = fiber._debugOwner._debugSource;
+                      sourceInfo = {
+                        sources: [{
+                          name: fiber._debugOwner.type?.name || 'Component',
+                          file: src.fileName || '',
+                          line: src.lineNumber || 0,
+                          column: src.columnNumber || 0
+                        }],
+                        summary: (src.fileName || 'unknown') + ':' + (src.lineNumber || 0)
+                      };
+                      console.log('[Page] Source from _debugOwner:', sourceInfo.summary);
+                      break;
+                    }
+                    fiber = fiber.return;
+                  }
+                  if (sourceInfo) break;
+                }
+              }
+            } catch (e) {
+              console.log('[Page] Fallback fiber error:', e.message);
+            }
+          }
+
+          if (sourceInfo) {
+            el.setAttribute('data-source-info', JSON.stringify(sourceInfo));
           } else {
-            console.warn('[Page] Source API not available, make sure app is loaded');
+            console.log('[Page] No source location found for element');
           }
         })();
       `
       document.documentElement.appendChild(script)
       script.remove()
 
-      // Wait a tick for the script to execute
+      // Wait for async operations
       setTimeout(() => {
         const sourceInfoAttr = el.getAttribute('data-source-info')
         el.removeAttribute('data-source-id')
@@ -385,7 +461,7 @@ function getSourceLocation(el) {
         } else {
           resolve(null)
         }
-      }, 10)
+      }, 500)
     } catch (err) {
       console.error('[Preload] Failed to get source location:', err)
       resolve(null)

@@ -1336,7 +1336,13 @@ Be concise. Confirm what you changed.
                               <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs border border-blue-200">
                                   <Check size={12} />
                                   <span className="font-medium">{selectedElement.tagName.toLowerCase()}</span>
-                                  <span className="text-blue-500 truncate max-w-[120px]">{selectedElement.text || '(element)'}</span>
+                                  {selectedElement.sourceLocation ? (
+                                      <span className="text-blue-600 font-mono truncate max-w-[180px]" title={selectedElement.sourceLocation.summary}>
+                                          {selectedElement.sourceLocation.summary}
+                                      </span>
+                                  ) : (
+                                      <span className="text-blue-500 truncate max-w-[120px]">{selectedElement.text || '(element)'}</span>
+                                  )}
                                   <button
                                       onClick={() => setSelectedElement(null)}
                                       className="ml-0.5 hover:text-blue-900"
