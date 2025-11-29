@@ -975,9 +975,6 @@ export default function App() {
     const handleIpcMessage = (event: { channel: string; args: unknown[] }) => {
       const { channel, args } = event;
 
-      // Only handle IPC messages from the active tab
-      if (tabId !== activeTabId) return;
-
       if (channel === 'inspector-select') {
         const data = args[0] as { element: SelectedElement; x: number; y: number; rect: unknown };
         setSelectedElement({
@@ -1048,9 +1045,6 @@ export default function App() {
     };
 
     const handleConsoleMessage = (e: { level: number; message: string; line: number; sourceId: string }) => {
-      // Only log console messages from active tab
-      if (tabId !== activeTabId) return;
-
       const levelMap: Record<number, 'log' | 'warn' | 'error' | 'info'> = {
         0: 'log',
         1: 'info',
@@ -1101,7 +1095,7 @@ export default function App() {
       webview.removeEventListener('page-title-updated', handlePageTitleUpdated as (e: unknown) => void);
       webview.removeEventListener('ipc-message', handleIpcMessage as (e: unknown) => void);
     };
-  }, [updateTab, activeTabId]);
+  }, [updateTab]);
 
   // Ref callback for webview elements - sets up handlers when mounted
   const webviewRefCallback = useCallback((tabId: string) => (element: HTMLElement | null) => {
