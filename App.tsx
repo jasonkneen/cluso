@@ -248,11 +248,77 @@ export default function App() {
   // Viewport State (responsive preview)
   type ViewportSize = 'mobile' | 'tablet' | 'desktop';
   const [viewportSize, setViewportSize] = useState<ViewportSize>('desktop');
+
+  // Device presets for responsive testing
+  interface DevicePreset {
+    name: string
+    width: number
+    height: number
+    type: ViewportSize
+  }
+
+  const devicePresets: DevicePreset[] = [
+    // Mobile devices
+    { name: 'iPhone SE', width: 375, height: 667, type: 'mobile' },
+    { name: 'iPhone 14', width: 390, height: 844, type: 'mobile' },
+    { name: 'iPhone 14 Pro Max', width: 430, height: 932, type: 'mobile' },
+    { name: 'iPhone 15 Pro', width: 393, height: 852, type: 'mobile' },
+    { name: 'Samsung Galaxy S21', width: 360, height: 800, type: 'mobile' },
+    { name: 'Pixel 7', width: 412, height: 915, type: 'mobile' },
+    // Tablet devices
+    { name: 'iPad Mini', width: 768, height: 1024, type: 'tablet' },
+    { name: 'iPad Air', width: 820, height: 1180, type: 'tablet' },
+    { name: 'iPad Pro 11"', width: 834, height: 1194, type: 'tablet' },
+    { name: 'iPad Pro 12.9"', width: 1024, height: 1366, type: 'tablet' },
+    { name: 'Surface Pro 7', width: 912, height: 1368, type: 'tablet' },
+    { name: 'Galaxy Tab S7', width: 800, height: 1280, type: 'tablet' },
+  ]
+
+  const [selectedDevice, setSelectedDevice] = useState<DevicePreset | null>(null)
+  const [customWidth, setCustomWidth] = useState<number>(375)
+  const [customHeight, setCustomHeight] = useState<number>(667)
+  const [isCustomDevice, setIsCustomDevice] = useState(false)
+  const [isDeviceSelectorOpen, setIsDeviceSelectorOpen] = useState(false)
+
+  // Zoom options for device preview
+  type ZoomLevel = 'fit' | '50' | '75' | '100' | '125' | '150'
+  const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('fit')
+  const [isZoomSelectorOpen, setIsZoomSelectorOpen] = useState(false)
+
+  const zoomOptions: { value: ZoomLevel; label: string }[] = [
+    { value: 'fit', label: 'Fit' },
+    { value: '50', label: '50%' },
+    { value: '75', label: '75%' },
+    { value: '100', label: '100%' },
+    { value: '125', label: '125%' },
+    { value: '150', label: '150%' },
+  ]
+
+  // Get current viewport dimensions
+  const currentWidth = isCustomDevice ? customWidth : (selectedDevice?.width ?? (viewportSize === 'tablet' ? 768 : 375))
+  const currentHeight = isCustomDevice ? customHeight : (selectedDevice?.height ?? (viewportSize === 'tablet' ? 1024 : 667))
+
   const viewportWidths: Record<ViewportSize, number | null> = {
     mobile: 375,
     tablet: 768,
     desktop: null // null means full width
   };
+
+  // Handle device selection
+  const handleDeviceSelect = (device: DevicePreset) => {
+    setSelectedDevice(device)
+    setIsCustomDevice(false)
+    setViewportSize(device.type)
+    setIsDeviceSelectorOpen(false)
+  }
+
+  // Handle custom device
+  const handleCustomDevice = () => {
+    setIsCustomDevice(true)
+    setSelectedDevice(null)
+    setViewportSize('mobile')
+    setIsDeviceSelectorOpen(false)
+  }
 
   // Console Panel State
   const [consoleLogs, setConsoleLogs] = useState<Array<{type: 'log' | 'warn' | 'error' | 'info'; message: string; timestamp: Date}>>([]);
@@ -1258,7 +1324,7 @@ If you're not sure what the user wants, ask for clarification.
 
         {/* --- Left Pane: Browser, New Tab Page, or Project Setup --- */}
         {setupProject ? (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`}>
+          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700' : 'bg-white border-stone-200'}`}>
             <ProjectSetupFlow
               projectPath={setupProject.path}
               projectName={setupProject.name}
@@ -1268,7 +1334,7 @@ If you're not sure what the user wants, ask for clarification.
             />
           </div>
         ) : isNewTabPage ? (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`}>
+          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700' : 'bg-white border-stone-200'}`}>
             <NewTabPage
               onOpenProject={handleOpenProject}
               onOpenUrl={handleOpenUrl}
@@ -1276,7 +1342,7 @@ If you're not sure what the user wants, ask for clarification.
             />
           </div>
         ) : (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`}>
+          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700' : 'bg-white border-stone-200'}`}>
 
             {/* Browser Toolbar */}
             <div className={`h-12 border-b flex items-center gap-2 px-3 flex-shrink-0 ${isDarkMode ? 'border-neutral-700 bg-neutral-800' : 'border-stone-100 bg-stone-50'}`}>
@@ -1401,22 +1467,202 @@ If you're not sure what the user wants, ask for clarification.
 
         {/* Browser Content */}
         <div className={`flex-1 relative overflow-hidden flex flex-col ${isConsolePanelOpen ? '' : ''}`}>
-          <div className={`flex-1 relative overflow-hidden flex items-start justify-center ${isDarkMode ? 'bg-neutral-900' : 'bg-stone-200'}`}>
+          <div className={`flex-1 relative overflow-hidden flex flex-col justify-center items-center ${viewportSize === 'desktop' ? '' : 'py-4 gap-3'} ${isDarkMode ? 'bg-neutral-900' : 'bg-stone-200'}`}>
+
+            {/* Device Selector & Zoom - only show in mobile/tablet mode */}
+            {viewportSize !== 'desktop' && (
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {/* Device Selector */}
+                <div className="relative">
+                  <button
+                    onClick={() => { setIsDeviceSelectorOpen(!isDeviceSelectorOpen); setIsZoomSelectorOpen(false); }}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                      isDarkMode
+                        ? 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700'
+                        : 'bg-white hover:bg-stone-50 text-stone-700 border border-stone-200 shadow-sm'
+                    }`}
+                  >
+                    {viewportSize === 'mobile' ? <Smartphone size={14} /> : <Tablet size={14} />}
+                    <span>{isCustomDevice ? 'Custom' : (selectedDevice?.name || (viewportSize === 'mobile' ? 'iPhone SE' : 'iPad Mini'))}</span>
+                    <span className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                      {currentWidth} × {currentHeight}
+                    </span>
+                    <ChevronDown size={14} className={`transition-transform ${isDeviceSelectorOpen ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {/* Device Dropdown */}
+                  {isDeviceSelectorOpen && (
+                    <div className={`absolute top-full left-1/2 -translate-x-1/2 mt-2 w-72 max-h-80 overflow-y-auto rounded-xl shadow-xl z-50 ${
+                      isDarkMode ? 'bg-neutral-800 border border-neutral-700' : 'bg-white border border-stone-200'
+                    }`}>
+                      {/* Mobile devices */}
+                      <div className={`px-3 py-2 text-xs font-semibold uppercase tracking-wider ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                        Mobile
+                      </div>
+                      {devicePresets.filter(d => d.type === 'mobile').map(device => (
+                        <button
+                          key={device.name}
+                          onClick={() => handleDeviceSelect(device)}
+                          className={`w-full flex items-center justify-between px-3 py-2.5 text-sm transition-colors ${
+                            selectedDevice?.name === device.name
+                              ? isDarkMode ? 'bg-blue-600/20 text-blue-400' : 'bg-blue-50 text-blue-600'
+                              : isDarkMode ? 'hover:bg-neutral-700 text-neutral-200' : 'hover:bg-stone-50 text-stone-700'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <Smartphone size={14} />
+                            {device.name}
+                          </span>
+                          <span className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                            {device.width} × {device.height}
+                          </span>
+                        </button>
+                      ))}
+
+                      {/* Tablet devices */}
+                      <div className={`px-3 py-2 text-xs font-semibold uppercase tracking-wider border-t ${isDarkMode ? 'text-neutral-500 border-neutral-700' : 'text-stone-400 border-stone-100'}`}>
+                        Tablet
+                      </div>
+                      {devicePresets.filter(d => d.type === 'tablet').map(device => (
+                        <button
+                          key={device.name}
+                          onClick={() => handleDeviceSelect(device)}
+                          className={`w-full flex items-center justify-between px-3 py-2.5 text-sm transition-colors ${
+                            selectedDevice?.name === device.name
+                              ? isDarkMode ? 'bg-blue-600/20 text-blue-400' : 'bg-blue-50 text-blue-600'
+                              : isDarkMode ? 'hover:bg-neutral-700 text-neutral-200' : 'hover:bg-stone-50 text-stone-700'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <Tablet size={14} />
+                            {device.name}
+                          </span>
+                          <span className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                            {device.width} × {device.height}
+                          </span>
+                        </button>
+                      ))}
+
+                      {/* Custom option */}
+                      <div className={`border-t ${isDarkMode ? 'border-neutral-700' : 'border-stone-100'}`}>
+                        <button
+                          onClick={handleCustomDevice}
+                          className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm transition-colors ${
+                            isCustomDevice
+                              ? isDarkMode ? 'bg-blue-600/20 text-blue-400' : 'bg-blue-50 text-blue-600'
+                              : isDarkMode ? 'hover:bg-neutral-700 text-neutral-200' : 'hover:bg-stone-50 text-stone-700'
+                          }`}
+                        >
+                          <Settings size={14} />
+                          Custom Size
+                        </button>
+                        {isCustomDevice && (
+                          <div className={`flex items-center gap-2 px-3 py-2 ${isDarkMode ? 'bg-neutral-900/50' : 'bg-stone-50'}`}>
+                            <input
+                              type="number"
+                              value={customWidth}
+                              onChange={(e) => setCustomWidth(parseInt(e.target.value) || 375)}
+                              className={`w-20 px-2 py-1 text-sm rounded-lg text-center ${
+                                isDarkMode
+                                  ? 'bg-neutral-700 border-neutral-600 text-neutral-200'
+                                  : 'bg-white border-stone-200 text-stone-700'
+                              } border focus:outline-none focus:ring-2 focus:ring-blue-500/30`}
+                              placeholder="Width"
+                            />
+                            <span className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>×</span>
+                            <input
+                              type="number"
+                              value={customHeight}
+                              onChange={(e) => setCustomHeight(parseInt(e.target.value) || 667)}
+                              className={`w-20 px-2 py-1 text-sm rounded-lg text-center ${
+                                isDarkMode
+                                  ? 'bg-neutral-700 border-neutral-600 text-neutral-200'
+                                  : 'bg-white border-stone-200 text-stone-700'
+                              } border focus:outline-none focus:ring-2 focus:ring-blue-500/30`}
+                              placeholder="Height"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Zoom Selector */}
+                <div className="relative">
+                  <button
+                    onClick={() => { setIsZoomSelectorOpen(!isZoomSelectorOpen); setIsDeviceSelectorOpen(false); }}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-full text-sm font-medium transition-colors ${
+                      isDarkMode
+                        ? 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700'
+                        : 'bg-white hover:bg-stone-50 text-stone-700 border border-stone-200 shadow-sm'
+                    }`}
+                  >
+                    <span>{zoomOptions.find(z => z.value === zoomLevel)?.label}</span>
+                    <ChevronDown size={14} className={`transition-transform ${isZoomSelectorOpen ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {/* Zoom Dropdown */}
+                  {isZoomSelectorOpen && (
+                    <div className={`absolute top-full left-1/2 -translate-x-1/2 mt-2 w-24 rounded-xl shadow-xl z-50 overflow-hidden ${
+                      isDarkMode ? 'bg-neutral-800 border border-neutral-700' : 'bg-white border border-stone-200'
+                    }`}>
+                      {zoomOptions.map(option => (
+                        <button
+                          key={option.value}
+                          onClick={() => { setZoomLevel(option.value); setIsZoomSelectorOpen(false); }}
+                          className={`w-full px-3 py-2 text-sm text-center transition-colors ${
+                            zoomLevel === option.value
+                              ? isDarkMode ? 'bg-blue-600/20 text-blue-400' : 'bg-blue-50 text-blue-600'
+                              : isDarkMode ? 'hover:bg-neutral-700 text-neutral-200' : 'hover:bg-stone-50 text-stone-700'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {isElectron && webviewPreloadPath ? (
-              <webview
-                ref={webviewRef as React.RefObject<HTMLElement>}
-                src={currentUrl || 'about:blank'}
-                preload={`file://${webviewPreloadPath}`}
-                className="h-full transition-all duration-300"
-                style={{
-                  width: viewportWidths[viewportSize] ? `${viewportWidths[viewportSize]}px` : '100%',
-                  maxWidth: '100%'
-                }}
-                // @ts-expect-error - webview is an Electron-specific element
-                allowpopups="true"
-                nodeintegration="true"
-                webpreferences="contextIsolation=no"
-              />
+              /* Wrapper div for proper corner clipping - uses aspect ratio to fit viewport */
+              <div
+                className={`transition-all duration-300 origin-center ${
+                  viewportSize === 'desktop'
+                    ? 'w-full h-full'
+                    : 'rounded-3xl shadow-2xl ring-4 ring-neutral-700 overflow-hidden flex-shrink-0'
+                }`}
+                style={viewportSize === 'desktop' ? undefined : (
+                  zoomLevel === 'fit' ? {
+                    aspectRatio: `${currentWidth} / ${currentHeight}`,
+                    maxWidth: 'calc(100% - 48px)',
+                    maxHeight: 'calc(100% - 80px)',
+                    width: 'auto',
+                    height: '100%'
+                  } : {
+                    width: `${currentWidth}px`,
+                    height: `${currentHeight}px`,
+                    transform: `scale(${parseInt(zoomLevel) / 100})`,
+                    transformOrigin: 'center center'
+                  }
+                )}
+              >
+                <webview
+                  ref={webviewRef as React.RefObject<HTMLElement>}
+                  src={currentUrl || 'about:blank'}
+                  preload={`file://${webviewPreloadPath}`}
+                  className="w-full h-full"
+                  style={viewportSize === 'desktop' ? {
+                    width: '100%'
+                  } : undefined}
+                  // @ts-expect-error - webview is an Electron-specific element
+                  allowpopups="true"
+                  nodeintegration="true"
+                  webpreferences="contextIsolation=no"
+                />
+              </div>
           ) : isElectron ? (
             <div className={`w-full h-full flex items-center justify-center ${isDarkMode ? 'bg-neutral-800' : 'bg-stone-50'}`}>
               <div className={`w-8 h-8 border-2 rounded-full animate-spin ${isDarkMode ? 'border-neutral-600 border-t-neutral-400' : 'border-stone-300 border-t-stone-600'}`}></div>
@@ -1636,7 +1882,7 @@ If you're not sure what the user wants, ask for clarification.
 
         {/* --- Right Pane: Chat --- */}
       {isSidebarOpen && (
-      <div className={`flex flex-col rounded-xl shadow-sm flex-shrink-0 ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`} style={{ width: sidebarWidth }}>
+      <div className={`flex flex-col rounded-xl shadow-sm flex-shrink-0 border ${isDarkMode ? 'bg-neutral-800 border-neutral-700' : 'bg-white border-stone-200'}`} style={{ width: sidebarWidth }}>
 
           {/* Git Header */}
           <div className={`h-12 border-b flex items-center justify-between px-3 flex-shrink-0 ${isDarkMode ? 'border-neutral-700' : 'border-stone-100'}`}>
