@@ -222,6 +222,7 @@ export default function App() {
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  const [previewIntent, setPreviewIntent] = useState<{ type: string; label: string } | null>(null);
 
   // Selection States
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
@@ -900,7 +901,32 @@ export default function App() {
       setFileSearchQuery('');
       setCommandSearchQuery('');
     }
-  }, [loadDirectoryFiles]);
+
+    // Update preview intent as user types (only for meaningful input)
+    if (value.trim().length >= 3 && !value.startsWith('@') && !value.startsWith('/')) {
+      const { intent } = processCodingMessage(value);
+      const intentLabels: Record<string, string> = {
+        code_edit: '✏️ Edit Code',
+        code_create: '➕ Create File',
+        code_delete: '🗑️ Delete',
+        code_explain: '💡 Explain',
+        code_refactor: '🔄 Refactor',
+        file_operation: '📁 File Op',
+        question: '❓ Question',
+        ui_inspect: '🔍 Inspect UI',
+        ui_modify: '🎨 Modify UI',
+        debug: '🐛 Debug',
+        unknown: '',
+      };
+      if (intent.type !== 'unknown' && intent.confidence > 0.2) {
+        setPreviewIntent({ type: intent.type, label: intentLabels[intent.type] });
+      } else {
+        setPreviewIntent(null);
+      }
+    } else {
+      setPreviewIntent(null);
+    }
+  }, [loadDirectoryFiles, processCodingMessage]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -2780,6 +2806,19 @@ If you're not sure what the user wants, ask for clarification.
                                   </button>
                               </div>
                           )}
+                      </div>
+                  )}
+
+                  {/* Intent Preview Chip */}
+                  {previewIntent && previewIntent.label && (
+                      <div className={`px-3 pt-2`}>
+                          <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium ${
+                            isDarkMode
+                              ? 'bg-gradient-to-r from-violet-500/20 to-purple-500/20 text-violet-300 border border-violet-500/30'
+                              : 'bg-gradient-to-r from-violet-50 to-purple-50 text-violet-700 border border-violet-200'
+                          }`}>
+                              <span>{previewIntent.label}</span>
+                          </div>
                       </div>
                   )}
 
