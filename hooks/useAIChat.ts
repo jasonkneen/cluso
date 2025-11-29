@@ -579,16 +579,30 @@ export function useAIChat(options: UseAIChatOptions = {}) {
       }
 
       // Generate text with potential tool calls
+      console.log('[AI SDK] Calling generateText with tools:', tools ? Object.keys(tools) : 'none')
       const result = await generateText(generateOptions)
+      console.log('[AI SDK] generateText result:', {
+        text: result.text?.substring(0, 100),
+        stepsCount: result.steps?.length || 0,
+        finishReason: result.finishReason,
+      })
 
       // Process tool calls if present
       const toolCalls: ToolCallPart[] = []
       const toolResults: ToolResultPart[] = []
 
       if (result.steps) {
-        for (const step of result.steps) {
+        console.log('[AI SDK] Processing', result.steps.length, 'steps')
+        for (let stepIdx = 0; stepIdx < result.steps.length; stepIdx++) {
+          const step = result.steps[stepIdx]
+          console.log(`[AI SDK] Step ${stepIdx + 1}:`, {
+            toolCallsCount: step.toolCalls?.length || 0,
+            toolResultsCount: step.toolResults?.length || 0,
+            text: step.text?.substring(0, 50),
+          })
           if (step.toolCalls) {
             for (const tc of step.toolCalls) {
+              console.log(`[AI SDK] Tool call: ${tc.toolName}`, tc.args)
               const toolCall: ToolCallPart = {
                 type: 'tool-call',
                 toolCallId: tc.toolCallId,
@@ -601,6 +615,7 @@ export function useAIChat(options: UseAIChatOptions = {}) {
           }
           if (step.toolResults) {
             for (const tr of step.toolResults) {
+              console.log(`[AI SDK] Tool result: ${tr.toolName}`, typeof tr.result === 'object' ? 'object' : tr.result)
               const toolResult: ToolResultPart = {
                 type: 'tool-result',
                 toolCallId: tr.toolCallId,
