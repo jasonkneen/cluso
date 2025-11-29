@@ -927,6 +927,8 @@ export default function App() {
 
   // Track cleanup functions for webview event handlers per tab
   const webviewCleanups = useRef<Map<string, () => void>>(new Map());
+  // Store stable ref callbacks per tab to prevent re-creation on every render
+  const webviewRefCallbacks = useRef<Map<string, (element: HTMLElement | null) => void>>(new Map());
 
   // Setup webview event handlers for a specific tab
   const setupWebviewHandlers = useCallback((tabId: string, webview: WebviewElement) => {
