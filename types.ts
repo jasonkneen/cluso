@@ -16,6 +16,18 @@ export interface Message {
   selectedElement?: SelectedElement;
 }
 
+export interface ComponentSource {
+  name: string;
+  file: string;
+  line: number;
+  column: number;
+}
+
+export interface ElementSourceInfo {
+  sources: ComponentSource[];
+  summary: string; // e.g., "App.tsx (45-120)"
+}
+
 export interface SelectedElement {
   tagName: string;
   text?: string;
@@ -32,6 +44,7 @@ export interface SelectedElement {
     backgroundColor?: string;
     fontSize?: string;
   };
+  sourceLocation?: ElementSourceInfo | null;
   x?: number;
   y?: number;
   rect?: {

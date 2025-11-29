@@ -1,0 +1,1 @@
+Make this page fully responsive for mobile, tablet, and desktop. Add media queries and adjust layouts to work well on all screen sizes.

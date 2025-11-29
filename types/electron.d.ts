@@ -23,8 +23,23 @@ interface ElectronGitAPI {
   stashPop: () => Promise<GitResult>
 }
 
+interface DirectoryEntry {
+  name: string
+  path: string
+  isDirectory: boolean
+}
+
+interface ElectronFilesAPI {
+  readFile: (path: string) => Promise<GitResult>
+  selectFile: (path: string) => Promise<GitResult<{path: string; content: string}>>
+  listDirectory: (path?: string) => Promise<GitResult<DirectoryEntry[]>>
+  listPrompts: () => Promise<GitResult<string[]>>
+  readPrompt: (name: string) => Promise<GitResult>
+}
+
 interface ElectronAPI {
   git: ElectronGitAPI
+  files: ElectronFilesAPI
   getWebviewPreloadPath: () => Promise<string>
   isElectron: boolean
 }

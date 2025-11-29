@@ -34,6 +34,9 @@ import {
   Zap,
   Sparkles,
   Rocket,
+  MessageCircle,
+  Folder,
+  File,
 } from 'lucide-react';
 
 // --- Constants ---
@@ -78,6 +81,8 @@ export default function App() {
   // Selection States
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
   const [screenshotElement, setScreenshotElement] = useState<SelectedElement | null>(null);
+  const [capturedScreenshot, setCapturedScreenshot] = useState<string | null>(null);
+  const [showScreenshotPreview, setShowScreenshotPreview] = useState(false);
 
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -91,6 +96,7 @@ export default function App() {
   const [attachLogs, setAttachLogs] = useState(false);
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Model State
   const [selectedModel, setSelectedModel] = useState(MODELS[0]);
@@ -98,6 +104,21 @@ export default function App() {
 
   // Popup Input State
   const [popupInput, setPopupInput] = useState('');
+  const [showElementChat, setShowElementChat] = useState(false);
+
+  // File Selection State (@ commands)
+  const [selectedFiles, setSelectedFiles] = useState<Array<{path: string; content: string}>>([]);
+  const [fileSearchQuery, setFileSearchQuery] = useState('');
+  const [showFileAutocomplete, setShowFileAutocomplete] = useState(false);
+  const [directoryFiles, setDirectoryFiles] = useState<Array<{name: string; path: string; isDirectory: boolean}>>([]);
+  const [currentDirectory, setCurrentDirectory] = useState<string>('');
+  const [directoryStack, setDirectoryStack] = useState<string[]>([]);
+  const [autocompleteIndex, setAutocompleteIndex] = useState(0);
+
+  // Slash Command State (/ commands)
+  const [availableCommands, setAvailableCommands] = useState<Array<{name: string; prompt: string}>>([]);
+  const [commandSearchQuery, setCommandSearchQuery] = useState('');
+  const [showCommandAutocomplete, setShowCommandAutocomplete] = useState(false);
 
   // Git State
   const git = useGit();
@@ -131,6 +152,14 @@ export default function App() {
 
   // Webview ready state (for sending messages)
   const [isWebviewReady, setIsWebviewReady] = useState(false);
+
+  // AI Element Selection State (pending confirmation)
+  const [aiSelectedElement, setAiSelectedElement] = useState<{
+    selector: string;
+    reasoning: string;
+    count?: number;
+    elements?: SelectedElement[];
+  } | null>(null);
 
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -169,44 +198,32 @@ export default function App() {
     setStashMessage('');
   }, [git]);
 
-  // Approve pending code change - execute in webview
+  // Approve pending code change - already applied, just confirm
   const handleApproveChange = useCallback(() => {
-    if (!pendingChange || !webviewRef.current || !isWebviewReady) return;
-
-    console.log('[Exec] Approved - Running code in webview:', pendingChange.code);
-    webviewRef.current.executeJavaScript(pendingChange.code)
-      .then((result: unknown) => {
-        console.log('[Exec] Result:', result);
-        setMessages(prev => [...prev, {
-          id: Date.now().toString(),
-          role: 'system',
-          content: 'Changes applied successfully.',
-          timestamp: new Date()
-        }]);
-      })
-      .catch((err: Error) => {
-        console.error('[Exec] Error:', err);
-        setMessages(prev => [...prev, {
-          id: Date.now().toString(),
-          role: 'system',
-          content: `Error applying changes: ${err.message}`,
-          timestamp: new Date()
-        }]);
-      });
-
-    setPendingChange(null);
-  }, [pendingChange, isWebviewReady]);
-
-  // Reject pending code change
-  const handleRejectChange = useCallback(() => {
+    console.log('[Exec] Changes confirmed');
     setPendingChange(null);
     setMessages(prev => [...prev, {
       id: Date.now().toString(),
       role: 'system',
-      content: 'Changes rejected.',
+      content: 'Changes confirmed.',
       timestamp: new Date()
     }]);
   }, []);
+
+  // Reject pending code change - undo and clear
+  const handleRejectChange = useCallback(() => {
+    if (pendingChange?.undoCode && webviewRef.current) {
+      console.log('[Exec] Rejecting - running undo code');
+      webviewRef.current.executeJavaScript(pendingChange.undoCode);
+    }
+    setPendingChange(null);
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      role: 'system',
+      content: 'Changes discarded.',
+      timestamp: new Date()
+    }]);
+  }, [pendingChange]);
 
   // Browser navigation functions - only use loadURL, don't change src attribute
   const navigateTo = useCallback((url: string) => {
@@ -250,6 +267,59 @@ export default function App() {
     }
   }, [isElectron]);
 
+  // Handle AI element selection request
+  const handleAiElementSelect = useCallback((selector: string, reasoning?: string) => {
+    console.log('[AI] Requesting element selection:', selector, reasoning);
+    if (webviewRef.current && isWebviewReady) {
+      // Send IPC message to webview to highlight the element
+      webviewRef.current.send('select-element-by-selector', selector);
+
+      // Store pending selection (we'll get confirmation via message)
+      setAiSelectedElement({ selector, reasoning: reasoning || '' });
+    }
+  }, [isWebviewReady]);
+
+  // Handle AI code execution
+  const handleExecuteCode = useCallback((code: string, description: string) => {
+    console.log('[AI] Executing code:', description);
+    if (webviewRef.current && isWebviewReady) {
+      webviewRef.current.executeJavaScript(code)
+        .then(() => {
+          console.log('[AI] Code executed successfully');
+          setMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            role: 'system',
+            content: `✓ ${description}`,
+            timestamp: new Date()
+          }]);
+        })
+        .catch((err: Error) => {
+          console.error('[AI] Code execution error:', err);
+          setMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            role: 'system',
+            content: `✗ Error: ${err.message}`,
+            timestamp: new Date()
+          }]);
+        });
+    }
+  }, [isWebviewReady]);
+
+  // Handle voice confirmation - can optionally specify which numbered element (1-indexed)
+  const handleConfirmSelection = useCallback((confirmed: boolean, elementNumber?: number) => {
+    console.log('[AI] Voice confirmation:', confirmed, 'element number:', elementNumber);
+    if (confirmed && aiSelectedElement?.elements && aiSelectedElement.elements.length > 0) {
+      // If elementNumber specified (1-indexed), use that, otherwise use first
+      const index = elementNumber ? Math.min(Math.max(elementNumber - 1, 0), aiSelectedElement.elements.length - 1) : 0;
+      setSelectedElement(aiSelectedElement.elements[index]);
+      webviewRef.current?.send('clear-selection');
+      setAiSelectedElement(null);
+    } else {
+      webviewRef.current?.send('clear-selection');
+      setAiSelectedElement(null);
+    }
+  }, [aiSelectedElement]);
+
   const {
     streamState,
     connect,
@@ -260,8 +330,143 @@ export default function App() {
   } = useLiveGemini({
     videoRef,
     canvasRef,
-    onCodeUpdate: () => {} // No longer used for code updates
+    onCodeUpdate: () => {}, // No longer used for code updates
+    onElementSelect: handleAiElementSelect,
+    onExecuteCode: handleExecuteCode,
+    onConfirmSelection: handleConfirmSelection,
+    selectedElement: selectedElement
   });
+
+  // Load available prompts and directory files on mount
+  useEffect(() => {
+    if (isElectron && window.electronAPI?.files) {
+      // Load prompts
+      window.electronAPI.files.listPrompts().then(result => {
+        if (result.success && result.data) {
+          setAvailableCommands(result.data.map(name => ({ name, prompt: '' })));
+        }
+      });
+      // Load directory files
+      window.electronAPI.files.listDirectory().then(result => {
+        if (result.success && result.data) {
+          console.log('[Files] Loaded directory:', result.data.length, 'files');
+          setDirectoryFiles(result.data);
+        }
+      });
+    }
+  }, [isElectron]);
+
+  // Load directory listing for @ command
+  const loadDirectoryFiles = useCallback(async (dirPath?: string) => {
+    if (!isElectron || !window.electronAPI?.files) return;
+    const result = await window.electronAPI.files.listDirectory(dirPath);
+    if (result.success && result.data) {
+      setDirectoryFiles(result.data);
+      if (dirPath) {
+        setCurrentDirectory(dirPath);
+      }
+    }
+  }, [isElectron]);
+
+  // Navigate into a subdirectory
+  const navigateToDirectory = useCallback((dirPath: string) => {
+    setDirectoryStack(prev => [...prev, currentDirectory]);
+    loadDirectoryFiles(dirPath);
+    setFileSearchQuery('');
+    setAutocompleteIndex(0);
+  }, [currentDirectory, loadDirectoryFiles]);
+
+  // Navigate back to parent directory
+  const navigateBack = useCallback(() => {
+    const newStack = [...directoryStack];
+    const parentDir = newStack.pop();
+    setDirectoryStack(newStack);
+    loadDirectoryFiles(parentDir || undefined);
+    setFileSearchQuery('');
+    setAutocompleteIndex(0);
+  }, [directoryStack, loadDirectoryFiles]);
+
+  // Handle @ command - select a file from the list
+  const handleFileSelect = useCallback(async (filePath: string) => {
+    if (!isElectron || !window.electronAPI?.files) return;
+
+    const result = await window.electronAPI.files.selectFile(filePath);
+    if (result.success && result.data) {
+      const { path, content } = result.data;
+      setSelectedFiles(prev => [...prev, { path, content }]);
+      setInput(''); // Clear @ command
+      setShowFileAutocomplete(false);
+      setFileSearchQuery('');
+      setAutocompleteIndex(0);
+    }
+  }, [isElectron]);
+
+  // Handle / command - execute prompt
+  const handleCommandSelect = useCallback(async (commandName: string) => {
+    if (!isElectron || !window.electronAPI?.files) return;
+
+    const result = await window.electronAPI.files.readPrompt(commandName);
+    if (result.success && result.data) {
+      setInput(result.data); // Replace input with prompt content
+      setShowCommandAutocomplete(false);
+      setCommandSearchQuery('');
+      setAutocompleteIndex(0);
+    }
+  }, [isElectron]);
+
+  // Get filtered files based on search query
+  const filteredFiles = directoryFiles.filter(f =>
+    !f.name.startsWith('.') &&
+    f.name.toLowerCase().includes(fileSearchQuery.toLowerCase())
+  );
+
+  // Get filtered commands based on search query
+  const filteredCommands = availableCommands.filter(cmd =>
+    cmd.name.toLowerCase().includes(commandSearchQuery.toLowerCase())
+  );
+
+  // Detect @ and / commands in input
+  const handleInputChange = useCallback((value: string) => {
+    console.log('[Input] Changed:', value);
+    setInput(value);
+    setAutocompleteIndex(0);
+
+    // Detect @ command for file selection
+    if (value.startsWith('@')) {
+      const query = value.substring(1);
+      console.log('[Input] @ detected, query:', query);
+      setFileSearchQuery(query);
+      setShowFileAutocomplete(true);
+      setShowCommandAutocomplete(false);
+      // Load files on first @
+      if (value === '@') {
+        loadDirectoryFiles();
+      }
+    }
+    // Detect / command for prompt selection
+    else if (value.startsWith('/')) {
+      const query = value.substring(1);
+      console.log('[Input] / detected, query:', query);
+      setCommandSearchQuery(query);
+      setShowCommandAutocomplete(true);
+      setShowFileAutocomplete(false);
+    }
+    else {
+      setShowFileAutocomplete(false);
+      setShowCommandAutocomplete(false);
+      setFileSearchQuery('');
+      setCommandSearchQuery('');
+    }
+  }, [loadDirectoryFiles]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = Math.min(textarea.scrollHeight, 144) + 'px';
+    }
+  }, [input]);
 
   // Handle Screen Sharing logic
   useEffect(() => {
@@ -339,13 +544,53 @@ export default function App() {
             rect: data.rect as SelectedElement['rect']
           });
         } else if (channel === 'screenshot-select') {
-          const data = args[0] as { element: SelectedElement };
+          const data = args[0] as { element: SelectedElement; rect: { top: number; left: number; width: number; height: number } };
           setScreenshotElement(data.element);
           setIsScreenshotActive(false);
+
+          // Capture the screenshot of the selected element
+          if (webview && data.rect) {
+            webview.capturePage({
+              x: Math.floor(data.rect.left),
+              y: Math.floor(data.rect.top),
+              width: Math.ceil(data.rect.width),
+              height: Math.ceil(data.rect.height)
+            }).then((image: Electron.NativeImage) => {
+              setCapturedScreenshot(image.toDataURL());
+            }).catch((err: Error) => {
+              console.error('Failed to capture screenshot:', err);
+            });
+          }
         } else if (channel === 'console-log') {
           const data = args[0] as { level: string; message: string };
           const logEntry = `[${data.level.toUpperCase()}] ${data.message}`;
           setLogs(prev => [...prev.slice(-49), logEntry]);
+        } else if (channel === 'ai-selection-confirmed') {
+          const data = args[0] as {
+            selector: string;
+            count: number;
+            elements: Array<{ element: SelectedElement; rect: unknown }>;
+          };
+          console.log('[AI] Element selection confirmed:', data);
+          setAiSelectedElement(prev => ({
+            selector: data.selector,
+            reasoning: prev?.reasoning || '',
+            count: data.count,
+            elements: data.elements.map(item => ({
+              ...item.element,
+              rect: item.rect as SelectedElement['rect']
+            }))
+          }));
+        } else if (channel === 'ai-selection-failed') {
+          const data = args[0] as { selector: string; error: string };
+          console.error('[AI] Element selection failed:', data);
+          setAiSelectedElement(null);
+          setMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            role: 'system',
+            content: `Could not find element: ${data.selector}. ${data.error}`,
+            timestamp: new Date()
+          }]);
         }
       };
 
@@ -393,8 +638,16 @@ export default function App() {
 
     if (!isInspectorActive) {
       setSelectedElement(null);
+      setShowElementChat(false);
     }
   }, [isInspectorActive, isScreenshotActive, isElectron, isWebviewReady]);
+
+  // Reset element chat when sidebar opens
+  useEffect(() => {
+    if (isSidebarOpen) {
+      setShowElementChat(false);
+    }
+  }, [isSidebarOpen]);
 
   // Scroll to bottom of chat
   useEffect(() => {
@@ -450,12 +703,24 @@ ${selectedElement.rect ? `- Dimensions: ${Math.round(selectedElement.rect.width)
 </selected_element>`;
     }
 
+    // Build file context from selected files
+    let fileContext = '';
+    if (selectedFiles.length > 0) {
+      fileContext = `\n\nAttached Files:\n${selectedFiles.map(f => `
+File: ${f.path}
+\`\`\`
+${f.content}
+\`\`\`
+`).join('\n')}`;
+    }
+
     let fullPromptText = `
 Current Page: ${browserUrl}
 ${pageTitle ? `Page Title: ${pageTitle}` : ''}
 
 User Request: ${userMessage.content}
 ${elementContext}
+${fileContext}
 ${screenshotElement ? `Context: User selected element for visual reference: <${screenshotElement.tagName}>` : ''}
     `;
 
@@ -576,15 +841,40 @@ Be concise. Confirm what you changed.
     }
   };
 
-  // Calculate popup position for webview
+  // Calculate popup position for webview - bottom-right of element with smart edge detection
   const getPopupStyle = () => {
-    if (!selectedElement || !selectedElement.x || !selectedElement.y || !webviewRef.current) return { display: 'none' };
+    if (!selectedElement || !selectedElement.rect || !webviewRef.current) return { display: 'none' };
+
     const webviewRect = webviewRef.current.getBoundingClientRect();
-    const top = webviewRect.top + selectedElement.y + 10;
-    const left = webviewRect.left + selectedElement.x;
-    const clampedLeft = Math.min(Math.max(10, left), window.innerWidth - 320);
-    const clampedTop = Math.min(Math.max(10, top), window.innerHeight - 150);
-    return { top: `${clampedTop}px`, left: `${clampedLeft}px` };
+    const buttonSize = 48; // Chat button size (matching w-12 h-12)
+    const offset = 4; // Distance from element corner
+
+    // Element position relative to viewport
+    const elementRect = selectedElement.rect;
+    const elementBottom = webviewRect.top + elementRect.top + elementRect.height;
+    const elementRight = webviewRect.left + elementRect.left + elementRect.width;
+
+    // Default: bottom-right
+    let top = elementBottom + offset;
+    let left = elementRight + offset;
+
+    // Check if off-screen right
+    if (left + buttonSize > window.innerWidth - 10) {
+      // Position to the left instead
+      left = webviewRect.left + elementRect.left - buttonSize - offset;
+    }
+
+    // Check if off-screen bottom
+    if (top + buttonSize > window.innerHeight - 10) {
+      // Position above instead
+      top = webviewRect.top + elementRect.top - buttonSize - offset;
+    }
+
+    // Final clamp to ensure always visible
+    left = Math.max(10, Math.min(left, window.innerWidth - buttonSize - 10));
+    top = Math.max(10, Math.min(top, window.innerHeight - buttonSize - 10));
+
+    return { top: `${top}px`, left: `${left}px` };
   };
 
   // Webview preload path state
@@ -749,71 +1039,105 @@ Be concise. Confirm what you changed.
 
                     <button
                         onClick={streamState.isConnected ? disconnect : connect}
-                        className={`flex items-center gap-2 px-4 h-10 rounded-full font-medium transition-all ${streamState.isConnected ? 'bg-red-50 text-red-600 ring-1 ring-red-100' : (isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-800')}`}
+                        className={`flex items-center justify-center w-10 h-10 rounded-full font-medium transition-all ${streamState.isConnected ? 'bg-red-50 text-red-600 ring-1 ring-red-100' : (isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-800')}`}
+                        title={streamState.isConnected ? 'End voice session' : 'Start voice session'}
                     >
                         {streamState.isConnected ? (
-                            <>
-                                <span className="relative flex h-2 w-2">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                                </span>
-                                <span>End</span>
-                            </>
+                            <span className="relative flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                            </span>
                         ) : (
-                            <>
-                                <Mic size={16} />
-                                <span>Speak</span>
-                            </>
+                            <Mic size={18} />
                         )}
                     </button>
                 </div>
             )}
 
-            {/* Popup Chat when element selected and sidebar collapsed */}
+            {/* Popup Chat Button/Input when element selected and sidebar collapsed */}
             {!isSidebarOpen && selectedElement && (
                 <div
-                    className={`absolute z-50 rounded-xl shadow-2xl w-80 p-3 ${isDarkMode ? 'bg-neutral-800 border border-neutral-700' : 'bg-white border border-stone-200'}`}
+                    className="absolute z-50 group"
                     style={getPopupStyle()}
+                    onMouseLeave={() => setShowElementChat(false)}
                 >
-                    <div className={`flex items-center gap-2 mb-2 text-xs ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
-                        <div className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-mono font-medium">
-                            {selectedElement.tagName}
-                        </div>
-                        <span className="truncate max-w-[150px]">{selectedElement.text}</span>
-                        <div className="flex-1"></div>
-                        <button onClick={() => setSelectedElement(null)} className={isDarkMode ? 'hover:text-neutral-200' : 'hover:text-stone-900'}>
-                            <X size={14} />
-                        </button>
-                    </div>
-
-                    <form
-                        onSubmit={(e) => {
-                            e.preventDefault();
-                            processPrompt(popupInput);
-                            setPopupInput('');
+                    {/* Always-visible chat icon bubble - semi-transparent, fully rounded */}
+                    <button
+                        onClick={() => setShowElementChat(!showElementChat)}
+                        className="w-12 h-12 rounded-full shadow-2xl flex items-center justify-center transition-all text-white"
+                        style={{
+                            background: 'rgba(59, 130, 246, 0.8)',
+                            backdropFilter: 'blur(12px)',
+                            WebkitBackdropFilter: 'blur(12px)',
+                            border: '1px solid rgba(255, 255, 255, 0.3)',
+                            boxShadow: '0 4px 16px rgba(59, 130, 246, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.3) inset'
                         }}
+                        title="Chat about this element (hover to type)"
                     >
-                        <textarea
-                            value={popupInput}
-                            onChange={(e) => setPopupInput(e.target.value)}
-                            placeholder="What would you like to change?"
-                            className={`w-full text-sm p-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none ${isDarkMode ? 'bg-neutral-700 border-neutral-600 text-neutral-100 placeholder-neutral-400' : 'bg-stone-50 border-stone-200'}`}
-                            rows={2}
-                            autoFocus
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
+                        <MessageCircle size={20} />
+                    </button>
+
+                    {/* Hidden chat controls - show on hover */}
+                    {showElementChat && (
+                        <div
+                            className={`absolute top-0 left-14 rounded-3xl shadow-2xl w-80 p-3 transition-all ${isDarkMode ? 'bg-neutral-800 border border-neutral-700' : 'bg-white border border-stone-200'}`}
+                        >
+                            <div className={`flex flex-col gap-2 mb-2`}>
+                                <div className={`flex items-center gap-2 text-xs ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                                    <div className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-mono font-medium">
+                                        {selectedElement.tagName}
+                                    </div>
+                                    <span className="truncate max-w-[150px]">{selectedElement.text}</span>
+                                    <div className="flex-1"></div>
+                                    <button onClick={() => {
+                                        setShowElementChat(false);
+                                        setSelectedElement(null);
+                                    }} className={isDarkMode ? 'hover:text-neutral-200' : 'hover:text-stone-900'}>
+                                        <X size={14} />
+                                    </button>
+                                </div>
+                                {selectedElement.sourceLocation && (
+                                    <div className={`text-xs font-mono ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                                        {selectedElement.sourceLocation.summary}
+                                    </div>
+                                )}
+                            </div>
+
+                            <form
+                                onSubmit={(e) => {
                                     e.preventDefault();
                                     processPrompt(popupInput);
                                     setPopupInput('');
-                                }
-                            }}
-                        />
-                        <div className="flex justify-end mt-2">
-                            <button type="submit" disabled={!popupInput.trim()} className={`w-7 h-7 rounded-full flex items-center justify-center disabled:opacity-50 ${isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-700'}`}>
-                                <ArrowUp size={14} />
-                            </button>
+                                    setShowElementChat(false);
+                                }}
+                            >
+                                <textarea
+                                    value={popupInput}
+                                    onChange={(e) => setPopupInput(e.target.value)}
+                                    placeholder="What would you like to change?"
+                                    className={`w-full text-sm p-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none ${isDarkMode ? 'bg-neutral-700 border-neutral-600 text-neutral-100 placeholder-neutral-400' : 'bg-stone-50 border-stone-200'}`}
+                                    rows={2}
+                                    autoFocus
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            processPrompt(popupInput);
+                                            setPopupInput('');
+                                            setShowElementChat(false);
+                                        }
+                                        if (e.key === 'Escape') {
+                                            setShowElementChat(false);
+                                        }
+                                    }}
+                                />
+                                <div className="flex justify-end mt-2">
+                                    <button type="submit" disabled={!popupInput.trim()} className={`w-7 h-7 rounded-full flex items-center justify-center disabled:opacity-50 ${isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-700'}`}>
+                                        <ArrowUp size={14} />
+                                    </button>
+                                </div>
+                            </form>
                         </div>
-                    </form>
+                    )}
                 </div>
             )}
         </div>
@@ -903,7 +1227,7 @@ Be concise. Confirm what you changed.
                       value={commitMessage}
                       onChange={(e) => setCommitMessage(e.target.value)}
                       placeholder="Message (⌘⏎ to commit)"
-                      className={`w-full text-xs px-2 py-1 rounded focus:outline-none focus:ring-1 ${isDarkMode ? 'bg-neutral-700 border border-neutral-600 text-neutral-200 placeholder-neutral-500 focus:ring-neutral-500' : 'bg-stone-50 border border-stone-200 text-stone-600 placeholder-stone-400 focus:ring-stone-300'}`}
+                      className={`w-full text-xs px-3 py-1.5 rounded-3xl focus:outline-none ${isDarkMode ? 'bg-neutral-800/60 text-neutral-300 placeholder-neutral-600 focus:bg-neutral-800' : 'bg-stone-50 border border-stone-200 text-stone-600 placeholder-stone-400 focus:ring-1 focus:ring-stone-300'}`}
                       onKeyDown={async (e) => {
                           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && commitMessage.trim()) {
                               setGitLoading('commit');
@@ -1026,7 +1350,10 @@ Be concise. Confirm what you changed.
                                   <Camera size={12} />
                                   <span className="font-medium">{screenshotElement.tagName.toLowerCase()}</span>
                                   <button
-                                      onClick={() => setScreenshotElement(null)}
+                                      onClick={() => {
+                                          setScreenshotElement(null);
+                                          setCapturedScreenshot(null);
+                                      }}
                                       className="ml-0.5 hover:text-purple-900"
                                   >
                                       <X size={12} />
@@ -1036,19 +1363,170 @@ Be concise. Confirm what you changed.
                       </div>
                   )}
 
-                  <textarea
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
-                      onKeyDown={(e) => {
-                          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                              e.preventDefault();
-                              processPrompt(input);
-                          }
-                      }}
-                      placeholder="Plan, @ for context, / for commands"
-                      className={`w-full bg-transparent px-4 py-3 text-sm resize-none focus:outline-none min-h-[56px] ${isDarkMode ? 'text-neutral-100 placeholder-neutral-400' : ''}`}
-                      rows={2}
-                  />
+                  {/* File Chips */}
+                  {selectedFiles.length > 0 && (
+                      <div className={`px-3 pt-2 flex flex-wrap gap-2`}>
+                          {selectedFiles.map((file, idx) => (
+                              <div key={idx} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs ${isDarkMode ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
+                                  <Code2 size={12} />
+                                  <span className="font-mono max-w-[120px] truncate">{file.path.split('/').pop()}</span>
+                                  <button
+                                      onClick={() => setSelectedFiles(prev => prev.filter((_, i) => i !== idx))}
+                                      className="hover:opacity-70"
+                                  >
+                                      <X size={12} />
+                                  </button>
+                              </div>
+                          ))}
+                      </div>
+                  )}
+
+                  <div className="relative">
+                      <textarea
+                          ref={textareaRef}
+                          value={input}
+                          onChange={(e) => handleInputChange(e.target.value)}
+                          style={{ overflowY: 'auto' }}
+                          onKeyDown={(e) => {
+                              // Handle autocomplete navigation
+                              if (showFileAutocomplete && filteredFiles.length > 0) {
+                                  const maxIndex = Math.min(filteredFiles.length - 1, 5); // 6 items max
+                                  if (e.key === 'ArrowDown') {
+                                      e.preventDefault();
+                                      setAutocompleteIndex(prev => Math.min(prev + 1, maxIndex));
+                                  } else if (e.key === 'ArrowUp') {
+                                      e.preventDefault();
+                                      setAutocompleteIndex(prev => Math.max(prev - 1, 0));
+                                  } else if (e.key === 'Tab' || e.key === 'Enter') {
+                                      e.preventDefault();
+                                      const selected = filteredFiles[autocompleteIndex];
+                                      if (selected) {
+                                          if (selected.isDirectory) {
+                                              navigateToDirectory(selected.path);
+                                          } else {
+                                              handleFileSelect(selected.path);
+                                          }
+                                      }
+                                  } else if (e.key === 'Backspace' && directoryStack.length > 0 && fileSearchQuery === '') {
+                                      e.preventDefault();
+                                      navigateBack();
+                                  } else if (e.key === 'Escape') {
+                                      setShowFileAutocomplete(false);
+                                      setFileSearchQuery('');
+                                      setDirectoryStack([]);
+                                      setCurrentDirectory('');
+                                      loadDirectoryFiles();
+                                      setInput('');
+                                  }
+                                  return;
+                              }
+
+                              if (showCommandAutocomplete && filteredCommands.length > 0) {
+                                  const maxIndex = Math.min(filteredCommands.length - 1, 5); // 6 items max
+                                  if (e.key === 'ArrowDown') {
+                                      e.preventDefault();
+                                      setAutocompleteIndex(prev => Math.min(prev + 1, maxIndex));
+                                  } else if (e.key === 'ArrowUp') {
+                                      e.preventDefault();
+                                      setAutocompleteIndex(prev => Math.max(prev - 1, 0));
+                                  } else if (e.key === 'Tab' || e.key === 'Enter') {
+                                      e.preventDefault();
+                                      const selected = filteredCommands[autocompleteIndex];
+                                      if (selected) {
+                                          handleCommandSelect(selected.name);
+                                      }
+                                  } else if (e.key === 'Escape') {
+                                      setShowCommandAutocomplete(false);
+                                      setCommandSearchQuery('');
+                                      setInput('');
+                                  }
+                                  return;
+                              }
+
+                              // Normal input handling
+                              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                                  e.preventDefault();
+                                  processPrompt(input);
+                                  setSelectedFiles([]);
+                              }
+                              if (e.key === 'Escape') {
+                                  setShowFileAutocomplete(false);
+                                  setShowCommandAutocomplete(false);
+                              }
+                          }}
+                          placeholder="Plan, @ for context, / for commands"
+                          className={`w-full bg-transparent px-4 py-3 text-sm resize-none focus:outline-none min-h-[56px] ${isDarkMode ? 'text-neutral-100 placeholder-neutral-400' : ''}`}
+                          rows={2}
+                      />
+
+                      {/* Autocomplete for @ (files) */}
+                      {showFileAutocomplete && isElectron && (
+                          <div className={`absolute bottom-full left-0 mb-2 w-80 rounded-xl shadow-xl py-1 z-[100] max-h-[264px] overflow-y-auto ${isDarkMode ? 'bg-neutral-700 border border-neutral-600' : 'bg-white border border-stone-200'}`}>
+                              {/* Back button when in subdirectory */}
+                              {directoryStack.length > 0 && (
+                                  <button
+                                      onClick={navigateBack}
+                                      className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 border-b ${isDarkMode ? 'hover:bg-neutral-600 text-neutral-300 border-neutral-600' : 'hover:bg-stone-50 text-stone-600 border-stone-100'}`}
+                                  >
+                                      <ChevronLeft size={14} />
+                                      <span>..</span>
+                                      <span className={`text-xs truncate ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                                          {currentDirectory.split('/').pop()}
+                                      </span>
+                                  </button>
+                              )}
+                              {filteredFiles.length === 0 ? (
+                                  <div className={`px-3 py-2 text-sm ${isDarkMode ? 'text-neutral-400' : 'text-stone-400'}`}>
+                                      {directoryFiles.length === 0 ? 'Loading...' : 'No matching files'}
+                                  </div>
+                              ) : (
+                                  filteredFiles.slice(0, 6).map((file, idx) => (
+                                      <button
+                                          key={file.path}
+                                          onClick={() => {
+                                              if (file.isDirectory) {
+                                                  navigateToDirectory(file.path);
+                                              } else {
+                                                  handleFileSelect(file.path);
+                                              }
+                                          }}
+                                          className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 ${idx === autocompleteIndex ? (isDarkMode ? 'bg-neutral-600' : 'bg-stone-100') : ''} ${isDarkMode ? 'hover:bg-neutral-600 text-neutral-200' : 'hover:bg-stone-50'}`}
+                                      >
+                                          {file.isDirectory ? (
+                                              <Folder size={14} className={isDarkMode ? 'text-yellow-400' : 'text-yellow-600'} />
+                                          ) : (
+                                              <File size={14} className={isDarkMode ? 'text-neutral-400' : 'text-stone-400'} />
+                                          )}
+                                          <span className={`truncate ${file.isDirectory ? 'font-medium' : ''}`}>{file.name}</span>
+                                          {file.isDirectory && <ChevronRight size={12} className={isDarkMode ? 'text-neutral-500 ml-auto' : 'text-stone-400 ml-auto'} />}
+                                      </button>
+                                  ))
+                              )}
+                          </div>
+                      )}
+
+                      {/* Autocomplete for / (commands) */}
+                      {showCommandAutocomplete && (
+                          <div className={`absolute bottom-full left-0 mb-2 w-64 rounded-xl shadow-xl py-1 z-[100] max-h-[264px] overflow-y-auto ${isDarkMode ? 'bg-neutral-700 border border-neutral-600' : 'bg-white border border-stone-200'}`}>
+                              {filteredCommands.length === 0 ? (
+                                  <div className={`px-3 py-2 text-sm ${isDarkMode ? 'text-neutral-400' : 'text-stone-400'}`}>
+                                      {availableCommands.length === 0 ? 'Loading...' : 'No matching commands'}
+                                  </div>
+                              ) : (
+                                  filteredCommands.slice(0, 6).map((cmd, idx) => (
+                                      <button
+                                          key={cmd.name}
+                                          onClick={() => handleCommandSelect(cmd.name)}
+                                          className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 ${idx === autocompleteIndex ? (isDarkMode ? 'bg-neutral-600' : 'bg-stone-100') : ''} ${isDarkMode ? 'hover:bg-neutral-600 text-neutral-200' : 'hover:bg-stone-50'}`}
+                                      >
+                                          <Terminal size={14} />
+                                          /{cmd.name}
+                                      </button>
+                                  ))
+                              )}
+                          </div>
+                      )}
+                  </div>
 
                   {/* Input Toolbar */}
                   <div className={`flex items-center justify-between px-3 py-2 border-t ${isDarkMode ? 'border-neutral-600' : 'border-stone-100'}`}>
@@ -1116,6 +1594,17 @@ Be concise. Confirm what you changed.
                               accept="image/*"
                               onChange={handleImageUpload}
                           />
+
+                          {/* Screenshot thumbnail preview */}
+                          {capturedScreenshot && (
+                              <button
+                                  onClick={() => setShowScreenshotPreview(true)}
+                                  className="relative w-8 h-8 rounded-lg overflow-hidden border-2 border-purple-500 hover:border-purple-600 transition-colors"
+                                  title="View captured screenshot"
+                              >
+                                  <img src={capturedScreenshot} alt="Screenshot preview" className="w-full h-full object-cover" />
+                              </button>
+                          )}
 
                           {/* Screenshot/Camera */}
                           <button
@@ -1202,6 +1691,82 @@ Be concise. Confirm what you changed.
           </>
       )}
 
+      {/* AI Element Selection Confirmation - Toolbar */}
+      {aiSelectedElement && aiSelectedElement.elements && aiSelectedElement.elements.length > 0 && (
+          <div className={`absolute top-20 left-1/2 transform -translate-x-1/2 rounded-lg shadow-2xl px-4 py-3 z-50 max-w-3xl ${isDarkMode ? 'bg-neutral-800 border border-neutral-700' : 'bg-white border border-neutral-200'}`}>
+              {aiSelectedElement.count === 1 ? (
+                  // Single element - simple confirmation
+                  <div className="flex items-center gap-4">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${isDarkMode ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>
+                          <Check size={16} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                          <div className={`text-sm leading-relaxed ${isDarkMode ? 'text-neutral-200' : 'text-neutral-800'}`}>
+                              Found <code className={`px-1.5 py-0.5 rounded font-mono text-xs ${isDarkMode ? 'bg-neutral-700 text-blue-400' : 'bg-blue-50 text-blue-700'}`}>{aiSelectedElement.elements[0].tagName}</code>
+                              {aiSelectedElement.elements[0].text && (
+                                  <span className="ml-1">"{aiSelectedElement.elements[0].text.substring(0, 40)}{aiSelectedElement.elements[0].text.length > 40 ? '...' : ''}"</span>
+                              )}
+                              <span className={`ml-1 ${isDarkMode ? 'text-neutral-400' : 'text-neutral-500'}`}>- Is this correct?</span>
+                          </div>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                          <button
+                              onClick={() => handleConfirmSelection(false)}
+                              className={`px-4 py-2 text-sm rounded-lg font-medium transition ${isDarkMode ? 'bg-neutral-700 hover:bg-neutral-600 text-neutral-200' : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-700'}`}
+                          >
+                              No
+                          </button>
+                          <button
+                              onClick={() => handleConfirmSelection(true, 1)}
+                              className={`px-4 py-2 text-sm rounded-lg font-medium transition ${isDarkMode ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
+                          >
+                              Yes
+                          </button>
+                      </div>
+                  </div>
+              ) : (
+                  // Multiple elements - show list with numbers
+                  <div>
+                      <div className="flex items-center gap-2 mb-3">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${isDarkMode ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>
+                              <Check size={16} />
+                          </div>
+                          <div className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-neutral-800'}`}>
+                              Found {aiSelectedElement.count} elements - which one?
+                          </div>
+                          <button
+                              onClick={() => handleConfirmSelection(false)}
+                              className={`ml-auto px-3 py-1.5 text-sm rounded-lg font-medium transition ${isDarkMode ? 'bg-neutral-700 hover:bg-neutral-600 text-neutral-200' : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-700'}`}
+                          >
+                              Cancel
+                          </button>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto">
+                          {aiSelectedElement.elements.map((element, index) => (
+                              <button
+                                  key={index}
+                                  onClick={() => handleConfirmSelection(true, index + 1)}
+                                  className={`flex items-center gap-3 p-2 rounded-lg text-left transition ${isDarkMode ? 'hover:bg-neutral-700' : 'hover:bg-neutral-50'}`}
+                              >
+                                  <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold ${isDarkMode ? 'bg-blue-500 text-white' : 'bg-blue-600 text-white'}`}>
+                                      {index + 1}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                      <code className={`text-xs font-mono ${isDarkMode ? 'text-blue-400' : 'text-blue-700'}`}>{element.tagName}</code>
+                                      {element.text && (
+                                          <span className={`ml-2 text-xs ${isDarkMode ? 'text-neutral-400' : 'text-neutral-600'}`}>
+                                              "{element.text.substring(0, 50)}{element.text.length > 50 ? '...' : ''}"
+                                          </span>
+                                      )}
+                                  </div>
+                              </button>
+                          ))}
+                      </div>
+                  </div>
+              )}
+          </div>
+      )}
+
       {/* Pending Code Change Preview - 3 Button Popup */}
       {pendingChange && (
           <div className={`absolute bottom-24 left-1/2 transform -translate-x-1/2 flex items-center gap-2 rounded-full shadow-xl p-2 z-50 ${isDarkMode ? 'bg-neutral-800 border border-neutral-700' : 'bg-white border border-neutral-200'}`}>
@@ -1248,6 +1813,30 @@ Be concise. Confirm what you changed.
               >
                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
               </button>
+          </div>
+      )}
+
+      {/* Screenshot Preview Modal */}
+      {showScreenshotPreview && capturedScreenshot && (
+          <div
+              className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+              onClick={() => setShowScreenshotPreview(false)}
+          >
+              <div className="relative max-w-4xl max-h-[90vh] p-4">
+                  <button
+                      onClick={() => setShowScreenshotPreview(false)}
+                      className="absolute -top-10 right-0 text-white hover:text-gray-300 transition-colors"
+                      title="Close preview"
+                  >
+                      <X size={24} />
+                  </button>
+                  <img
+                      src={capturedScreenshot}
+                      alt="Screenshot preview"
+                      className="max-w-full max-h-[90vh] rounded-lg shadow-2xl"
+                      onClick={(e) => e.stopPropagation()}
+                  />
+              </div>
           </div>
       )}
 

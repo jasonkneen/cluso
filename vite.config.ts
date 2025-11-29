@@ -10,7 +10,12 @@ export default defineConfig(({ mode }) => {
         port: 3000,
         host: '0.0.0.0',
       },
-      plugins: [react()],
+      plugins: [
+        react({
+          jsxRuntime: 'automatic',
+          // Vite automatically adds __source in dev mode, no need for Babel plugin
+        })
+      ],
       define: {
         'process.env.API_KEY': JSON.stringify(env.VITE_GOOGLE_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.VITE_GOOGLE_API_KEY)

@@ -2,15 +2,27 @@
 export const INJECTION_SCRIPT = `
 <style>
   .inspector-hover-target {
-    outline: 2px solid #3b82f6 !important;
+    outline: 2px dashed #3b82f6 !important;
     outline-offset: -2px !important;
     cursor: crosshair !important;
     position: relative;
     z-index: 10000;
   }
   .inspector-selected-target {
-    outline: 2px solid #ef4444 !important;
-    outline-offset: -2px !important;
+    position: relative !important;
+    z-index: 9999 !important;
+  }
+  .inspector-selected-target::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    border: 2px dashed rgba(59, 130, 246, 0.8);
+    pointer-events: none;
+    z-index: -1;
+    border-radius: 4px;
   }
 
   .screenshot-hover-target {
@@ -21,12 +33,40 @@ export const INJECTION_SCRIPT = `
     position: relative;
     z-index: 10000;
   }
+
+  .element-number-badge {
+    position: absolute;
+    bottom: -10px;
+    right: -10px;
+    min-width: 28px;
+    height: 28px;
+    padding: 0 8px;
+    background: rgba(59, 130, 246, 0.85) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    color: white !important;
+    border-radius: 14px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.3) inset !important;
+    z-index: 10001 !important;
+    pointer-events: none !important;
+  }
+  .element-number-badge::before {
+    content: '';
+  }
 </style>
 <script>
   (function() {
     let currentSelected = null;
     let isInspectorActive = false;
     let isScreenshotActive = false;
+    let multipleMatches = [];
+    let numberBadges = [];
 
     // --- Console Interception ---
     const originalLog = console.log;
@@ -68,6 +108,20 @@ export const INJECTION_SCRIPT = `
     };
 
     // --- Inspector Logic ---
+
+    function clearNumberBadges() {
+      numberBadges.forEach(badge => badge.remove());
+      numberBadges = [];
+      multipleMatches.forEach(el => el.classList.remove('inspector-selected-target'));
+      multipleMatches = [];
+    }
+
+    function createNumberBadge(number) {
+      const badge = document.createElement('div');
+      badge.className = 'element-number-badge';
+      badge.textContent = number;
+      return badge;
+    }
 
     function getElementSummary(el) {
       return {
@@ -148,8 +202,8 @@ export const INJECTION_SCRIPT = `
             if (event.data.type === 'TOGGLE_INSPECTOR') {
                 isInspectorActive = event.data.active;
                 // clear previous screenshot mode if swapping
-                if(isInspectorActive) isScreenshotActive = false; 
-                
+                if(isInspectorActive) isScreenshotActive = false;
+
                 if (!isInspectorActive && currentSelected) {
                     currentSelected.classList.remove('inspector-selected-target');
                     currentSelected = null;
@@ -164,6 +218,77 @@ export const INJECTION_SCRIPT = `
                         currentSelected.classList.remove('inspector-selected-target');
                         currentSelected = null;
                     }
+                }
+            }
+            else if (event.data.type === 'SELECT_ELEMENT_BY_SELECTOR') {
+                // AI-driven element selection with multi-element support
+                const selector = event.data.selector;
+                try {
+                    // Clear previous selections
+                    clearNumberBadges();
+                    if (currentSelected) {
+                        currentSelected.classList.remove('inspector-selected-target');
+                        currentSelected = null;
+                    }
+
+                    // Find ALL matching elements
+                    const elements = document.querySelectorAll(selector);
+
+                    if (elements.length === 0) {
+                        window.parent.postMessage({
+                            type: 'AI_SELECTION_FAILED',
+                            selector: selector,
+                            error: 'No elements found'
+                        }, '*');
+                        return;
+                    }
+
+                    // Store all matches
+                    multipleMatches = Array.from(elements);
+
+                    // Highlight all elements and add number badges
+                    const elementsData = [];
+                    multipleMatches.forEach((element, index) => {
+                        element.classList.add('inspector-selected-target');
+
+                        // Create and position number badge
+                        const badge = createNumberBadge(index + 1);
+                        element.style.position = element.style.position || 'relative';
+                        element.appendChild(badge);
+                        numberBadges.push(badge);
+
+                        // Collect element data
+                        const summary = getElementSummary(element);
+                        const rect = element.getBoundingClientRect();
+
+                        elementsData.push({
+                            element: summary,
+                            rect: {
+                                top: rect.top,
+                                left: rect.left,
+                                width: rect.width,
+                                height: rect.height
+                            }
+                        });
+                    });
+
+                    // Scroll first element into view
+                    multipleMatches[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                    // Send back all matched elements
+                    window.parent.postMessage({
+                        type: 'AI_SELECTION_CONFIRMED',
+                        selector: selector,
+                        count: multipleMatches.length,
+                        elements: elementsData
+                    }, '*');
+
+                } catch (error) {
+                    window.parent.postMessage({
+                        type: 'AI_SELECTION_FAILED',
+                        selector: selector,
+                        error: error.message
+                    }, '*');
                 }
             }
         }

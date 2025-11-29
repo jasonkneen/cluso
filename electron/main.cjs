@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('path')
 const { execSync, exec } = require('child_process')
+const fs = require('fs').promises
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -90,6 +91,82 @@ function registerGitHandlers() {
 
   ipcMain.handle('git:stashPop', async () => {
     return gitExec('stash pop')
+  })
+
+  // File operations handlers
+  ipcMain.handle('files:readFile', async (event, filePath) => {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8')
+      return { success: true, data: content }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('files:selectFile', async (event, filePath) => {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8')
+      return { success: true, data: { path: filePath, content } }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('files:listDirectory', async (event, dirPath) => {
+    try {
+      // Default to project root (parent of electron folder)
+      const projectRoot = path.join(__dirname, '..')
+      const targetDir = dirPath || projectRoot
+      console.log('[Files] Listing directory:', targetDir)
+      const entries = await fs.readdir(targetDir, { withFileTypes: true })
+      const files = entries.map(entry => ({
+        name: entry.name,
+        path: path.join(targetDir, entry.name),
+        isDirectory: entry.isDirectory()
+      }))
+      // Sort: directories first, then files, both alphabetically
+      files.sort((a, b) => {
+        if (a.isDirectory && !b.isDirectory) return -1
+        if (!a.isDirectory && b.isDirectory) return 1
+        return a.name.localeCompare(b.name)
+      })
+      console.log('[Files] Found', files.length, 'entries')
+      return { success: true, data: files }
+    } catch (error) {
+      console.error('[Files] Error listing directory:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('files:listPrompts', async () => {
+    try {
+      const promptsDir = path.join(__dirname, '../prompts')
+      await fs.mkdir(promptsDir, { recursive: true })
+      const files = await fs.readdir(promptsDir)
+      const prompts = files.filter(f => f.endsWith('.txt') || f.endsWith('.md'))
+      return { success: true, data: prompts.map(f => f.replace(/\.(txt|md)$/, '')) }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('files:readPrompt', async (event, name) => {
+    try {
+      const promptsDir = path.join(__dirname, '../prompts')
+      const txtPath = path.join(promptsDir, `${name}.txt`)
+      const mdPath = path.join(promptsDir, `${name}.md`)
+
+      let content = ''
+      try {
+        content = await fs.readFile(txtPath, 'utf-8')
+      } catch {
+        content = await fs.readFile(mdPath, 'utf-8')
+      }
+
+      return { success: true, data: content }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
   })
 }
 

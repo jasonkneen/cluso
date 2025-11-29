@@ -19,6 +19,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Webview preload path - fetched from main process
   getWebviewPreloadPath: () => ipcRenderer.invoke('get-webview-preload-path'),
 
+  // File operations
+  files: {
+    readFile: (path) => ipcRenderer.invoke('files:readFile', path),
+    selectFile: (path) => ipcRenderer.invoke('files:selectFile', path),
+    listDirectory: (path) => ipcRenderer.invoke('files:listDirectory', path),
+    listPrompts: () => ipcRenderer.invoke('files:listPrompts'),
+    readPrompt: (name) => ipcRenderer.invoke('files:readPrompt', name),
+  },
+
   // Check if running in Electron
   isElectron: true,
 })
