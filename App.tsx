@@ -4,6 +4,9 @@ import { useLiveGemini } from './hooks/useLiveGemini';
 import { useGit } from './hooks/useGit';
 import { INJECTION_SCRIPT } from './utils/iframe-injection';
 import { SelectedElement, Message } from './types';
+import { TabState, createNewTab } from './types/tab';
+import { TabBar, Tab } from './components/TabBar';
+import { NewTabPage, RecentProject } from './components/NewTabPage';
 import { GoogleGenAI } from '@google/genai';
 import {
   ChevronLeft,
@@ -67,6 +70,56 @@ interface WebviewElement extends HTMLElement {
 }
 
 export default function App() {
+  // Tab State - manages multiple browser tabs
+  const [tabs, setTabs] = useState<TabState[]>(() => [createNewTab('tab-1')]);
+  const [activeTabId, setActiveTabId] = useState('tab-1');
+
+  // Get current active tab
+  const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+
+  // Tab management functions
+  const handleNewTab = useCallback(() => {
+    const newTab = createNewTab();
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabId(newTab.id);
+  }, []);
+
+  const handleCloseTab = useCallback((tabId: string) => {
+    setTabs(prev => {
+      const filtered = prev.filter(t => t.id !== tabId);
+      if (filtered.length === 0) {
+        // Don't allow closing last tab
+        return prev;
+      }
+      // If closing active tab, switch to adjacent one
+      if (tabId === activeTabId) {
+        const closedIndex = prev.findIndex(t => t.id === tabId);
+        const newActiveIndex = Math.min(closedIndex, filtered.length - 1);
+        setActiveTabId(filtered[newActiveIndex].id);
+      }
+      return filtered;
+    });
+  }, [activeTabId]);
+
+  const handleSelectTab = useCallback((tabId: string) => {
+    setActiveTabId(tabId);
+  }, []);
+
+  // Update current tab state helper
+  const updateCurrentTab = useCallback((updates: Partial<TabState>) => {
+    setTabs(prev => prev.map(tab =>
+      tab.id === activeTabId ? { ...tab, ...updates } : tab
+    ));
+  }, [activeTabId]);
+
+  // Convert TabState to Tab for TabBar
+  const tabBarTabs: Tab[] = tabs.map(t => ({
+    id: t.id,
+    title: t.title || 'Cluso',
+    url: t.url,
+    favicon: t.favicon,
+  }));
+
   // Browser State
   const [browserUrl, setBrowserUrl] = useState(DEFAULT_URL);
   const [urlInput, setUrlInput] = useState(DEFAULT_URL);
@@ -890,14 +943,55 @@ Be concise. Confirm what you changed.
     }
   }, [isElectron]);
 
+  // Handle opening a project from new tab page
+  const handleOpenProject = useCallback((projectPath: string) => {
+    // For now, just open localhost - in the future could scan for running dev servers
+    const url = 'http://localhost:3000';
+    updateCurrentTab({ url, title: projectPath.split('/').pop() || 'Project' });
+    setBrowserUrl(url);
+    setUrlInput(url);
+  }, [updateCurrentTab]);
+
+  // Handle opening a URL from new tab page
+  const handleOpenUrl = useCallback((url: string) => {
+    updateCurrentTab({ url, title: new URL(url).hostname });
+    setBrowserUrl(url);
+    setUrlInput(url);
+  }, [updateCurrentTab]);
+
+  // Check if current tab is "new tab" (no URL)
+  const isNewTabPage = !activeTab.url;
+
   return (
-    <div className={`flex h-screen w-full overflow-hidden font-sans p-2 gap-2 ${isDarkMode ? 'bg-neutral-900 text-neutral-100' : 'bg-stone-200 text-neutral-900'}`}>
+    <div className={`flex flex-col h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'bg-neutral-900 text-neutral-100' : 'bg-stone-100 text-neutral-900'}`}>
 
-      {/* --- Left Pane: Browser --- */}
-      <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`}>
+      {/* Tab Bar - at the very top with traffic light area */}
+      <TabBar
+        tabs={tabBarTabs}
+        activeTabId={activeTabId}
+        onTabSelect={handleSelectTab}
+        onTabClose={handleCloseTab}
+        onNewTab={handleNewTab}
+        isDarkMode={isDarkMode}
+      />
 
-        {/* Browser Toolbar */}
-        <div className={`h-12 border-b flex items-center gap-2 px-3 flex-shrink-0 ${isDarkMode ? 'border-neutral-700 bg-neutral-800' : 'border-stone-100 bg-stone-50'}`}>
+      {/* Main Content Area */}
+      <div className="flex flex-1 overflow-hidden p-2 gap-2">
+
+        {/* --- Left Pane: Browser or New Tab Page --- */}
+        {isNewTabPage ? (
+          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`}>
+            <NewTabPage
+              onOpenProject={handleOpenProject}
+              onOpenUrl={handleOpenUrl}
+              isDarkMode={isDarkMode}
+            />
+          </div>
+        ) : (
+          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`}>
+
+            {/* Browser Toolbar */}
+            <div className={`h-12 border-b flex items-center gap-2 px-3 flex-shrink-0 ${isDarkMode ? 'border-neutral-700 bg-neutral-800' : 'border-stone-100 bg-stone-50'}`}>
           {/* Navigation Buttons */}
           <div className="flex items-center gap-1">
             <button
@@ -1140,10 +1234,11 @@ Be concise. Confirm what you changed.
                     )}
                 </div>
             )}
+          </div>
         </div>
-      </div>
+        )}
 
-      {/* --- Right Pane: Chat --- */}
+        {/* --- Right Pane: Chat --- */}
       {isSidebarOpen && (
       <div className={`w-[420px] flex-shrink-0 flex flex-col rounded-xl shadow-sm ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`}>
 
@@ -1850,6 +1945,7 @@ Be concise. Confirm what you changed.
       <video ref={videoRef} className="hidden" autoPlay playsInline muted />
       <canvas ref={canvasRef} className="hidden" />
 
+      </div>
     </div>
   );
 }

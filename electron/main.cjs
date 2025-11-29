@@ -175,7 +175,8 @@ function createWindow() {
     width: 1200,
     height: 800,
     backgroundColor: '#1a1a1a',
-    titleBarStyle: 'default',
+    titleBarStyle: 'hiddenInset', // Hide title bar but keep traffic lights
+    trafficLightPosition: { x: 12, y: 12 }, // Position traffic lights
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
