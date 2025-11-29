@@ -152,7 +152,8 @@ export default function App() {
   }));
 
   // Browser State
-  const [urlInput, setUrlInput] = useState(DEFAULT_URL);
+  const [currentUrl, setCurrentUrl] = useState(DEFAULT_URL); // URL for webview src
+  const [urlInput, setUrlInput] = useState(DEFAULT_URL); // URL in address bar (editable)
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -176,6 +177,10 @@ export default function App() {
   // Inspector & Context State
   const [isInspectorActive, setIsInspectorActive] = useState(false);
   const [isScreenshotActive, setIsScreenshotActive] = useState(false);
+
+  // Refs to track current state values for closures (webview event handlers)
+  const isInspectorActiveRef = useRef(false);
+  const isScreenshotActiveRef = useRef(false);
 
   const [logs, setLogs] = useState<string[]>([]);
   const [attachLogs, setAttachLogs] = useState(false);
@@ -292,6 +297,15 @@ export default function App() {
     localStorage.setItem('darkMode', String(isDarkMode));
   }, [isDarkMode]);
 
+  // Keep refs in sync with state for webview event handler closures
+  useEffect(() => {
+    isInspectorActiveRef.current = isInspectorActive;
+  }, [isInspectorActive]);
+
+  useEffect(() => {
+    isScreenshotActiveRef.current = isScreenshotActive;
+  }, [isScreenshotActive]);
+
   const toggleDarkMode = useCallback(() => {
     setIsDarkMode(prev => !prev);
   }, []);
@@ -373,23 +387,16 @@ export default function App() {
     }]);
   }, [pendingChange]);
 
-  // Browser navigation functions - only use loadURL, don't change src attribute
+  // Browser navigation functions - use src attribute via currentUrl state
   const navigateTo = useCallback((url: string) => {
     let finalUrl = url.trim();
     if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
       finalUrl = 'http://' + finalUrl;
     }
     console.log('Navigating to:', finalUrl);
+    // Update both display URL and navigation URL
     setUrlInput(finalUrl);
-
-    // Use loadURL for navigation to avoid React re-renders
-    if (webviewRef.current) {
-      try {
-        webviewRef.current.loadURL(finalUrl);
-      } catch (e) {
-        console.error('loadURL error:', e);
-      }
-    }
+    setCurrentUrl(finalUrl);
   }, []);
 
   const handleUrlSubmit = useCallback((e: React.FormEvent) => {
@@ -657,8 +664,10 @@ export default function App() {
       console.log('Setting up webview event handlers');
 
       const handleDidNavigate = () => {
-        console.log('Did navigate:', webview.getURL());
-        setUrlInput(webview.getURL());
+        const url = webview.getURL();
+        console.log('Did navigate:', url);
+        // Only update display URL, not navigation URL (to avoid loops)
+        setUrlInput(url);
         setCanGoBack(webview.canGoBack());
         setCanGoForward(webview.canGoForward());
       };
@@ -672,12 +681,15 @@ export default function App() {
         setIsLoading(false);
       };
       const handleDidFinishLoad = () => {
-        console.log('Page finished loading, URL:', webview.getURL());
-        // Update URL input to reflect actual loaded URL
-        const currentUrl = webview.getURL();
-        if (currentUrl && currentUrl !== 'about:blank') {
-          setUrlInput(currentUrl);
-        }
+        const loadedUrl = webview.getURL();
+        console.log('Page finished loading, URL:', loadedUrl);
+        // Resend inspector state to fresh preload script after each page load
+        // The preload script runs fresh on each navigation, so we need to re-sync state
+        // Use refs to get current values (state variables would be stale in this closure)
+        console.log('Resending inspector modes after page load, inspector:', isInspectorActiveRef.current, 'screenshot:', isScreenshotActiveRef.current);
+        webview.send('set-inspector-mode', isInspectorActiveRef.current);
+        webview.send('set-screenshot-mode', isScreenshotActiveRef.current);
+        setIsWebviewReady(true);
       };
 
       const handleDidFailLoad = (e: { errorCode: number; errorDescription: string; validatedURL: string }) => {
@@ -757,6 +769,10 @@ export default function App() {
       const handleDomReady = () => {
         console.log('Webview DOM ready');
         setIsWebviewReady(true);
+        // Also send inspector state on dom-ready in case page already loaded
+        console.log('DOM ready - sending inspector modes, inspector:', isInspectorActiveRef.current, 'screenshot:', isScreenshotActiveRef.current);
+        webview.send('set-inspector-mode', isInspectorActiveRef.current);
+        webview.send('set-screenshot-mode', isScreenshotActiveRef.current);
       };
 
       const handleConsoleMessage = (e: { level: number; message: string; line: number; sourceId: string }) => {
@@ -784,6 +800,22 @@ export default function App() {
       webview.addEventListener('did-fail-load', handleDidFailLoad as (e: unknown) => void);
       webview.addEventListener('page-title-updated', handlePageTitleUpdated as (e: unknown) => void);
       webview.addEventListener('ipc-message', handleIpcMessage as (e: unknown) => void);
+
+      // Check if webview is already ready (events may have fired before listeners were attached)
+      // The webview has a getURL method we can use to check if it's loaded
+      try {
+        const currentWebviewUrl = webview.getURL();
+        console.log('Webview current URL on setup:', currentWebviewUrl);
+        if (currentWebviewUrl) {
+          // Webview already has a URL loaded, treat as ready
+          console.log('Webview already loaded, setting ready and sending inspector state');
+          setIsWebviewReady(true);
+          webview.send('set-inspector-mode', isInspectorActiveRef.current);
+          webview.send('set-screenshot-mode', isScreenshotActiveRef.current);
+        }
+      } catch (e) {
+        console.log('Webview not yet ready for getURL');
+      }
 
       // Cleanup function
       return () => {
@@ -815,10 +847,22 @@ export default function App() {
 
   // Sync Inspector State with Webview
   useEffect(() => {
-    if (!isElectron || !webviewRef.current || !isWebviewReady) return;
+    console.log('[Inspector Sync] Effect triggered:', { isElectron, hasWebview: !!webviewRef.current, isWebviewReady, isInspectorActive, isScreenshotActive });
+    if (!isElectron) {
+      console.log('[Inspector Sync] Skipping: not in Electron');
+      return;
+    }
+    if (!webviewRef.current) {
+      console.log('[Inspector Sync] Skipping: no webview ref');
+      return;
+    }
+    if (!isWebviewReady) {
+      console.log('[Inspector Sync] Skipping: webview not ready');
+      return;
+    }
 
     const webview = webviewRef.current;
-    console.log('Sending inspector modes to webview:', { isInspectorActive, isScreenshotActive });
+    console.log('[Inspector Sync] Sending inspector modes to webview:', { isInspectorActive, isScreenshotActive });
     webview.send('set-inspector-mode', isInspectorActive);
     webview.send('set-screenshot-mode', isScreenshotActive);
 
@@ -1167,11 +1211,9 @@ If you're not sure what the user wants, ask for clarification.
   const handleSetupComplete = useCallback((url: string) => {
     if (setupProject) {
       updateCurrentTab({ url, title: setupProject.name });
+      // Update both display URL and navigation URL
       setUrlInput(url);
-      // Use loadURL for navigation (not src attribute change)
-      if (webviewRef.current) {
-        webviewRef.current.loadURL(url);
-      }
+      setCurrentUrl(url);
       setSetupProject(null);
     }
   }, [setupProject, updateCurrentTab]);
@@ -1184,11 +1226,9 @@ If you're not sure what the user wants, ask for clarification.
   // Handle opening a URL from new tab page
   const handleOpenUrl = useCallback((url: string) => {
     updateCurrentTab({ url, title: new URL(url).hostname });
+    // Update both display URL and navigation URL
     setUrlInput(url);
-    // Use loadURL for navigation (not src attribute change)
-    if (webviewRef.current) {
-      webviewRef.current.loadURL(url);
-    }
+    setCurrentUrl(url);
   }, [updateCurrentTab]);
 
   // Check if current tab is "new tab" (no URL)
@@ -1372,7 +1412,7 @@ If you're not sure what the user wants, ask for clarification.
             {isElectron && webviewPreloadPath ? (
               <webview
                 ref={webviewRef as React.RefObject<HTMLElement>}
-                src="about:blank"
+                src={currentUrl || 'about:blank'}
                 preload={`file://${webviewPreloadPath}`}
                 className="h-full transition-all duration-300"
                 style={{
