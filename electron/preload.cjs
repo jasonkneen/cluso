@@ -16,6 +16,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stashPop: () => ipcRenderer.invoke('git:stashPop'),
   },
 
+  // OAuth operations (for Anthropic API keys and Claude Code)
+  oauth: {
+    // Start OAuth login flow - mode: 'max' for Claude Pro/Max, 'console' for Console API
+    startLogin: (mode) => ipcRenderer.invoke('oauth:start-login', mode),
+    // Complete OAuth login by exchanging code for tokens
+    // createKey: true = get API key, false = keep OAuth tokens for Claude Code
+    completeLogin: (code, createKey) => ipcRenderer.invoke('oauth:complete-login', code, createKey),
+    // Cancel OAuth flow
+    cancel: () => ipcRenderer.invoke('oauth:cancel'),
+    // Get OAuth status
+    getStatus: () => ipcRenderer.invoke('oauth:get-status'),
+    // Logout (clear OAuth tokens)
+    logout: () => ipcRenderer.invoke('oauth:logout'),
+    // Get valid access token (handles refresh if needed)
+    getAccessToken: () => ipcRenderer.invoke('oauth:get-access-token'),
+  },
+
+  // API proxy to bypass CORS restrictions
+  api: {
+    proxy: (request) => ipcRenderer.invoke('api:proxy', request),
+  },
+
   // Webview preload path - fetched from main process
   getWebviewPreloadPath: () => ipcRenderer.invoke('get-webview-preload-path'),
 

@@ -37,9 +37,80 @@ interface ElectronFilesAPI {
   readPrompt: (name: string) => Promise<GitResult>
 }
 
+// OAuth types
+type OAuthMode = 'max' | 'console'
+
+interface OAuthStartResult {
+  success: boolean
+  authUrl?: string
+  error?: string
+}
+
+interface OAuthCompleteResult {
+  success: boolean
+  apiKey?: string
+  mode?: 'api-key' | 'oauth'
+  error?: string
+}
+
+interface OAuthStatusResult {
+  authenticated: boolean
+  expiresAt: number | null
+}
+
+interface OAuthAccessTokenResult {
+  success: boolean
+  accessToken?: string
+  error?: string
+}
+
+interface OAuthResult {
+  success: boolean
+  error?: string
+}
+
+interface ElectronOAuthAPI {
+  // Start OAuth login flow - mode: 'max' for Claude Pro/Max, 'console' for Console API
+  startLogin: (mode: OAuthMode) => Promise<OAuthStartResult>
+  // Complete OAuth login by exchanging code for tokens
+  // createKey: true = get API key, false = keep OAuth tokens for Claude Code
+  completeLogin: (code: string, createKey?: boolean) => Promise<OAuthCompleteResult>
+  // Cancel OAuth flow
+  cancel: () => Promise<OAuthResult>
+  // Get OAuth status
+  getStatus: () => Promise<OAuthStatusResult>
+  // Logout (clear OAuth tokens)
+  logout: () => Promise<OAuthResult>
+  // Get valid access token (handles refresh if needed)
+  getAccessToken: () => Promise<OAuthAccessTokenResult>
+}
+
+interface ApiProxyRequest {
+  url: string
+  method?: string
+  headers?: Record<string, string>
+  body?: unknown
+}
+
+interface ApiProxyResponse {
+  ok: boolean
+  status: number
+  statusText: string
+  headers?: Record<string, string>
+  body?: unknown
+  isStream?: boolean
+  error?: string
+}
+
+interface ElectronApiAPI {
+  proxy: (request: ApiProxyRequest) => Promise<ApiProxyResponse>
+}
+
 interface ElectronAPI {
   git: ElectronGitAPI
   files: ElectronFilesAPI
+  oauth: ElectronOAuthAPI
+  api: ElectronApiAPI
   getWebviewPreloadPath: () => Promise<string>
   isElectron: boolean
 }

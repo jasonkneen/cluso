@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   X,
   Settings,
@@ -17,6 +17,10 @@ import {
   Loader2,
   CheckCircle,
   XCircle,
+  LogIn,
+  LogOut,
+  Key,
+  Sparkles,
 } from 'lucide-react'
 
 type SettingsSection = 'general' | 'display' | 'providers' | 'models' | 'connections'
@@ -55,6 +59,9 @@ export interface AppSettings {
   providers: Provider[]
   models: SettingsModel[]
   connections: Connection[]
+  // Claude Code OAuth state
+  claudeCodeAuthenticated?: boolean
+  claudeCodeExpiresAt?: number | null
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -76,6 +83,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai', enabled: false },
     { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'anthropic', enabled: false },
     { id: 'claude-3-opus', name: 'Claude 3 Opus', provider: 'anthropic', enabled: false },
+    { id: 'claude-code', name: 'Claude Code (OAuth)', provider: 'claude-code', enabled: false },
   ],
   connections: [
     { id: '1', name: 'Local MCP Server', type: 'mcp', url: 'http://localhost:3001', enabled: false },
@@ -115,6 +123,37 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general')
   const [showApiKeys, setShowApiKeys] = useState<Record<string, boolean>>({})
+
+  // OAuth state
+  const [oauthLoading, setOauthLoading] = useState(false)
+  const [oauthError, setOauthError] = useState<string | null>(null)
+  const [awaitingOAuthCode, setAwaitingOAuthCode] = useState<{ mode: 'max' | 'console', createKey: boolean } | null>(null)
+  const [oauthCode, setOauthCode] = useState('')
+  const [claudeCodeStatus, setClaudeCodeStatus] = useState<{ authenticated: boolean; expiresAt: number | null }>({
+    authenticated: false,
+    expiresAt: null
+  })
+
+  // Check Claude Code OAuth status on mount and when dialog opens
+  useEffect(() => {
+    if (isOpen && window.electronAPI?.oauth) {
+      window.electronAPI.oauth.getStatus().then(status => {
+        setClaudeCodeStatus(status)
+        // Update settings with OAuth status
+        if (status.authenticated !== settings.claudeCodeAuthenticated) {
+          onSettingsChange({
+            ...settings,
+            claudeCodeAuthenticated: status.authenticated,
+            claudeCodeExpiresAt: status.expiresAt,
+            // Enable Claude Code model if authenticated
+            models: settings.models.map(m =>
+              m.id === 'claude-code' ? { ...m, enabled: status.authenticated } : m
+            )
+          })
+        }
+      })
+    }
+  }, [isOpen])
 
   if (!isOpen) return null
 
@@ -187,6 +226,98 @@ export function SettingsDialog({
     }
   }
 
+  // OAuth handlers
+  const startOAuthLogin = async (mode: 'max' | 'console', createKey: boolean) => {
+    if (!window.electronAPI?.oauth) {
+      setOauthError('OAuth is only available in the desktop app')
+      return
+    }
+
+    setOauthLoading(true)
+    setOauthError(null)
+
+    try {
+      const result = await window.electronAPI.oauth.startLogin(mode)
+      if (result.success) {
+        setAwaitingOAuthCode({ mode, createKey })
+        setOauthCode('')
+      } else {
+        setOauthError(result.error || 'Failed to start OAuth flow')
+      }
+    } catch (err) {
+      setOauthError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setOauthLoading(false)
+    }
+  }
+
+  const completeOAuthLogin = async () => {
+    if (!window.electronAPI?.oauth || !awaitingOAuthCode) return
+
+    setOauthLoading(true)
+    setOauthError(null)
+
+    try {
+      const result = await window.electronAPI.oauth.completeLogin(oauthCode, awaitingOAuthCode.createKey)
+      if (result.success) {
+        if (result.mode === 'api-key' && result.apiKey) {
+          // Update Anthropic provider with the new API key
+          updateSettings({
+            providers: settings.providers.map(p =>
+              p.id === 'anthropic' ? { ...p, apiKey: result.apiKey!, verified: true, enabled: true } : p
+            )
+          })
+        } else if (result.mode === 'oauth') {
+          // Update Claude Code status
+          const status = await window.electronAPI.oauth.getStatus()
+          setClaudeCodeStatus(status)
+          updateSettings({
+            claudeCodeAuthenticated: true,
+            claudeCodeExpiresAt: status.expiresAt,
+            models: settings.models.map(m =>
+              m.id === 'claude-code' ? { ...m, enabled: true } : m
+            )
+          })
+        }
+        setAwaitingOAuthCode(null)
+        setOauthCode('')
+      } else {
+        setOauthError(result.error || 'Failed to complete OAuth flow')
+      }
+    } catch (err) {
+      setOauthError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setOauthLoading(false)
+    }
+  }
+
+  const cancelOAuthFlow = async () => {
+    if (window.electronAPI?.oauth) {
+      await window.electronAPI.oauth.cancel()
+    }
+    setAwaitingOAuthCode(null)
+    setOauthCode('')
+    setOauthError(null)
+  }
+
+  const logoutClaudeCode = async () => {
+    if (!window.electronAPI?.oauth) return
+
+    try {
+      await window.electronAPI.oauth.logout()
+      setClaudeCodeStatus({ authenticated: false, expiresAt: null })
+      updateSettings({
+        claudeCodeAuthenticated: false,
+        claudeCodeExpiresAt: null,
+        models: settings.models.map(m =>
+          m.id === 'claude-code' ? { ...m, enabled: false } : m
+        )
+      })
+    } catch (err) {
+      setOauthError(err instanceof Error ? err.message : 'Unknown error')
+    }
+  }
+
   const toggleModelEnabled = (id: string) => {
     updateSettings({
       models: settings.models.map(m =>
@@ -210,6 +341,7 @@ export function SettingsDialog({
   }
 
   const getProviderName = (providerId: string) => {
+    if (providerId === 'claude-code') return 'Claude Code (OAuth)'
     const provider = settings.providers.find(p => p.id === providerId)
     return provider?.name || providerId
   }
@@ -402,6 +534,80 @@ export function SettingsDialog({
               Configure API providers for AI models. Add your API keys to enable different providers.
             </p>
 
+            {/* OAuth Error Display */}
+            {oauthError && (
+              <div className={`p-3 rounded-lg ${
+                isDarkMode ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-600'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <XCircle size={16} />
+                  <span className="text-sm">{oauthError}</span>
+                  <button
+                    onClick={() => setOauthError(null)}
+                    className="ml-auto"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* OAuth Code Input (shown when awaiting code) */}
+            {awaitingOAuthCode && (
+              <div className={`p-4 rounded-xl border ${
+                isDarkMode ? 'border-purple-500/30 bg-purple-500/10' : 'border-purple-200 bg-purple-50'
+              }`}>
+                <div className="flex items-center gap-2 mb-3">
+                  <Key size={16} className={isDarkMode ? 'text-purple-400' : 'text-purple-600'} />
+                  <span className={`text-sm font-medium ${isDarkMode ? 'text-purple-300' : 'text-purple-700'}`}>
+                    Enter OAuth Code
+                  </span>
+                </div>
+                <p className={`text-xs mb-3 ${isDarkMode ? 'text-purple-400' : 'text-purple-600'}`}>
+                  A browser window opened. After authorizing, copy the code and paste it here.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={oauthCode}
+                    onChange={(e) => setOauthCode(e.target.value)}
+                    placeholder="Paste authorization code..."
+                    className={`flex-1 px-3 py-2 rounded-lg text-sm ${
+                      isDarkMode
+                        ? 'bg-neutral-700 border-neutral-600 text-neutral-200 placeholder-neutral-500'
+                        : 'bg-white border-stone-200 text-stone-800 placeholder-stone-400'
+                    } border focus:outline-none focus:ring-2 focus:ring-purple-500/50`}
+                  />
+                  <button
+                    onClick={completeOAuthLogin}
+                    disabled={!oauthCode || oauthLoading}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                      !oauthCode
+                        ? isDarkMode
+                          ? 'bg-neutral-700 text-neutral-500 cursor-not-allowed'
+                          : 'bg-stone-100 text-stone-400 cursor-not-allowed'
+                        : isDarkMode
+                          ? 'bg-purple-500 text-white hover:bg-purple-600'
+                          : 'bg-purple-600 text-white hover:bg-purple-700'
+                    }`}
+                  >
+                    {oauthLoading ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                    Complete
+                  </button>
+                  <button
+                    onClick={cancelOAuthFlow}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      isDarkMode
+                        ? 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                    }`}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-3">
               {settings.providers.map((provider) => (
                 <div
@@ -489,9 +695,113 @@ export function SettingsDialog({
                       {provider.verifying ? 'Verifying' : provider.verified ? 'Verified' : 'Verify'}
                     </button>
                   </div>
+
+                  {/* OAuth button for Anthropic provider */}
+                  {provider.id === 'anthropic' && window.electronAPI?.oauth && (
+                    <div className={`mt-3 pt-3 border-t ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
+                      <button
+                        onClick={() => startOAuthLogin('console', true)}
+                        disabled={oauthLoading || !!awaitingOAuthCode}
+                        className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          oauthLoading || awaitingOAuthCode
+                            ? isDarkMode
+                              ? 'bg-neutral-700 text-neutral-500 cursor-not-allowed'
+                              : 'bg-stone-100 text-stone-400 cursor-not-allowed'
+                            : isDarkMode
+                              ? 'bg-orange-500/10 text-orange-400 hover:bg-orange-500/20'
+                              : 'bg-orange-50 text-orange-600 hover:bg-orange-100'
+                        }`}
+                      >
+                        {oauthLoading ? <Loader2 size={14} className="animate-spin" /> : <Key size={14} />}
+                        Get API Key via OAuth
+                      </button>
+                      <p className={`text-xs mt-1.5 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                        Use your Anthropic Console account to create an API key
+                      </p>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
+
+            {/* Claude Code OAuth Section */}
+            {window.electronAPI?.oauth && (
+              <>
+                <div className={`border-t ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'} my-4`} />
+
+                <div className={`p-4 rounded-xl border ${
+                  claudeCodeStatus.authenticated
+                    ? isDarkMode ? 'border-purple-500/30 bg-purple-500/10' : 'border-purple-200 bg-purple-50'
+                    : isDarkMode ? 'border-neutral-700 bg-neutral-800/50' : 'border-stone-200 bg-stone-50'
+                }`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                        claudeCodeStatus.authenticated
+                          ? 'bg-purple-500/20 text-purple-500'
+                          : isDarkMode ? 'bg-neutral-700 text-neutral-400' : 'bg-stone-200 text-stone-400'
+                      }`}>
+                        <Sparkles size={16} />
+                      </div>
+                      <div>
+                        <span className={`font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                          Claude Code
+                        </span>
+                        <p className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                          Use Claude with your Pro/Max subscription
+                        </p>
+                      </div>
+                    </div>
+                    {claudeCodeStatus.authenticated && (
+                      <div className="flex items-center gap-2">
+                        <CheckCircle size={16} className="text-purple-500" />
+                        <span className={`text-xs ${isDarkMode ? 'text-purple-400' : 'text-purple-600'}`}>
+                          Connected
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {claudeCodeStatus.authenticated ? (
+                    <div className="space-y-3">
+                      {claudeCodeStatus.expiresAt && (
+                        <p className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                          Token expires: {new Date(claudeCodeStatus.expiresAt).toLocaleString()}
+                        </p>
+                      )}
+                      <button
+                        onClick={logoutClaudeCode}
+                        className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          isDarkMode
+                            ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
+                            : 'bg-red-50 text-red-600 hover:bg-red-100'
+                        }`}
+                      >
+                        <LogOut size={14} />
+                        Disconnect
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => startOAuthLogin('max', false)}
+                      disabled={oauthLoading || !!awaitingOAuthCode}
+                      className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        oauthLoading || awaitingOAuthCode
+                          ? isDarkMode
+                            ? 'bg-neutral-700 text-neutral-500 cursor-not-allowed'
+                            : 'bg-stone-100 text-stone-400 cursor-not-allowed'
+                          : isDarkMode
+                            ? 'bg-purple-500 text-white hover:bg-purple-600'
+                            : 'bg-purple-600 text-white hover:bg-purple-700'
+                      }`}
+                    >
+                      {oauthLoading ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
+                      Login with Claude Pro/Max
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )
 
@@ -503,9 +813,12 @@ export function SettingsDialog({
             </p>
 
             {/* Group models by provider */}
-            {['google', 'openai', 'anthropic'].map((providerId) => {
+            {['google', 'openai', 'anthropic', 'claude-code'].map((providerId) => {
               const providerModels = settings.models.filter(m => m.provider === providerId)
-              const providerEnabled = isProviderEnabled(providerId)
+              if (providerModels.length === 0) return null
+              const providerEnabled = providerId === 'claude-code'
+                ? claudeCodeStatus.authenticated
+                : isProviderEnabled(providerId)
 
               return (
                 <div key={providerId} className="space-y-2">
@@ -517,7 +830,7 @@ export function SettingsDialog({
                       <span className={`text-xs px-1.5 py-0.5 rounded ${
                         isDarkMode ? 'bg-yellow-500/10 text-yellow-400' : 'bg-yellow-50 text-yellow-600'
                       }`}>
-                        Configure API key first
+                        {providerId === 'claude-code' ? 'Login with OAuth first' : 'Configure API key first'}
                       </span>
                     )}
                   </div>

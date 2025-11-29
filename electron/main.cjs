@@ -1,7 +1,8 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
 const path = require('path')
 const { execSync, exec } = require('child_process')
 const fs = require('fs').promises
+const oauth = require('./oauth.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -21,6 +22,192 @@ function registerHandlers() {
   // Webview preload path
   ipcMain.handle('get-webview-preload-path', () => {
     return path.join(__dirname, 'webview-preload.cjs')
+  })
+}
+
+// Register OAuth IPC handlers
+function registerOAuthHandlers() {
+  // Start OAuth login flow
+  ipcMain.handle('oauth:start-login', async (_event, mode) => {
+    try {
+      // Generate PKCE challenge
+      const pkce = oauth.generatePKCEChallenge()
+      oauth.setPKCEVerifier(pkce.verifier)
+
+      // Get authorization URL
+      const authUrl = oauth.getAuthorizationUrl(mode, pkce)
+
+      // Open the authorization URL in the default browser
+      await shell.openExternal(authUrl)
+
+      return {
+        success: true,
+        authUrl
+      }
+    } catch (error) {
+      console.error('Error starting OAuth login:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // Complete OAuth login by exchanging code for tokens
+  ipcMain.handle('oauth:complete-login', async (_event, code, createKey = false) => {
+    try {
+      const verifier = oauth.getPKCEVerifier()
+      if (!verifier) {
+        return {
+          success: false,
+          error: 'No active OAuth flow. Please start the login process again.'
+        }
+      }
+
+      // Exchange code for tokens
+      const tokens = await oauth.exchangeCodeForTokens(code, verifier)
+
+      if (!tokens) {
+        return {
+          success: false,
+          error: 'Failed to exchange authorization code for tokens'
+        }
+      }
+
+      // If creating an API key instead of using OAuth directly
+      if (createKey) {
+        const apiKey = await oauth.createApiKey(tokens.access)
+        if (!apiKey) {
+          return {
+            success: false,
+            error: 'Failed to create API key'
+          }
+        }
+
+        // Clear the temporary verifier
+        oauth.clearPKCEVerifier()
+
+        return {
+          success: true,
+          apiKey,
+          mode: 'api-key'
+        }
+      }
+
+      // Save OAuth tokens for Claude Code usage
+      oauth.saveOAuthTokens(tokens)
+
+      // Clear the temporary verifier
+      oauth.clearPKCEVerifier()
+
+      return {
+        success: true,
+        mode: 'oauth'
+      }
+    } catch (error) {
+      console.error('Error completing OAuth login:', error)
+      oauth.clearPKCEVerifier()
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // Cancel OAuth flow
+  ipcMain.handle('oauth:cancel', () => {
+    oauth.clearPKCEVerifier()
+    return { success: true }
+  })
+
+  // Get OAuth status
+  ipcMain.handle('oauth:get-status', () => {
+    const tokens = oauth.getOAuthTokens()
+    return {
+      authenticated: !!tokens,
+      expiresAt: tokens?.expires || null
+    }
+  })
+
+  // Logout (clear OAuth tokens)
+  ipcMain.handle('oauth:logout', () => {
+    try {
+      oauth.clearOAuthTokens()
+      return { success: true }
+    } catch (error) {
+      console.error('Error during OAuth logout:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // Get valid access token (handles refresh if needed)
+  ipcMain.handle('oauth:get-access-token', async () => {
+    try {
+      const accessToken = await oauth.getValidAccessToken()
+      return {
+        success: !!accessToken,
+        accessToken
+      }
+    } catch (error) {
+      console.error('Error getting access token:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // API proxy to bypass CORS for Anthropic API calls
+  ipcMain.handle('api:proxy', async (_event, { url, method, headers, body }) => {
+    try {
+      const response = await fetch(url, {
+        method: method || 'POST',
+        headers: headers || {},
+        body: body ? JSON.stringify(body) : undefined,
+      })
+
+      const responseHeaders = {}
+      response.headers.forEach((value, key) => {
+        responseHeaders[key] = value
+      })
+
+      // Handle streaming responses
+      const contentType = response.headers.get('content-type') || ''
+      if (contentType.includes('text/event-stream')) {
+        // For streaming, read all chunks and return as text
+        const text = await response.text()
+        return {
+          ok: response.ok,
+          status: response.status,
+          statusText: response.statusText,
+          headers: responseHeaders,
+          body: text,
+          isStream: true,
+        }
+      }
+
+      // Regular JSON response
+      const data = await response.json()
+      return {
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        headers: responseHeaders,
+        body: data,
+        isStream: false,
+      }
+    } catch (error) {
+      console.error('API proxy error:', error)
+      return {
+        ok: false,
+        status: 500,
+        statusText: 'Proxy Error',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      }
+    }
   })
 }
 
@@ -235,6 +422,7 @@ function createWindow() {
 app.whenReady().then(() => {
   registerHandlers()
   registerGitHandlers()
+  registerOAuthHandlers()
   createWindow()
 
   app.on('activate', () => {
