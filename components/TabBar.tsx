@@ -31,10 +31,10 @@ export function TabBar({
 }: TabBarProps) {
   return (
     <div
-      className={`h-11 flex items-center justify-between border-b select-none ${
+      className={`h-11 flex items-center justify-between select-none ${
         isDarkMode
-          ? 'bg-neutral-900 border-neutral-800'
-          : 'bg-stone-100 border-stone-200'
+          ? 'bg-neutral-900 border-b border-neutral-800'
+          : 'bg-stone-300'
       }`}
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >

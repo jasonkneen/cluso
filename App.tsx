@@ -1305,7 +1305,7 @@ If you're not sure what the user wants, ask for clarification.
   const isNewTabPage = !activeTab.url;
 
   return (
-    <div className={`flex flex-col h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'dark bg-neutral-900 text-neutral-100' : 'bg-stone-100 text-neutral-900'}`}>
+    <div className={`flex flex-col h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'dark bg-neutral-900 text-neutral-100' : 'bg-stone-300 text-neutral-900'}`}>
 
       {/* Tab Bar - at the very top with traffic light area */}
       <TabBar
