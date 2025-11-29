@@ -43,6 +43,9 @@ import {
   MessageCircle,
   Folder,
   File,
+  Smartphone,
+  Tablet,
+  Settings,
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -72,7 +75,7 @@ const MODELS = [
   { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', Icon: Rocket },
 ];
 
-const DEFAULT_URL = 'http://localhost:3000/test.html';
+const DEFAULT_URL = 'http://localhost:3000/landing/index.html';
 
 // Type for webview element (Electron)
 interface WebviewElement extends HTMLElement {
@@ -233,6 +236,20 @@ export default function App() {
     deletions: number;
   } | null>(null);
   const [isPreviewingOriginal, setIsPreviewingOriginal] = useState(false);
+
+  // Viewport State (responsive preview)
+  type ViewportSize = 'mobile' | 'tablet' | 'desktop';
+  const [viewportSize, setViewportSize] = useState<ViewportSize>('desktop');
+  const viewportWidths: Record<ViewportSize, number | null> = {
+    mobile: 375,
+    tablet: 768,
+    desktop: null // null means full width
+  };
+
+  // Console Panel State
+  const [consoleLogs, setConsoleLogs] = useState<Array<{type: 'log' | 'warn' | 'error' | 'info'; message: string; timestamp: Date}>>([]);
+  const [isConsolePanelOpen, setIsConsolePanelOpen] = useState(false);
+  const consoleEndRef = useRef<HTMLDivElement>(null);
 
   // Webview ready state (for sending messages)
   const [isWebviewReady, setIsWebviewReady] = useState(false);
@@ -691,8 +708,12 @@ export default function App() {
           }
         } else if (channel === 'console-log') {
           const data = args[0] as { level: string; message: string };
-          const logEntry = `[${data.level.toUpperCase()}] ${data.message}`;
-          setLogs(prev => [...prev.slice(-49), logEntry]);
+          const logType = (data.level.toLowerCase() === 'warning' ? 'warn' : data.level.toLowerCase()) as 'log' | 'warn' | 'error' | 'info';
+          setConsoleLogs(prev => [...prev.slice(-99), {
+            type: logType,
+            message: data.message,
+            timestamp: new Date()
+          }]);
         } else if (channel === 'ai-selection-confirmed') {
           const data = args[0] as {
             selector: string;
@@ -727,7 +748,23 @@ export default function App() {
         setIsWebviewReady(true);
       };
 
+      const handleConsoleMessage = (e: { level: number; message: string; line: number; sourceId: string }) => {
+        const levelMap: Record<number, 'log' | 'warn' | 'error' | 'info'> = {
+          0: 'log',    // Verbose/Debug
+          1: 'info',   // Info
+          2: 'warn',   // Warning
+          3: 'error'   // Error
+        };
+        const logType = levelMap[e.level] || 'log';
+        setConsoleLogs(prev => [...prev.slice(-99), {
+          type: logType,
+          message: e.message,
+          timestamp: new Date()
+        }]);
+      };
+
       webview.addEventListener('dom-ready', handleDomReady);
+      webview.addEventListener('console-message', handleConsoleMessage as (e: unknown) => void);
       webview.addEventListener('did-navigate', handleDidNavigate);
       webview.addEventListener('did-navigate-in-page', handleDidNavigate);
       webview.addEventListener('did-start-loading', handleDidStartLoading);
@@ -739,6 +776,7 @@ export default function App() {
       // Cleanup function
       return () => {
         webview.removeEventListener('dom-ready', handleDomReady);
+        webview.removeEventListener('console-message', handleConsoleMessage as (e: unknown) => void);
         webview.removeEventListener('did-navigate', handleDidNavigate);
         webview.removeEventListener('did-navigate-in-page', handleDidNavigate);
         webview.removeEventListener('did-start-loading', handleDidStartLoading);
@@ -754,6 +792,13 @@ export default function App() {
       setIsWebviewReady(false);
     };
   }, [isElectron]);
+
+  // Auto-scroll console panel to bottom when new logs arrive
+  useEffect(() => {
+    if (consoleEndRef.current && isConsolePanelOpen) {
+      consoleEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [consoleLogs, isConsolePanelOpen]);
 
   // Sync Inspector State with Webview
   useEffect(() => {
@@ -1179,6 +1224,31 @@ If you're not sure what the user wants, ask for clarification.
             </button>
           </div>
 
+          {/* Viewport Switcher - Desktop, Tablet, Mobile */}
+          <div className={`flex items-center rounded-lg p-0.5 ${isDarkMode ? 'bg-neutral-700' : 'bg-stone-100'}`}>
+            <button
+              onClick={() => setViewportSize('desktop')}
+              className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${viewportSize === 'desktop' ? (isDarkMode ? 'bg-neutral-600 text-white' : 'bg-white text-stone-900 shadow-sm') : (isDarkMode ? 'text-neutral-400 hover:text-neutral-200' : 'text-stone-400 hover:text-stone-600')}`}
+              title="Desktop view"
+            >
+              <Monitor size={14} />
+            </button>
+            <button
+              onClick={() => setViewportSize('tablet')}
+              className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${viewportSize === 'tablet' ? (isDarkMode ? 'bg-neutral-600 text-white' : 'bg-white text-stone-900 shadow-sm') : (isDarkMode ? 'text-neutral-400 hover:text-neutral-200' : 'text-stone-400 hover:text-stone-600')}`}
+              title="Tablet view (768px)"
+            >
+              <Tablet size={14} />
+            </button>
+            <button
+              onClick={() => setViewportSize('mobile')}
+              className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${viewportSize === 'mobile' ? (isDarkMode ? 'bg-neutral-600 text-white' : 'bg-white text-stone-900 shadow-sm') : (isDarkMode ? 'text-neutral-400 hover:text-neutral-200' : 'text-stone-400 hover:text-stone-600')}`}
+              title="Mobile view (375px)"
+            >
+              <Smartphone size={14} />
+            </button>
+          </div>
+
           {/* URL Bar */}
           <form onSubmit={handleUrlSubmit} className="flex-1">
             <div className="relative">
@@ -1222,6 +1292,20 @@ If you're not sure what the user wants, ask for clarification.
             <Code2 size={16} />
           </button>
 
+          {/* Console Toggle */}
+          <button
+            onClick={() => setIsConsolePanelOpen(!isConsolePanelOpen)}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors relative ${isConsolePanelOpen ? 'bg-blue-100 text-blue-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500')}`}
+            title="Toggle Console"
+          >
+            <Terminal size={16} />
+            {consoleLogs.filter(l => l.type === 'error').length > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center">
+                {consoleLogs.filter(l => l.type === 'error').length}
+              </span>
+            )}
+          </button>
+
           {/* Dark Mode Toggle */}
           <button
             onClick={toggleDarkMode}
@@ -1230,21 +1314,35 @@ If you're not sure what the user wants, ask for clarification.
           >
             {isDarkMode ? <Sun size={16} /> : <Moon size={16} />}
           </button>
+
+          {/* Settings Button */}
+          <button
+            onClick={() => {/* TODO: Open settings panel */}}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'}`}
+            title="Settings"
+          >
+            <Settings size={16} />
+          </button>
         </div>
 
         {/* Browser Content */}
-        <div className="flex-1 relative overflow-hidden">
-          {isElectron && webviewPreloadPath ? (
-            <webview
-              ref={webviewRef as React.RefObject<HTMLElement>}
-              src={browserUrl}
-              preload={`file://${webviewPreloadPath}`}
-              className="w-full h-full"
-              // @ts-expect-error - webview is an Electron-specific element
-              allowpopups="true"
-              nodeintegration="true"
-              webpreferences="contextIsolation=no"
-            />
+        <div className={`flex-1 relative overflow-hidden flex flex-col ${isConsolePanelOpen ? '' : ''}`}>
+          <div className={`flex-1 relative overflow-hidden flex items-start justify-center ${isDarkMode ? 'bg-neutral-900' : 'bg-stone-200'}`}>
+            {isElectron && webviewPreloadPath ? (
+              <webview
+                ref={webviewRef as React.RefObject<HTMLElement>}
+                src={browserUrl}
+                preload={`file://${webviewPreloadPath}`}
+                className="h-full transition-all duration-300"
+                style={{
+                  width: viewportWidths[viewportSize] ? `${viewportWidths[viewportSize]}px` : '100%',
+                  maxWidth: '100%'
+                }}
+                // @ts-expect-error - webview is an Electron-specific element
+                allowpopups="true"
+                nodeintegration="true"
+                webpreferences="contextIsolation=no"
+              />
           ) : isElectron ? (
             <div className={`w-full h-full flex items-center justify-center ${isDarkMode ? 'bg-neutral-800' : 'bg-stone-50'}`}>
               <div className={`w-8 h-8 border-2 rounded-full animate-spin ${isDarkMode ? 'border-neutral-600 border-t-neutral-400' : 'border-stone-300 border-t-stone-600'}`}></div>
@@ -1391,6 +1489,66 @@ If you're not sure what the user wants, ask for clarification.
                 </div>
             )}
           </div>
+
+          {/* Console Panel */}
+          {isConsolePanelOpen && (
+            <div className={`h-48 border-t flex flex-col ${isDarkMode ? 'border-neutral-700 bg-neutral-900' : 'border-stone-200 bg-stone-50'}`}>
+              <div className={`flex items-center justify-between px-3 py-1.5 border-b ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
+                <div className="flex items-center gap-2">
+                  <Terminal size={14} className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'} />
+                  <span className={`text-xs font-medium ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>Console</span>
+                  <span className={`text-xs px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-neutral-700 text-neutral-400' : 'bg-stone-200 text-stone-500'}`}>
+                    {consoleLogs.length}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setConsoleLogs([])}
+                    className={`p-1 rounded hover:bg-opacity-80 transition ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'}`}
+                    title="Clear console"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+                  </button>
+                  <button
+                    onClick={() => setIsConsolePanelOpen(false)}
+                    className={`p-1 rounded hover:bg-opacity-80 transition ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'}`}
+                    title="Close console"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+              <div className={`flex-1 overflow-y-auto font-mono text-xs p-2 space-y-0.5 ${isDarkMode ? 'text-neutral-300' : 'text-stone-700'}`}>
+                {consoleLogs.length === 0 ? (
+                  <div className={`text-center py-8 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                    No console messages yet
+                  </div>
+                ) : (
+                  consoleLogs.map((log, index) => (
+                    <div
+                      key={index}
+                      className={`flex items-start gap-2 px-2 py-0.5 rounded ${
+                        log.type === 'error' ? (isDarkMode ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-600') :
+                        log.type === 'warn' ? (isDarkMode ? 'bg-yellow-500/10 text-yellow-400' : 'bg-yellow-50 text-yellow-600') :
+                        log.type === 'info' ? (isDarkMode ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600') :
+                        ''
+                      }`}
+                    >
+                      <span className={`flex-shrink-0 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                        {log.timestamp.toLocaleTimeString()}
+                      </span>
+                      <span className="flex-shrink-0 w-12 text-center">
+                        [{log.type}]
+                      </span>
+                      <span className="break-all">{log.message}</span>
+                    </div>
+                  ))
+                )}
+                <div ref={consoleEndRef} />
+              </div>
+            </div>
+          )}
+        </div>
         </div>
         )}
 
