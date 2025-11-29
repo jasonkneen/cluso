@@ -22,6 +22,16 @@ export interface SelectedElement {
   id?: string;
   className?: string;
   xpath?: string;
+  outerHTML?: string;
+  attributes?: Record<string, string>;
+  computedStyle?: {
+    display?: string;
+    position?: string;
+    visibility?: string;
+    color?: string;
+    backgroundColor?: string;
+    fontSize?: string;
+  };
   x?: number;
   y?: number;
   rect?: {
