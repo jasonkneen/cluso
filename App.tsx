@@ -229,6 +229,8 @@ export default function App() {
     code: string;
     undoCode: string;
     description: string;
+    additions: number;
+    deletions: number;
   } | null>(null);
   const [isPreviewingOriginal, setIsPreviewingOriginal] = useState(false);
 
@@ -330,9 +332,17 @@ export default function App() {
 
   // Reject pending code change - undo and clear
   const handleRejectChange = useCallback(() => {
+    console.log('[Exec] Rejecting change, pendingChange:', pendingChange);
+    console.log('[Exec] undoCode:', pendingChange?.undoCode);
+    console.log('[Exec] webviewRef.current:', !!webviewRef.current);
+
     if (pendingChange?.undoCode && webviewRef.current) {
-      console.log('[Exec] Rejecting - running undo code');
-      webviewRef.current.executeJavaScript(pendingChange.undoCode);
+      console.log('[Exec] Rejecting - running undo code:', pendingChange.undoCode);
+      webviewRef.current.executeJavaScript(pendingChange.undoCode)
+        .then(() => console.log('[Exec] Undo executed successfully'))
+        .catch((err: Error) => console.error('[Exec] Undo error:', err));
+    } else {
+      console.log('[Exec] No undo code available or no webview');
     }
     setPendingChange(null);
     setMessages(prev => [...prev, {
@@ -976,11 +986,18 @@ If you're not sure what the user wants, ask for clarification.
             .then(() => console.log('[Exec] Applied'))
             .catch((err: Error) => console.error('[Exec] Error:', err));
 
+          // Calculate simple diff stats based on code changes
+          // Count semicolons/statements as a rough proxy for changes
+          const additions = codeBlocks.length;
+          const deletions = codeBlocks.filter(b => b.undo).length;
+
           // Store for toolbar (undo/confirm/reject)
           setPendingChange({
             code: forwardCode,
             undoCode: undoCode || '',
-            description: cleanedText || 'Change applied'
+            description: cleanedText || 'Change applied',
+            additions,
+            deletions
           });
         }
       }
@@ -2049,6 +2066,12 @@ If you're not sure what the user wants, ask for clarification.
       {/* Pending Code Change Preview - 3 Button Popup */}
       {pendingChange && (
           <div className={`absolute bottom-24 left-1/2 transform -translate-x-1/2 flex items-center gap-2 rounded-full shadow-xl p-2 z-50 ${isDarkMode ? 'bg-neutral-800 border border-neutral-700' : 'bg-white border border-neutral-200'}`}>
+              {/* Diff Stats */}
+              <div className="flex items-center gap-1.5 px-2 text-xs font-mono">
+                  <span className="text-green-500">+{pendingChange.additions}</span>
+                  <span className="text-red-500">-{pendingChange.deletions}</span>
+              </div>
+              <div className={`w-[1px] h-6 ${isDarkMode ? 'bg-neutral-600' : 'bg-neutral-200'}`}></div>
               <button
                   onMouseDown={() => {
                     if (pendingChange.undoCode && webviewRef.current) {
