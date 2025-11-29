@@ -2153,16 +2153,6 @@ If you're not sure what the user wants, ask for clarification.
       </div>
       )}
 
-      {/* Expand Sidebar Button */}
-      {!isSidebarOpen && (
-          <button
-              onClick={() => setIsSidebarOpen(true)}
-              className={`absolute right-4 top-4 p-2 rounded-lg shadow-sm transition z-50 ${isDarkMode ? 'bg-neutral-800 border border-neutral-700 hover:bg-neutral-700 text-neutral-400 hover:text-neutral-200' : 'bg-white border border-stone-200 hover:bg-stone-50 text-stone-500 hover:text-stone-700'}`}
-              title="Open sidebar"
-          >
-              <PanelLeft size={16} />
-          </button>
-      )}
 
       {/* Stash Confirmation Dialog */}
       {isStashDialogOpen && (
