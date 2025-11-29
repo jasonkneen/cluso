@@ -1356,7 +1356,7 @@ If you're not sure what the user wants, ask for clarification.
       />
 
       {/* Main Content Area */}
-      <div className="flex flex-1 overflow-hidden p-1 gap-1">
+      <div className="flex flex-1 overflow-hidden pt-1 pb-2 px-2 gap-1">
 
         {/* --- Left Pane: Browser, New Tab Page, or Project Setup --- */}
         {setupProject ? (
@@ -1853,7 +1853,7 @@ If you're not sure what the user wants, ask for clarification.
 
           {/* Console Panel */}
           {isConsolePanelOpen && (
-            <div className={`flex flex-col rounded-t-2xl overflow-hidden ${isDarkMode ? 'bg-neutral-900' : 'bg-stone-50'}`} style={{ height: consoleHeight }}>
+            <div className={`flex flex-col overflow-hidden ${isDarkMode ? 'bg-neutral-900' : 'bg-stone-50'}`} style={{ height: consoleHeight }}>
               {/* Resize Handle */}
               <div
                 className={`h-2 cursor-ns-resize flex-shrink-0 flex items-center justify-center group ${isDarkMode ? 'bg-neutral-900' : 'bg-stone-50'}`}
@@ -1862,10 +1862,10 @@ If you're not sure what the user wants, ask for clarification.
                 <div className={`w-8 h-0.5 rounded-full transition-colors ${isConsoleResizing ? (isDarkMode ? 'bg-neutral-400' : 'bg-stone-500') : (isDarkMode ? 'bg-neutral-600 group-hover:bg-neutral-500' : 'bg-stone-300 group-hover:bg-stone-400')}`} />
               </div>
               <div className={`flex items-center justify-between px-3 py-1.5 border-b ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
-                <div className="flex items-center gap-2">
+                <div className={`flex items-center gap-2 px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-neutral-700' : 'bg-stone-200'}`} style={{ position: 'relative', top: '-3px' }}>
                   <Terminal size={14} className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'} />
                   <span className={`text-xs font-medium ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>Console</span>
-                  <span className={`text-xs px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-neutral-700 text-neutral-400' : 'bg-stone-200 text-stone-500'}`}>
+                  <span className={`text-xs ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
                     {consoleLogs.length}
                   </span>
                 </div>

@@ -62,6 +62,7 @@ export function TabBar({
                   : 'text-stone-500 hover:bg-stone-200/60 hover:text-stone-700'
               }
             `}
+            style={{ position: 'relative', top: '3px' }}
           >
             {/* Favicon */}
             {tab.favicon ? (
