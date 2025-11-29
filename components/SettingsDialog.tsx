@@ -92,10 +92,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     { id: 'claude-opus-4-5', name: 'Claude Opus 4.5', provider: 'claude-code', enabled: false },
     { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', provider: 'claude-code', enabled: false },
     // Codex OAuth models (ChatGPT Plus/Pro)
-    { id: 'gpt-5', name: 'GPT-5', provider: 'codex', enabled: false },
-    { id: 'gpt-5-mini', name: 'GPT-5 Mini', provider: 'codex', enabled: false },
-    { id: 'gpt-5-nano', name: 'GPT-5 Nano', provider: 'codex', enabled: false },
-    { id: 'gpt-5-codex', name: 'GPT-5 Codex', provider: 'codex', enabled: false },
+    { id: 'gpt-5.1', name: 'GPT-5.1', provider: 'codex', enabled: false },
+    { id: 'gpt-5.1-mini', name: 'GPT-5.1 Mini', provider: 'codex', enabled: false },
+    { id: 'gpt-5.1-nano', name: 'GPT-5.1 Nano', provider: 'codex', enabled: false },
+    { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex', provider: 'codex', enabled: false },
   ],
   connections: [
     { id: '1', name: 'Local MCP Server', type: 'mcp', url: 'http://localhost:3001', enabled: false },

@@ -13,6 +13,7 @@ export interface TabState {
   canGoBack: boolean
   canGoForward: boolean
   isLoading: boolean
+  isWebviewReady: boolean
 
   // Chat state
   messages: Message[]
@@ -49,6 +50,7 @@ export function createNewTab(id?: string): TabState {
     canGoBack: false,
     canGoForward: false,
     isLoading: false,
+    isWebviewReady: false,
 
     messages: [],
     selectedElement: null,

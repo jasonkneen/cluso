@@ -185,12 +185,24 @@ export default function App() {
     setActiveTabId(tabId);
   }, []);
 
+  // Sync URL input when switching tabs
+  useEffect(() => {
+    setUrlInput(activeTab.url || '');
+  }, [activeTabId, activeTab.url]);
+
   // Update current tab state helper
   const updateCurrentTab = useCallback((updates: Partial<TabState>) => {
     setTabs(prev => prev.map(tab =>
       tab.id === activeTabId ? { ...tab, ...updates } : tab
     ));
   }, [activeTabId]);
+
+  // Update any tab by ID (for webview event handlers)
+  const updateTab = useCallback((tabId: string, updates: Partial<TabState>) => {
+    setTabs(prev => prev.map(tab =>
+      tab.id === tabId ? { ...tab, ...updates } : tab
+    ));
+  }, []);
 
   // Convert TabState to Tab for TabBar
   const tabBarTabs: Tab[] = tabs.map(t => ({
@@ -201,7 +213,6 @@ export default function App() {
   }));
 
   // Browser State
-  const [currentUrl, setCurrentUrl] = useState(DEFAULT_URL); // URL for webview src
   const [urlInput, setUrlInput] = useState(DEFAULT_URL); // URL in address bar (editable)
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
@@ -327,10 +338,12 @@ export default function App() {
     return appSettings.models.map(settingsModel => {
       const provider = appSettings.providers.find(p => p.id === settingsModel.provider);
 
-      // For claude-code, check OAuth status instead of provider API key
+      // For claude-code and codex, check OAuth status instead of provider API key
       const isProviderConfigured = settingsModel.provider === 'claude-code'
         ? !!appSettings.claudeCodeAuthenticated
-        : provider?.enabled && !!provider?.apiKey;
+        : settingsModel.provider === 'codex'
+          ? !!appSettings.codexAuthenticated
+          : provider?.enabled && !!provider?.apiKey;
 
       const isAvailable = settingsModel.enabled && isProviderConfigured;
       const Icon = getModelIcon(settingsModel.id, settingsModel.provider);
@@ -345,7 +358,7 @@ export default function App() {
         isProviderConfigured,
       };
     });
-  }, [appSettings.models, appSettings.providers, appSettings.claudeCodeAuthenticated]);
+  }, [appSettings.models, appSettings.providers, appSettings.claudeCodeAuthenticated, appSettings.codexAuthenticated]);
 
   // Get only available models (for backwards compatibility)
   const availableModels = useMemo(() => {
@@ -380,6 +393,18 @@ export default function App() {
     deletions: number;
   } | null>(null);
   const [isPreviewingOriginal, setIsPreviewingOriginal] = useState(false);
+
+  // Edited Files Drawer State
+  interface EditedFile {
+    path: string;
+    fileName: string;
+    additions: number;
+    deletions: number;
+    undoCode?: string;
+    timestamp: Date;
+  }
+  const [editedFiles, setEditedFiles] = useState<EditedFile[]>([]);
+  const [isEditedFilesDrawerOpen, setIsEditedFilesDrawerOpen] = useState(false);
 
   // Viewport State (responsive preview)
   type ViewportSize = 'mobile' | 'tablet' | 'desktop';
@@ -460,15 +485,13 @@ export default function App() {
   const [consoleLogs, setConsoleLogs] = useState<Array<{type: 'log' | 'warn' | 'error' | 'info'; message: string; timestamp: Date}>>([]);
   const [isConsolePanelOpen, setIsConsolePanelOpen] = useState(false);
   const [consoleHeight, setConsoleHeight] = useState(192); // 192px = h-48
+  const [consoleFilters, setConsoleFilters] = useState<Set<'log' | 'warn' | 'error' | 'info'>>(new Set());
   const [isConsoleResizing, setIsConsoleResizing] = useState(false);
   const consoleResizeStartY = useRef<number>(0);
   const consoleResizeStartHeight = useRef<number>(192);
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const [selectedLogIndices, setSelectedLogIndices] = useState<Set<number>>(new Set());
   const lastClickedLogIndex = useRef<number | null>(null);
-
-  // Webview ready state (for sending messages)
-  const [isWebviewReady, setIsWebviewReady] = useState(false);
 
   // AI Element Selection State (pending confirmation)
   const [aiSelectedElement, setAiSelectedElement] = useState<{
@@ -489,7 +512,13 @@ export default function App() {
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const webviewRef = useRef<WebviewElement>(null);
+  // Map of webview refs by tab id - each tab has its own webview instance
+  const webviewRefs = useRef<Map<string, WebviewElement>>(new Map());
+
+  // Helper to get the current tab's webview ref
+  const getWebviewRef = useCallback((tabId: string) => webviewRefs.current.get(tabId), []);
+  const activeWebview = webviewRefs.current.get(activeTabId);
+  const isWebviewReady = activeTab.isWebviewReady;
 
   // Check if in Electron
   const isElectron = typeof window !== 'undefined' && window.electronAPI?.isElectron;
@@ -606,13 +635,14 @@ export default function App() {
 
   // Reject pending code change - undo and clear
   const handleRejectChange = useCallback(() => {
+    const webview = webviewRefs.current.get(activeTabId);
     console.log('[Exec] Rejecting change, pendingChange:', pendingChange);
     console.log('[Exec] undoCode:', pendingChange?.undoCode);
-    console.log('[Exec] webviewRef.current:', !!webviewRef.current);
+    console.log('[Exec] webview:', !!webview);
 
-    if (pendingChange?.undoCode && webviewRef.current) {
+    if (pendingChange?.undoCode && webview) {
       console.log('[Exec] Rejecting - running undo code:', pendingChange.undoCode);
-      webviewRef.current.executeJavaScript(pendingChange.undoCode)
+      webview.executeJavaScript(pendingChange.undoCode)
         .then(() => console.log('[Exec] Undo executed successfully'))
         .catch((err: Error) => console.error('[Exec] Undo error:', err));
     } else {
@@ -625,19 +655,19 @@ export default function App() {
       content: 'Changes discarded.',
       timestamp: new Date()
     }]);
-  }, [pendingChange]);
+  }, [pendingChange, activeTabId]);
 
-  // Browser navigation functions - use src attribute via currentUrl state
+  // Browser navigation functions - update active tab's URL
   const navigateTo = useCallback((url: string) => {
     let finalUrl = url.trim();
     if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
       finalUrl = 'http://' + finalUrl;
     }
     console.log('Navigating to:', finalUrl);
-    // Update both display URL and navigation URL
+    // Update both display URL and tab's navigation URL
     setUrlInput(finalUrl);
-    setCurrentUrl(finalUrl);
-  }, []);
+    updateCurrentTab({ url: finalUrl });
+  }, [updateCurrentTab]);
 
   const handleUrlSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -645,40 +675,45 @@ export default function App() {
   }, [urlInput, navigateTo]);
 
   const goBack = useCallback(() => {
-    if (webviewRef.current && isElectron) {
-      webviewRef.current.goBack();
+    const webview = webviewRefs.current.get(activeTabId);
+    if (webview && isElectron) {
+      webview.goBack();
     }
-  }, [isElectron]);
+  }, [isElectron, activeTabId]);
 
   const goForward = useCallback(() => {
-    if (webviewRef.current && isElectron) {
-      webviewRef.current.goForward();
+    const webview = webviewRefs.current.get(activeTabId);
+    if (webview && isElectron) {
+      webview.goForward();
     }
-  }, [isElectron]);
+  }, [isElectron, activeTabId]);
 
   const reload = useCallback(() => {
-    if (webviewRef.current && isElectron) {
-      webviewRef.current.reload();
+    const webview = webviewRefs.current.get(activeTabId);
+    if (webview && isElectron) {
+      webview.reload();
     }
-  }, [isElectron]);
+  }, [isElectron, activeTabId]);
 
   // Handle AI element selection request
   const handleAiElementSelect = useCallback((selector: string, reasoning?: string) => {
     console.log('[AI] Requesting element selection:', selector, reasoning);
-    if (webviewRef.current && isWebviewReady) {
+    const webview = webviewRefs.current.get(activeTabId);
+    if (webview && isWebviewReady) {
       // Send IPC message to webview to highlight the element
-      webviewRef.current.send('select-element-by-selector', selector);
+      webview.send('select-element-by-selector', selector);
 
       // Store pending selection (we'll get confirmation via message)
       setAiSelectedElement({ selector, reasoning: reasoning || '' });
     }
-  }, [isWebviewReady]);
+  }, [isWebviewReady, activeTabId]);
 
   // Handle AI code execution
   const handleExecuteCode = useCallback((code: string, description: string) => {
     console.log('[AI] Executing code:', description);
-    if (webviewRef.current && isWebviewReady) {
-      webviewRef.current.executeJavaScript(code)
+    const webview = webviewRefs.current.get(activeTabId);
+    if (webview && isWebviewReady) {
+      webview.executeJavaScript(code)
         .then(() => {
           console.log('[AI] Code executed successfully');
           setMessages(prev => [...prev, {
@@ -698,22 +733,23 @@ export default function App() {
           }]);
         });
     }
-  }, [isWebviewReady]);
+  }, [isWebviewReady, activeTabId]);
 
   // Handle voice confirmation - can optionally specify which numbered element (1-indexed)
   const handleConfirmSelection = useCallback((confirmed: boolean, elementNumber?: number) => {
     console.log('[AI] Voice confirmation:', confirmed, 'element number:', elementNumber);
+    const webview = webviewRefs.current.get(activeTabId);
     if (confirmed && aiSelectedElement?.elements && aiSelectedElement.elements.length > 0) {
       // If elementNumber specified (1-indexed), use that, otherwise use first
       const index = elementNumber ? Math.min(Math.max(elementNumber - 1, 0), aiSelectedElement.elements.length - 1) : 0;
       setSelectedElement(aiSelectedElement.elements[index]);
-      webviewRef.current?.send('clear-selection');
+      webview?.send('clear-selection');
       setAiSelectedElement(null);
     } else {
-      webviewRef.current?.send('clear-selection');
+      webview?.send('clear-selection');
       setAiSelectedElement(null);
     }
-  }, [aiSelectedElement]);
+  }, [aiSelectedElement, activeTabId]);
 
   const {
     streamState,
@@ -889,198 +925,208 @@ export default function App() {
     }
   }, [isScreenSharing, streamState.isConnected, startVideoStreaming, stopVideoStreaming]);
 
-  // Webview event handlers (Electron only)
-  useEffect(() => {
-    if (!isElectron) return;
+  // Track cleanup functions for webview event handlers per tab
+  const webviewCleanups = useRef<Map<string, () => void>>(new Map());
 
-    // Use a small delay to ensure webview is mounted
-    const timer = setTimeout(() => {
-      const webview = webviewRef.current;
-      if (!webview) {
-        console.log('Webview not found');
-        return;
-      }
+  // Setup webview event handlers for a specific tab
+  const setupWebviewHandlers = useCallback((tabId: string, webview: WebviewElement) => {
+    console.log(`[Tab ${tabId}] Setting up webview event handlers`);
 
-      console.log('Setting up webview event handlers');
-
-      const handleDidNavigate = () => {
-        const url = webview.getURL();
-        console.log('Did navigate:', url);
-        // Only update display URL, not navigation URL (to avoid loops)
+    const handleDidNavigate = () => {
+      const url = webview.getURL();
+      console.log(`[Tab ${tabId}] Did navigate:`, url);
+      // Update this tab's state
+      updateTab(tabId, {
+        canGoBack: webview.canGoBack(),
+        canGoForward: webview.canGoForward(),
+      });
+      // Update URL input only if this is the active tab
+      if (tabId === activeTabId) {
         setUrlInput(url);
-        setCanGoBack(webview.canGoBack());
-        setCanGoForward(webview.canGoForward());
-      };
+      }
+    };
 
-      const handleDidStartLoading = () => {
-        console.log('Started loading');
-        setIsLoading(true);
-      };
-      const handleDidStopLoading = () => {
-        console.log('Stopped loading');
-        setIsLoading(false);
-      };
-      const handleDidFinishLoad = () => {
-        const loadedUrl = webview.getURL();
-        console.log('Page finished loading, URL:', loadedUrl);
-        // Resend inspector state to fresh preload script after each page load
-        // The preload script runs fresh on each navigation, so we need to re-sync state
-        // Use refs to get current values (state variables would be stale in this closure)
-        console.log('Resending inspector modes after page load, inspector:', isInspectorActiveRef.current, 'screenshot:', isScreenshotActiveRef.current);
-        webview.send('set-inspector-mode', isInspectorActiveRef.current);
-        webview.send('set-screenshot-mode', isScreenshotActiveRef.current);
-        setIsWebviewReady(true);
-      };
+    const handleDidStartLoading = () => {
+      console.log(`[Tab ${tabId}] Started loading`);
+      updateTab(tabId, { isLoading: true });
+    };
 
-      const handleDidFailLoad = (e: { errorCode: number; errorDescription: string; validatedURL: string }) => {
-        console.error('Failed to load:', e.errorCode, e.errorDescription, e.validatedURL);
-      };
+    const handleDidStopLoading = () => {
+      console.log(`[Tab ${tabId}] Stopped loading`);
+      updateTab(tabId, { isLoading: false });
+    };
 
-      const handlePageTitleUpdated = (e: { title: string }) => {
-        setPageTitle(e.title);
-      };
+    const handleDidFinishLoad = () => {
+      const loadedUrl = webview.getURL();
+      console.log(`[Tab ${tabId}] Page finished loading, URL:`, loadedUrl);
+      webview.send('set-inspector-mode', isInspectorActiveRef.current);
+      webview.send('set-screenshot-mode', isScreenshotActiveRef.current);
+      updateTab(tabId, { isWebviewReady: true });
+    };
 
-      const handleIpcMessage = (event: { channel: string; args: unknown[] }) => {
-        const { channel, args } = event;
+    const handleDidFailLoad = (e: { errorCode: number; errorDescription: string; validatedURL: string }) => {
+      console.error(`[Tab ${tabId}] Failed to load:`, e.errorCode, e.errorDescription, e.validatedURL);
+    };
 
-        if (channel === 'inspector-select') {
-          const data = args[0] as { element: SelectedElement; x: number; y: number; rect: unknown };
-          setSelectedElement({
-            ...data.element,
-            x: data.x,
-            y: data.y,
-            rect: data.rect as SelectedElement['rect']
+    const handlePageTitleUpdated = (e: { title: string }) => {
+      updateTab(tabId, { title: e.title });
+    };
+
+    const handleIpcMessage = (event: { channel: string; args: unknown[] }) => {
+      const { channel, args } = event;
+
+      // Only handle IPC messages from the active tab
+      if (tabId !== activeTabId) return;
+
+      if (channel === 'inspector-select') {
+        const data = args[0] as { element: SelectedElement; x: number; y: number; rect: unknown };
+        setSelectedElement({
+          ...data.element,
+          x: data.x,
+          y: data.y,
+          rect: data.rect as SelectedElement['rect']
+        });
+      } else if (channel === 'screenshot-select') {
+        const data = args[0] as { element: SelectedElement; rect: { top: number; left: number; width: number; height: number } };
+        setScreenshotElement(data.element);
+        setIsScreenshotActive(false);
+
+        if (webview && data.rect) {
+          webview.capturePage({
+            x: Math.floor(data.rect.left),
+            y: Math.floor(data.rect.top),
+            width: Math.ceil(data.rect.width),
+            height: Math.ceil(data.rect.height)
+          }).then((image: Electron.NativeImage) => {
+            setCapturedScreenshot(image.toDataURL());
+          }).catch((err: Error) => {
+            console.error('Failed to capture screenshot:', err);
           });
-        } else if (channel === 'screenshot-select') {
-          const data = args[0] as { element: SelectedElement; rect: { top: number; left: number; width: number; height: number } };
-          setScreenshotElement(data.element);
-          setIsScreenshotActive(false);
-
-          // Capture the screenshot of the selected element
-          if (webview && data.rect) {
-            webview.capturePage({
-              x: Math.floor(data.rect.left),
-              y: Math.floor(data.rect.top),
-              width: Math.ceil(data.rect.width),
-              height: Math.ceil(data.rect.height)
-            }).then((image: Electron.NativeImage) => {
-              setCapturedScreenshot(image.toDataURL());
-            }).catch((err: Error) => {
-              console.error('Failed to capture screenshot:', err);
-            });
-          }
-        } else if (channel === 'console-log') {
-          const data = args[0] as { level: string; message: string };
-          const logType = (data.level.toLowerCase() === 'warning' ? 'warn' : data.level.toLowerCase()) as 'log' | 'warn' | 'error' | 'info';
-          setConsoleLogs(prev => [...prev.slice(-99), {
-            type: logType,
-            message: data.message,
-            timestamp: new Date()
-          }]);
-        } else if (channel === 'ai-selection-confirmed') {
-          const data = args[0] as {
-            selector: string;
-            count: number;
-            elements: Array<{ element: SelectedElement; rect: unknown }>;
-          };
-          console.log('[AI] Element selection confirmed:', data);
-          setAiSelectedElement(prev => ({
-            selector: data.selector,
-            reasoning: prev?.reasoning || '',
-            count: data.count,
-            elements: data.elements.map(item => ({
-              ...item.element,
-              rect: item.rect as SelectedElement['rect']
-            }))
-          }));
-        } else if (channel === 'ai-selection-failed') {
-          const data = args[0] as { selector: string; error: string };
-          console.error('[AI] Element selection failed:', data);
-          setAiSelectedElement(null);
-          setMessages(prev => [...prev, {
-            id: Date.now().toString(),
-            role: 'system',
-            content: `Could not find element: ${data.selector}. ${data.error}`,
-            timestamp: new Date()
-          }]);
         }
-      };
-
-      const handleDomReady = () => {
-        console.log('Webview DOM ready');
-        setIsWebviewReady(true);
-        // Also send inspector state on dom-ready in case page already loaded
-        console.log('DOM ready - sending inspector modes, inspector:', isInspectorActiveRef.current, 'screenshot:', isScreenshotActiveRef.current);
-        webview.send('set-inspector-mode', isInspectorActiveRef.current);
-        webview.send('set-screenshot-mode', isScreenshotActiveRef.current);
-      };
-
-      const handleConsoleMessage = (e: { level: number; message: string; line: number; sourceId: string }) => {
-        const levelMap: Record<number, 'log' | 'warn' | 'error' | 'info'> = {
-          0: 'log',    // Verbose/Debug
-          1: 'info',   // Info
-          2: 'warn',   // Warning
-          3: 'error'   // Error
-        };
-        const logType = levelMap[e.level] || 'log';
+      } else if (channel === 'console-log') {
+        const data = args[0] as { level: string; message: string };
+        const logType = (data.level.toLowerCase() === 'warning' ? 'warn' : data.level.toLowerCase()) as 'log' | 'warn' | 'error' | 'info';
         setConsoleLogs(prev => [...prev.slice(-99), {
           type: logType,
-          message: e.message,
+          message: data.message,
           timestamp: new Date()
         }]);
-      };
-
-      webview.addEventListener('dom-ready', handleDomReady);
-      webview.addEventListener('console-message', handleConsoleMessage as (e: unknown) => void);
-      webview.addEventListener('did-navigate', handleDidNavigate);
-      webview.addEventListener('did-navigate-in-page', handleDidNavigate);
-      webview.addEventListener('did-start-loading', handleDidStartLoading);
-      webview.addEventListener('did-stop-loading', handleDidStopLoading);
-      webview.addEventListener('did-finish-load', handleDidFinishLoad);
-      webview.addEventListener('did-fail-load', handleDidFailLoad as (e: unknown) => void);
-      webview.addEventListener('page-title-updated', handlePageTitleUpdated as (e: unknown) => void);
-      webview.addEventListener('ipc-message', handleIpcMessage as (e: unknown) => void);
-
-      // Check if webview is already ready (events may have fired before listeners were attached)
-      // The webview has a getURL method we can use to check if it's loaded
-      try {
-        const currentWebviewUrl = webview.getURL();
-        console.log('Webview current URL on setup:', currentWebviewUrl);
-        if (currentWebviewUrl) {
-          // Webview already has a URL loaded, treat as ready
-          console.log('Webview already loaded, setting ready and sending inspector state');
-          setIsWebviewReady(true);
-          webview.send('set-inspector-mode', isInspectorActiveRef.current);
-          webview.send('set-screenshot-mode', isScreenshotActiveRef.current);
-        }
-      } catch (e) {
-        console.log('Webview not yet ready for getURL');
+      } else if (channel === 'ai-selection-confirmed') {
+        const data = args[0] as {
+          selector: string;
+          count: number;
+          elements: Array<{ element: SelectedElement; rect: unknown }>;
+        };
+        console.log('[AI] Element selection confirmed:', data);
+        setAiSelectedElement(prev => ({
+          selector: data.selector,
+          reasoning: prev?.reasoning || '',
+          count: data.count,
+          elements: data.elements.map(item => ({
+            ...item.element,
+            rect: item.rect as SelectedElement['rect']
+          }))
+        }));
+      } else if (channel === 'ai-selection-failed') {
+        const data = args[0] as { selector: string; error: string };
+        console.error('[AI] Element selection failed:', data);
+        setAiSelectedElement(null);
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          role: 'system',
+          content: `Could not find element: ${data.selector}. ${data.error}`,
+          timestamp: new Date()
+        }]);
       }
-
-      // Cleanup function
-      return () => {
-        webview.removeEventListener('dom-ready', handleDomReady);
-        webview.removeEventListener('console-message', handleConsoleMessage as (e: unknown) => void);
-        webview.removeEventListener('did-navigate', handleDidNavigate);
-        webview.removeEventListener('did-navigate-in-page', handleDidNavigate);
-        webview.removeEventListener('did-start-loading', handleDidStartLoading);
-        webview.removeEventListener('did-stop-loading', handleDidStopLoading);
-        webview.removeEventListener('did-finish-load', handleDidFinishLoad);
-        webview.removeEventListener('did-fail-load', handleDidFailLoad as (e: unknown) => void);
-        webview.removeEventListener('page-title-updated', handlePageTitleUpdated as (e: unknown) => void);
-        webview.removeEventListener('ipc-message', handleIpcMessage as (e: unknown) => void);
-      };
-    }, 100);
-
-    return () => {
-      clearTimeout(timer);
-      setIsWebviewReady(false);
     };
-  // Re-run when these change (webview may mount/unmount based on URL/state):
-  // - currentUrl: the webview src
-  // - setupProject: when not null, webview is hidden (showing ProjectSetupFlow)
-  // - activeTab.url: determines isNewTabPage which controls webview visibility
-  }, [isElectron, currentUrl, setupProject, activeTab.url]);
+
+    const handleDomReady = () => {
+      console.log(`[Tab ${tabId}] Webview DOM ready`);
+      updateTab(tabId, { isWebviewReady: true });
+      webview.send('set-inspector-mode', isInspectorActiveRef.current);
+      webview.send('set-screenshot-mode', isScreenshotActiveRef.current);
+    };
+
+    const handleConsoleMessage = (e: { level: number; message: string; line: number; sourceId: string }) => {
+      // Only log console messages from active tab
+      if (tabId !== activeTabId) return;
+
+      const levelMap: Record<number, 'log' | 'warn' | 'error' | 'info'> = {
+        0: 'log',
+        1: 'info',
+        2: 'warn',
+        3: 'error'
+      };
+      const logType = levelMap[e.level] || 'log';
+      setConsoleLogs(prev => [...prev.slice(-99), {
+        type: logType,
+        message: e.message,
+        timestamp: new Date()
+      }]);
+    };
+
+    webview.addEventListener('dom-ready', handleDomReady);
+    webview.addEventListener('console-message', handleConsoleMessage as (e: unknown) => void);
+    webview.addEventListener('did-navigate', handleDidNavigate);
+    webview.addEventListener('did-navigate-in-page', handleDidNavigate);
+    webview.addEventListener('did-start-loading', handleDidStartLoading);
+    webview.addEventListener('did-stop-loading', handleDidStopLoading);
+    webview.addEventListener('did-finish-load', handleDidFinishLoad);
+    webview.addEventListener('did-fail-load', handleDidFailLoad as (e: unknown) => void);
+    webview.addEventListener('page-title-updated', handlePageTitleUpdated as (e: unknown) => void);
+    webview.addEventListener('ipc-message', handleIpcMessage as (e: unknown) => void);
+
+    // Check if webview is already ready
+    try {
+      const currentWebviewUrl = webview.getURL();
+      if (currentWebviewUrl) {
+        updateTab(tabId, { isWebviewReady: true });
+        webview.send('set-inspector-mode', isInspectorActiveRef.current);
+        webview.send('set-screenshot-mode', isScreenshotActiveRef.current);
+      }
+    } catch (e) {
+      console.log(`[Tab ${tabId}] Webview not yet ready for getURL`);
+    }
+
+    // Return cleanup function
+    return () => {
+      webview.removeEventListener('dom-ready', handleDomReady);
+      webview.removeEventListener('console-message', handleConsoleMessage as (e: unknown) => void);
+      webview.removeEventListener('did-navigate', handleDidNavigate);
+      webview.removeEventListener('did-navigate-in-page', handleDidNavigate);
+      webview.removeEventListener('did-start-loading', handleDidStartLoading);
+      webview.removeEventListener('did-stop-loading', handleDidStopLoading);
+      webview.removeEventListener('did-finish-load', handleDidFinishLoad);
+      webview.removeEventListener('did-fail-load', handleDidFailLoad as (e: unknown) => void);
+      webview.removeEventListener('page-title-updated', handlePageTitleUpdated as (e: unknown) => void);
+      webview.removeEventListener('ipc-message', handleIpcMessage as (e: unknown) => void);
+    };
+  }, [updateTab, activeTabId]);
+
+  // Ref callback for webview elements - sets up handlers when mounted
+  const webviewRefCallback = useCallback((tabId: string) => (element: HTMLElement | null) => {
+    if (element) {
+      const webview = element as unknown as WebviewElement;
+      webviewRefs.current.set(tabId, webview);
+
+      // Small delay to ensure webview is fully mounted
+      setTimeout(() => {
+        // Clean up previous handlers if any
+        const prevCleanup = webviewCleanups.current.get(tabId);
+        if (prevCleanup) prevCleanup();
+
+        // Set up new handlers
+        const cleanup = setupWebviewHandlers(tabId, webview);
+        webviewCleanups.current.set(tabId, cleanup);
+      }, 100);
+    } else {
+      // Element unmounted - clean up
+      const cleanup = webviewCleanups.current.get(tabId);
+      if (cleanup) cleanup();
+      webviewCleanups.current.delete(tabId);
+      webviewRefs.current.delete(tabId);
+    }
+  }, [setupWebviewHandlers]);
 
   // Auto-scroll console panel to bottom when new logs arrive
   useEffect(() => {
@@ -1131,14 +1177,105 @@ export default function App() {
     lastClickedLogIndex.current = null;
   }, []);
 
+  // Toggle console filter
+  const toggleConsoleFilter = useCallback((type: 'log' | 'warn' | 'error' | 'info') => {
+    setConsoleFilters(prev => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  }, []);
+
+  // Clear all console filters (show all)
+  const clearConsoleFilters = useCallback(() => {
+    setConsoleFilters(new Set());
+  }, []);
+
+  // Filtered console logs
+  const filteredConsoleLogs = useMemo(() => {
+    if (consoleFilters.size === 0) return consoleLogs;
+    return consoleLogs.filter(log => consoleFilters.has(log.type));
+  }, [consoleLogs, consoleFilters]);
+
+  // Edited files management
+  const addEditedFile = useCallback((file: { path: string; additions?: number; deletions?: number; undoCode?: string }) => {
+    const fileName = file.path.split('/').pop() || file.path;
+    setEditedFiles(prev => {
+      // Check if file already exists, update it
+      const existing = prev.findIndex(f => f.path === file.path);
+      if (existing >= 0) {
+        const updated = [...prev];
+        updated[existing] = {
+          ...updated[existing],
+          additions: updated[existing].additions + (file.additions || 0),
+          deletions: updated[existing].deletions + (file.deletions || 0),
+          undoCode: file.undoCode || updated[existing].undoCode,
+          timestamp: new Date()
+        };
+        return updated;
+      }
+      return [...prev, {
+        path: file.path,
+        fileName,
+        additions: file.additions || 0,
+        deletions: file.deletions || 0,
+        undoCode: file.undoCode,
+        timestamp: new Date()
+      }];
+    });
+  }, []);
+
+  const undoFileEdit = useCallback((path: string) => {
+    const file = editedFiles.find(f => f.path === path);
+    if (file?.undoCode) {
+      const webview = webviewRefs.current.get(activeTabId);
+      if (webview) {
+        webview.executeJavaScript(file.undoCode)
+          .then(() => {
+            setEditedFiles(prev => prev.filter(f => f.path !== path));
+          })
+          .catch((err: Error) => console.error('[Undo] Error:', err));
+      }
+    } else {
+      // No undo code, just remove from list
+      setEditedFiles(prev => prev.filter(f => f.path !== path));
+    }
+  }, [editedFiles, activeTabId]);
+
+  const undoAllEdits = useCallback(() => {
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview) return;
+
+    // Execute all undo codes in reverse order
+    const filesToUndo = [...editedFiles].reverse();
+    Promise.all(
+      filesToUndo
+        .filter(f => f.undoCode)
+        .map(f => webview.executeJavaScript(f.undoCode!).catch(() => {}))
+    ).then(() => {
+      setEditedFiles([]);
+      setIsEditedFilesDrawerOpen(false);
+    });
+  }, [editedFiles, activeTabId]);
+
+  const keepAllEdits = useCallback(() => {
+    setEditedFiles([]);
+    setIsEditedFilesDrawerOpen(false);
+  }, []);
+
   // Sync Inspector State with Webview
   useEffect(() => {
-    console.log('[Inspector Sync] Effect triggered:', { isElectron, hasWebview: !!webviewRef.current, isWebviewReady, isInspectorActive, isScreenshotActive });
+    const webview = webviewRefs.current.get(activeTabId);
+    console.log('[Inspector Sync] Effect triggered:', { isElectron, hasWebview: !!webview, isWebviewReady, isInspectorActive, isScreenshotActive });
     if (!isElectron) {
       console.log('[Inspector Sync] Skipping: not in Electron');
       return;
     }
-    if (!webviewRef.current) {
+    if (!webview) {
       console.log('[Inspector Sync] Skipping: no webview ref');
       return;
     }
@@ -1147,7 +1284,6 @@ export default function App() {
       return;
     }
 
-    const webview = webviewRef.current;
     console.log('[Inspector Sync] Sending inspector modes to webview:', { isInspectorActive, isScreenshotActive });
     webview.send('set-inspector-mode', isInspectorActive);
     webview.send('set-screenshot-mode', isScreenshotActive);
@@ -1156,18 +1292,20 @@ export default function App() {
       setSelectedElement(null);
       setShowElementChat(false);
     }
-  }, [isInspectorActive, isScreenshotActive, isElectron, isWebviewReady]);
+  }, [isInspectorActive, isScreenshotActive, isElectron, isWebviewReady, activeTabId]);
 
   // Auto-reload webview on HMR (Hot Module Replacement)
   useEffect(() => {
-    if (!isElectron || !webviewRef.current) return;
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!isElectron || !webview) return;
 
     // Vite HMR - reload webview when app code changes
     if (import.meta.hot) {
       const handleHmrUpdate = () => {
         console.log('[HMR] Reloading webview...');
-        if (webviewRef.current) {
-          webviewRef.current.reload();
+        const currentWebview = webviewRefs.current.get(activeTabId);
+        if (currentWebview) {
+          currentWebview.reload();
         }
       };
 
@@ -1177,7 +1315,7 @@ export default function App() {
         import.meta.hot?.off('vite:afterUpdate', handleHmrUpdate);
       };
     }
-  }, [isElectron]);
+  }, [isElectron, activeTabId]);
 
   // Reset element chat when sidebar opens
   useEffect(() => {
@@ -1392,13 +1530,14 @@ If you're not sure what the user wants, ask for clarification.
         }]);
 
         // If we have code to execute, execute immediately and show toolbar
-        if (codeBlocks.length > 0 && webviewRef.current && isWebviewReady) {
+        const webview = webviewRefs.current.get(activeTabId);
+        if (codeBlocks.length > 0 && webview && isWebviewReady) {
           const forwardCode = codeBlocks.map(b => b.code).join(';\n');
           const undoCode = codeBlocks.map(b => b.undo || '').filter(Boolean).join(';\n');
 
           // Execute immediately
           console.log('[Exec] Executing immediately:', forwardCode);
-          webviewRef.current.executeJavaScript(forwardCode)
+          webview.executeJavaScript(forwardCode)
             .then(() => console.log('[Exec] Applied'))
             .catch((err: Error) => console.error('[Exec] Error:', err));
 
@@ -1432,9 +1571,10 @@ If you're not sure what the user wants, ask for clarification.
 
   // Calculate popup position for webview - bottom-right of element with smart edge detection
   const getPopupStyle = () => {
-    if (!selectedElement || !selectedElement.rect || !webviewRef.current) return { display: 'none' };
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!selectedElement || !selectedElement.rect || !webview) return { display: 'none' };
 
-    const webviewRect = webviewRef.current.getBoundingClientRect();
+    const webviewRect = webview.getBoundingClientRect();
     const buttonSize = 48; // Chat button size (matching w-12 h-12)
     const offset = 4; // Distance from element corner
 
@@ -1535,9 +1675,7 @@ If you're not sure what the user wants, ask for clarification.
   const handleSetupComplete = useCallback((url: string) => {
     if (setupProject) {
       updateCurrentTab({ url, title: setupProject.name, projectPath: setupProject.path });
-      // Update both display URL and navigation URL
-      setUrlInput(url);
-      setCurrentUrl(url);
+      // URL input is synced via useEffect when tab.url changes
       setSetupProject(null);
     }
   }, [setupProject, updateCurrentTab]);
@@ -1550,9 +1688,7 @@ If you're not sure what the user wants, ask for clarification.
   // Handle opening a URL from new tab page
   const handleOpenUrl = useCallback((url: string) => {
     updateCurrentTab({ url, title: new URL(url).hostname });
-    // Update both display URL and navigation URL
-    setUrlInput(url);
-    setCurrentUrl(url);
+    // URL input is synced via useEffect when tab.url changes
   }, [updateCurrentTab]);
 
   // Check if current tab is "new tab" (no URL)
@@ -1689,8 +1825,9 @@ If you're not sure what the user wants, ask for clarification.
           {/* DevTools Toggle */}
           <button
             onClick={() => {
-              if (webviewRef.current) {
-                webviewRef.current.openDevTools();
+              const webview = webviewRefs.current.get(activeTabId);
+              if (webview) {
+                webview.openDevTools();
               }
             }}
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'}`}
@@ -1881,42 +2018,52 @@ If you're not sure what the user wants, ask for clarification.
             )}
 
             {isElectron && webviewPreloadPath ? (
-              /* Wrapper div for proper corner clipping - uses aspect ratio to fit viewport */
-              <div
-                className={`transition-all duration-300 origin-center ${
-                  viewportSize === 'desktop'
-                    ? 'w-full h-full'
-                    : 'rounded-3xl shadow-2xl ring-4 ring-neutral-700 overflow-hidden flex-shrink-0'
-                }`}
-                style={viewportSize === 'desktop' ? undefined : (
-                  zoomLevel === 'fit' ? {
-                    aspectRatio: `${currentWidth} / ${currentHeight}`,
-                    maxWidth: 'calc(100% - 48px)',
-                    maxHeight: 'calc(100% - 80px)',
-                    width: 'auto',
-                    height: '100%'
-                  } : {
-                    width: `${currentWidth}px`,
-                    height: `${currentHeight}px`,
-                    transform: `scale(${parseInt(zoomLevel) / 100})`,
-                    transformOrigin: 'center center'
-                  }
-                )}
-              >
-                <webview
-                  ref={webviewRef as React.RefObject<HTMLElement>}
-                  src={currentUrl || 'about:blank'}
-                  preload={`file://${webviewPreloadPath}`}
-                  className="w-full h-full"
-                  style={viewportSize === 'desktop' ? {
-                    width: '100%'
-                  } : undefined}
-                  // @ts-expect-error - webview is an Electron-specific element
-                  allowpopups="true"
-                  nodeintegration="true"
-                  webpreferences="contextIsolation=no"
-                />
-              </div>
+              /* Render a webview for each tab - only active one is visible */
+              <>
+                {tabs.filter(tab => tab.url).map(tab => (
+                  <div
+                    key={tab.id}
+                    className={`transition-all duration-300 origin-center ${
+                      viewportSize === 'desktop'
+                        ? 'w-full h-full'
+                        : 'rounded-3xl shadow-2xl ring-4 ring-neutral-700 overflow-hidden flex-shrink-0'
+                    }`}
+                    style={{
+                      ...(viewportSize === 'desktop' ? {} : (
+                        zoomLevel === 'fit' ? {
+                          aspectRatio: `${currentWidth} / ${currentHeight}`,
+                          maxWidth: 'calc(100% - 48px)',
+                          maxHeight: 'calc(100% - 80px)',
+                          width: 'auto',
+                          height: '100%'
+                        } : {
+                          width: `${currentWidth}px`,
+                          height: `${currentHeight}px`,
+                          transform: `scale(${parseInt(zoomLevel) / 100})`,
+                          transformOrigin: 'center center'
+                        }
+                      )),
+                      // Show only active tab's webview, but keep others in DOM
+                      display: tab.id === activeTabId ? 'block' : 'none',
+                      position: tab.id === activeTabId ? 'relative' : 'absolute',
+                    }}
+                  >
+                    <webview
+                      ref={webviewRefCallback(tab.id)}
+                      src={tab.url || 'about:blank'}
+                      preload={`file://${webviewPreloadPath}`}
+                      className="w-full h-full"
+                      style={viewportSize === 'desktop' ? {
+                        width: '100%'
+                      } : undefined}
+                      // @ts-expect-error - webview is an Electron-specific element
+                      allowpopups="true"
+                      nodeintegration="true"
+                      webpreferences="contextIsolation=no"
+                    />
+                  </div>
+                ))}
+              </>
           ) : isElectron ? (
             <div className={`w-full h-full flex items-center justify-center ${isDarkMode ? 'bg-neutral-800' : 'bg-stone-50'}`}>
               <div className={`w-8 h-8 border-2 rounded-full animate-spin ${isDarkMode ? 'border-neutral-600 border-t-neutral-400' : 'border-stone-300 border-t-stone-600'}`}></div>
@@ -2080,12 +2227,67 @@ If you're not sure what the user wants, ask for clarification.
                 <div className={`w-8 h-0.5 rounded-full transition-colors ${isConsoleResizing ? (isDarkMode ? 'bg-neutral-400' : 'bg-stone-500') : (isDarkMode ? 'bg-neutral-600 group-hover:bg-neutral-500' : 'bg-stone-300 group-hover:bg-stone-400')}`} />
               </div>
               <div className={`flex items-center justify-between px-3 py-1.5 border-b ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
-                <div className={`flex items-center gap-2 px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-neutral-700' : 'bg-stone-200'}`} style={{ position: 'relative', top: '-3px' }}>
-                  <Terminal size={14} className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'} />
-                  <span className={`text-xs font-medium ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>Console</span>
-                  <span className={`text-xs ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
-                    {consoleLogs.length}
-                  </span>
+                <div className="flex items-center gap-1.5" style={{ position: 'relative', top: '-3px' }}>
+                  {/* Console label - click to clear filters */}
+                  <button
+                    onClick={clearConsoleFilters}
+                    className={`flex items-center gap-2 px-2.5 py-1 rounded-full transition-colors ${
+                      consoleFilters.size === 0
+                        ? (isDarkMode ? 'bg-neutral-600 text-neutral-200' : 'bg-stone-300 text-stone-700')
+                        : (isDarkMode ? 'bg-neutral-700 text-neutral-400 hover:bg-neutral-600' : 'bg-stone-200 text-stone-500 hover:bg-stone-300')
+                    }`}
+                    title="Show all logs"
+                  >
+                    <Terminal size={14} />
+                    <span className="text-xs font-medium">Console</span>
+                    <span className="text-xs opacity-70">{filteredConsoleLogs.length}</span>
+                  </button>
+
+                  {/* Filter chips */}
+                  <button
+                    onClick={() => toggleConsoleFilter('log')}
+                    className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
+                      consoleFilters.has('log')
+                        ? (isDarkMode ? 'bg-neutral-500 text-white' : 'bg-stone-500 text-white')
+                        : (isDarkMode ? 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700' : 'bg-stone-100 text-stone-500 hover:bg-stone-200')
+                    }`}
+                    title="Filter by log"
+                  >
+                    log
+                  </button>
+                  <button
+                    onClick={() => toggleConsoleFilter('info')}
+                    className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
+                      consoleFilters.has('info')
+                        ? 'bg-blue-500 text-white'
+                        : (isDarkMode ? 'bg-neutral-800 text-blue-400 hover:bg-neutral-700' : 'bg-blue-50 text-blue-600 hover:bg-blue-100')
+                    }`}
+                    title="Filter by info"
+                  >
+                    info
+                  </button>
+                  <button
+                    onClick={() => toggleConsoleFilter('warn')}
+                    className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
+                      consoleFilters.has('warn')
+                        ? 'bg-yellow-500 text-white'
+                        : (isDarkMode ? 'bg-neutral-800 text-yellow-400 hover:bg-neutral-700' : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100')
+                    }`}
+                    title="Filter by warn"
+                  >
+                    warn
+                  </button>
+                  <button
+                    onClick={() => toggleConsoleFilter('error')}
+                    className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
+                      consoleFilters.has('error')
+                        ? 'bg-red-500 text-white'
+                        : (isDarkMode ? 'bg-neutral-800 text-red-400 hover:bg-neutral-700' : 'bg-red-50 text-red-600 hover:bg-red-100')
+                    }`}
+                    title="Filter by error"
+                  >
+                    error
+                  </button>
                 </div>
                 <div className="flex items-center gap-1">
                   {selectedLogIndices.size > 0 && (
@@ -2110,12 +2312,12 @@ If you're not sure what the user wants, ask for clarification.
                 </div>
               </div>
               <div className={`flex-1 overflow-y-auto font-mono text-xs p-2 space-y-0.5 ${isDarkMode ? 'text-neutral-300' : 'text-stone-700'}`}>
-                {consoleLogs.length === 0 ? (
+                {filteredConsoleLogs.length === 0 ? (
                   <div className={`text-center py-8 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-                    No console messages yet
+                    {consoleLogs.length === 0 ? 'No console messages yet' : 'No logs match current filters'}
                   </div>
                 ) : (
-                  consoleLogs.map((log, index) => (
+                  filteredConsoleLogs.map((log, index) => (
                     <div
                       key={index}
                       onClick={(e) => handleLogRowClick(index, e)}
@@ -2337,9 +2539,117 @@ If you're not sure what the user wants, ask for clarification.
               <div ref={messagesEndRef} />
           </div>
 
+          {/* Edited Files Drawer */}
+          {editedFiles.length > 0 && (
+            <div className="px-4 pb-2">
+              <div
+                className={`rounded-t-2xl border border-b-0 overflow-hidden transition-all duration-300 ${
+                  isDarkMode ? 'bg-neutral-800 border-neutral-600' : 'bg-stone-100 border-stone-200'
+                }`}
+              >
+                {/* Drawer Header - always visible */}
+                <button
+                  onClick={() => setIsEditedFilesDrawerOpen(!isEditedFilesDrawerOpen)}
+                  className={`w-full flex items-center justify-between px-4 py-2.5 transition-colors ${
+                    isDarkMode ? 'hover:bg-neutral-700' : 'hover:bg-stone-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <ChevronRight
+                      size={16}
+                      className={`transition-transform duration-200 ${isEditedFilesDrawerOpen ? 'rotate-90' : ''} ${
+                        isDarkMode ? 'text-neutral-400' : 'text-stone-500'
+                      }`}
+                    />
+                    <span className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`}>
+                      {editedFiles.length} File{editedFiles.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); undoAllEdits(); }}
+                      className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${
+                        isDarkMode
+                          ? 'text-neutral-300 hover:bg-neutral-600'
+                          : 'text-stone-600 hover:bg-stone-300'
+                      }`}
+                    >
+                      Undo All
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); keepAllEdits(); }}
+                      className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${
+                        isDarkMode
+                          ? 'text-neutral-300 hover:bg-neutral-600'
+                          : 'text-stone-600 hover:bg-stone-300'
+                      }`}
+                    >
+                      Keep All
+                    </button>
+                  </div>
+                </button>
+
+                {/* Drawer Content - file list */}
+                <div
+                  className={`overflow-hidden transition-all duration-300 ${
+                    isEditedFilesDrawerOpen ? 'max-h-80' : 'max-h-0'
+                  }`}
+                >
+                  <div className={`border-t max-h-72 overflow-y-auto ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
+                    {editedFiles.map((file, index) => (
+                      <div
+                        key={file.path}
+                        className={`flex items-center justify-between px-4 py-2 ${
+                          index !== editedFiles.length - 1 ? (isDarkMode ? 'border-b border-neutral-700' : 'border-b border-stone-200') : ''
+                        } ${isDarkMode ? 'hover:bg-neutral-700' : 'hover:bg-stone-200'}`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Code2 size={14} className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'} />
+                          <span className={`text-sm font-mono truncate ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`}>
+                            {file.fileName}
+                          </span>
+                          <div className="flex items-center gap-1 text-xs font-mono">
+                            {file.additions > 0 && <span className="text-green-500">+{file.additions}</span>}
+                            {file.deletions > 0 && <span className="text-red-500">-{file.deletions}</span>}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {file.undoCode && (
+                            <button
+                              onClick={() => undoFileEdit(file.path)}
+                              className={`p-1.5 rounded-lg text-xs transition-colors ${
+                                isDarkMode
+                                  ? 'text-neutral-400 hover:bg-neutral-600 hover:text-neutral-200'
+                                  : 'text-stone-500 hover:bg-stone-300 hover:text-stone-700'
+                              }`}
+                              title="Undo this file"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setEditedFiles(prev => prev.filter(f => f.path !== file.path))}
+                            className={`p-1.5 rounded-lg text-xs transition-colors ${
+                              isDarkMode
+                                ? 'text-neutral-400 hover:bg-neutral-600 hover:text-neutral-200'
+                                : 'text-stone-500 hover:bg-stone-300 hover:text-stone-700'
+                            }`}
+                            title="Keep this file"
+                          >
+                            <Check size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Input Area */}
-          <div className="p-4" style={{ overflow: 'visible' }}>
-              <div className={`rounded-2xl border ${isDarkMode ? 'bg-neutral-700 border-neutral-600' : 'bg-stone-50 border-stone-200'}`} style={{ overflow: 'visible' }}>
+          <div className={`p-4 ${editedFiles.length > 0 ? 'pt-0' : ''}`} style={{ overflow: 'visible' }}>
+              <div className={`rounded-2xl border ${editedFiles.length > 0 ? 'rounded-t-none border-t-0' : ''} ${isDarkMode ? 'bg-neutral-700 border-neutral-600' : 'bg-stone-50 border-stone-200'}`} style={{ overflow: 'visible' }}>
                   {/* Selection Chips */}
                   {(selectedElement || screenshotElement || attachLogs || selectedLogs) && (
                       <div className="px-3 pt-3 flex flex-wrap gap-2">
@@ -2855,24 +3165,27 @@ If you're not sure what the user wants, ask for clarification.
               <div className={`w-[1px] h-6 ${isDarkMode ? 'bg-neutral-600' : 'bg-neutral-200'}`}></div>
               <button
                   onMouseDown={() => {
-                    if (pendingChange.undoCode && webviewRef.current) {
+                    const webview = webviewRefs.current.get(activeTabId);
+                    if (pendingChange.undoCode && webview) {
                       console.log('[Preview] Showing original');
-                      webviewRef.current.executeJavaScript(pendingChange.undoCode);
+                      webview.executeJavaScript(pendingChange.undoCode);
                       setIsPreviewingOriginal(true);
                     }
                   }}
                   onMouseUp={() => {
-                    if (pendingChange.code && webviewRef.current) {
+                    const webview = webviewRefs.current.get(activeTabId);
+                    if (pendingChange.code && webview) {
                       console.log('[Preview] Showing change');
-                      webviewRef.current.executeJavaScript(pendingChange.code);
+                      webview.executeJavaScript(pendingChange.code);
                       setIsPreviewingOriginal(false);
                     }
                   }}
                   onMouseLeave={() => {
                     if (!isPreviewingOriginal) return;
-                    if (pendingChange.code && webviewRef.current) {
+                    const webview = webviewRefs.current.get(activeTabId);
+                    if (pendingChange.code && webview) {
                       console.log('[Preview] Showing change (mouse leave)');
-                      webviewRef.current.executeJavaScript(pendingChange.code);
+                      webview.executeJavaScript(pendingChange.code);
                       setIsPreviewingOriginal(false);
                     }
                   }}

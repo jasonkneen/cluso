@@ -380,10 +380,10 @@ const MODEL_PROVIDER_MAP: Record<string, ProviderType> = {
   'codex-gpt-4o': 'codex',
   'codex-o1': 'codex',
   'codex-o1-pro': 'codex',
-  'gpt-5': 'codex',
-  'gpt-5-mini': 'codex',
-  'gpt-5-nano': 'codex',
-  'gpt-5-codex': 'codex',
+  'gpt-5.1': 'codex',
+  'gpt-5.1-mini': 'codex',
+  'gpt-5.1-nano': 'codex',
+  'gpt-5.1-codex': 'codex',
 }
 
 // Normalize model IDs to what each provider expects
@@ -409,16 +409,15 @@ const normalizeModelId = (modelId: string, provider: ProviderType): string => {
     return anthropicModelMap[modelId] || modelId
   }
 
-  // Claude Code - map to actual Anthropic model names
-  // Note: User-friendly names map to actual Anthropic API model IDs
+  // Claude Code - map to actual Anthropic model names (Claude 4.5 family)
   if (provider === 'claude-code') {
     const claudeCodeModelMap: Record<string, string> = {
-      'claude-code': 'claude-sonnet-4-20250514', // Default to Claude 4 Sonnet
-      'claude-sonnet-4-5': 'claude-sonnet-4-20250514', // Claude 4 Sonnet (actual model)
-      'claude-opus-4-5': 'claude-opus-4-20250514', // Claude 4 Opus (actual model)
-      'claude-haiku-4-5': 'claude-3-5-haiku-20241022', // Claude 3.5 Haiku (no Claude 4 Haiku yet)
+      'claude-code': 'claude-sonnet-4-5-20250929', // Default to Claude 4.5 Sonnet
+      'claude-sonnet-4-5': 'claude-sonnet-4-5-20250929',
+      'claude-opus-4-5': 'claude-opus-4-5-20251101',
+      'claude-haiku-4-5': 'claude-haiku-4-5-20251001',
     }
-    return claudeCodeModelMap[modelId] || 'claude-sonnet-4-20250514'
+    return claudeCodeModelMap[modelId] || 'claude-sonnet-4-5-20250929'
   }
 
   // Codex - map to actual model names for ChatGPT backend responses endpoint
@@ -429,11 +428,11 @@ const normalizeModelId = (modelId: string, provider: ProviderType): string => {
       'codex-gpt-4o': 'gpt-4o',
       'codex-o1': 'o1',
       'codex-o1-pro': 'o1-pro',
-      // GPT-5 family - pass through as-is (these are the actual model names)
-      'gpt-5': 'gpt-5',
-      'gpt-5-mini': 'gpt-5-mini',
-      'gpt-5-nano': 'gpt-5-nano',
-      'gpt-5-codex': 'gpt-5-codex',
+      // GPT-5.1 family - pass through as-is (these are the actual model names)
+      'gpt-5.1': 'gpt-5.1',
+      'gpt-5.1-mini': 'gpt-5.1-mini',
+      'gpt-5.1-nano': 'gpt-5.1-nano',
+      'gpt-5.1-codex': 'gpt-5.1-codex',
     }
     return codexModelMap[modelId] || modelId
   }
