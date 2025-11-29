@@ -71,7 +71,12 @@ interface WebviewElement extends HTMLElement {
 
 export default function App() {
   // Tab State - manages multiple browser tabs
-  const [tabs, setTabs] = useState<TabState[]>(() => [createNewTab('tab-1')]);
+  // First tab starts with the default URL so browser loads immediately
+  const [tabs, setTabs] = useState<TabState[]>(() => [{
+    ...createNewTab('tab-1'),
+    url: DEFAULT_URL,
+    title: 'localhost'
+  }]);
   const [activeTabId, setActiveTabId] = useState('tab-1');
 
   // Get current active tab
