@@ -8,6 +8,7 @@ import { TabState, createNewTab } from './types/tab';
 import { TabBar, Tab } from './components/TabBar';
 import { NewTabPage } from './components/NewTabPage';
 import { ProjectSetupFlow } from './components/ProjectSetupFlow';
+import { SettingsDialog, AppSettings, DEFAULT_SETTINGS, getFontSizeValue } from './components/SettingsDialog';
 import { CodeBlock, CodeBlockCopyButton } from '@/components/ai-elements/code-block';
 import { Tool, ToolContent, ToolHeader, ToolOutput } from '@/components/ai-elements/tool';
 import { MessageResponse } from '@/components/ai-elements/message';
@@ -69,6 +70,31 @@ function formatRelativeTime(date: Date): string {
 
 // --- Constants ---
 
+// Icon mapping for models based on provider or specific model
+const MODEL_ICONS: Record<string, typeof Sparkles> = {
+  'gemini-3-pro-preview': Sparkles,
+  'gemini-2.5-flash': Zap,
+  'gemini-2.5-pro': Rocket,
+  'gemini-2.0-flash': Rocket,
+  'gpt-4o': Sparkles,
+  'gpt-4o-mini': Zap,
+  'claude-3-5-sonnet': Sparkles,
+  'claude-3-opus': Rocket,
+};
+
+// Provider icons fallback
+const PROVIDER_ICONS: Record<string, typeof Sparkles> = {
+  'google': Sparkles,
+  'openai': Zap,
+  'anthropic': Rocket,
+};
+
+// Helper to get icon for a model
+const getModelIcon = (modelId: string, providerId: string) => {
+  return MODEL_ICONS[modelId] || PROVIDER_ICONS[providerId] || Sparkles;
+};
+
+// Legacy MODELS constant for backwards compatibility
 const MODELS = [
   { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro', Icon: Sparkles },
   { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', Icon: Zap },
@@ -230,6 +256,58 @@ export default function App() {
     }
     return false;
   });
+
+  // Settings Dialog State
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // App Settings State - with localStorage persistence
+  const [appSettings, setAppSettings] = useState<AppSettings>(() => {
+    try {
+      const stored = localStorage.getItem('cluso-settings');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Merge with defaults to handle new settings added over time
+        return { ...DEFAULT_SETTINGS, ...parsed };
+      }
+    } catch (e) {
+      console.error('Failed to load settings from localStorage:', e);
+    }
+    return DEFAULT_SETTINGS;
+  });
+
+  // Persist settings to localStorage when they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('cluso-settings', JSON.stringify(appSettings));
+    } catch (e) {
+      console.error('Failed to save settings to localStorage:', e);
+    }
+  }, [appSettings]);
+
+  // Get all models from settings with availability status
+  const displayModels = useMemo(() => {
+    return appSettings.models.map(settingsModel => {
+      const provider = appSettings.providers.find(p => p.id === settingsModel.provider);
+      const isProviderConfigured = provider?.enabled && !!provider?.apiKey;
+      const isAvailable = settingsModel.enabled && isProviderConfigured;
+      const Icon = getModelIcon(settingsModel.id, settingsModel.provider);
+
+      return {
+        id: settingsModel.id,
+        name: settingsModel.name,
+        provider: settingsModel.provider,
+        Icon,
+        isAvailable,
+        isEnabled: settingsModel.enabled,
+        isProviderConfigured,
+      };
+    });
+  }, [appSettings.models, appSettings.providers]);
+
+  // Get only available models (for backwards compatibility)
+  const availableModels = useMemo(() => {
+    return displayModels.filter(m => m.isAvailable);
+  }, [displayModels]);
 
   // Stash Confirmation Dialog State
   const [isStashDialogOpen, setIsStashDialogOpen] = useState(false);
@@ -1413,7 +1491,7 @@ If you're not sure what the user wants, ask for clarification.
         onNewTab={handleNewTab}
         isDarkMode={isDarkMode}
         onToggleDarkMode={toggleDarkMode}
-        onOpenSettings={() => {/* TODO: Open settings panel */}}
+        onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -2160,13 +2238,16 @@ If you're not sure what the user wants, ask for clarification.
               )}
               {messages.map((msg) => (
                   <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                      <div className={`text-sm leading-relaxed overflow-hidden ${
-                          msg.role === 'user'
-                              ? `px-3 py-2 max-w-[85%] ${isDarkMode ? 'bg-white text-neutral-900 rounded-xl' : 'bg-stone-900 text-white rounded-xl'}`
-                              : msg.role === 'system'
-                              ? `px-4 py-3 ${isDarkMode ? 'bg-yellow-500/20 text-yellow-200 rounded-2xl' : 'bg-yellow-50 text-yellow-800 rounded-2xl'}`
-                              : `w-full ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`
-                      }`}>
+                      <div
+                          className={`leading-relaxed overflow-hidden ${
+                              msg.role === 'user'
+                                  ? `px-3 py-2 max-w-[85%] ${isDarkMode ? 'bg-white text-neutral-900 rounded-xl' : 'bg-stone-900 text-white rounded-xl'}`
+                                  : msg.role === 'system'
+                                  ? `px-4 py-3 ${isDarkMode ? 'bg-yellow-500/20 text-yellow-200 rounded-2xl' : 'bg-yellow-50 text-yellow-800 rounded-2xl'}`
+                                  : `w-full ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`
+                          }`}
+                          style={{ fontSize: getFontSizeValue(appSettings.fontSize) }}
+                      >
                           <MessageResponse>{msg.content}</MessageResponse>
                       </div>
                       <div className={`text-[10px] mt-1 ${msg.role === 'user' ? 'text-right pr-1' : 'text-left'} ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
@@ -2460,17 +2541,29 @@ If you're not sure what the user wants, ask for clarification.
                               {isModelMenuOpen && (
                                   <>
                                       <div className="fixed inset-0 z-[99]" onClick={() => setIsModelMenuOpen(false)}></div>
-                                      <div className={`absolute bottom-full left-0 mb-2 w-52 rounded-xl shadow-xl py-1 z-[100] ${isDarkMode ? 'bg-neutral-700 border border-neutral-600' : 'bg-white border border-stone-200'}`}>
-                                          {MODELS.map(model => (
+                                      <div className={`absolute bottom-full left-0 mb-2 w-56 rounded-xl shadow-xl py-1 z-[100] max-h-80 overflow-y-auto ${isDarkMode ? 'bg-neutral-700 border border-neutral-600' : 'bg-white border border-stone-200'}`}>
+                                          {/* Show all models from settings */}
+                                          {displayModels.map(model => (
                                               <button
                                                   key={model.id}
-                                                  onClick={() => { setSelectedModel(model); setIsModelMenuOpen(false); }}
-                                                  className={`w-full text-left px-3 py-2.5 text-sm flex items-center gap-2 ${isDarkMode ? 'hover:bg-neutral-600 text-neutral-200' : 'hover:bg-stone-50'}`}
+                                                  onClick={() => {
+                                                    if (model.isAvailable) {
+                                                      setSelectedModel({ id: model.id, name: model.name, Icon: model.Icon });
+                                                      setIsModelMenuOpen(false);
+                                                    }
+                                                  }}
+                                                  className={`w-full text-left px-3 py-2.5 text-sm flex items-center gap-2 ${
+                                                      !model.isAvailable
+                                                        ? 'opacity-40 cursor-not-allowed'
+                                                        : isDarkMode ? 'hover:bg-neutral-600 text-neutral-200' : 'hover:bg-stone-50'
+                                                  }`}
+                                                  disabled={!model.isAvailable}
+                                                  title={!model.isProviderConfigured ? 'Configure provider API key in Settings' : !model.isEnabled ? 'Enable in Settings' : ''}
                                               >
-                                                  <model.Icon size={16} className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'} />
-                                                  <span className={selectedModel.id === model.id ? 'font-medium' : ''}>{model.name}</span>
+                                                  <model.Icon size={16} className={model.isAvailable ? (isDarkMode ? 'text-neutral-400' : 'text-stone-500') : 'text-stone-300'} />
+                                                  <span className={`flex-1 ${selectedModel.id === model.id ? 'font-medium' : ''}`}>{model.name}</span>
                                                   {selectedModel.id === model.id && (
-                                                      <Check size={14} className="ml-auto text-blue-600" />
+                                                      <Check size={14} className="text-blue-600" />
                                                   )}
                                               </button>
                                           ))}
@@ -2754,6 +2847,16 @@ If you're not sure what the user wants, ask for clarification.
       {/* Hidden Media Elements */}
       <video ref={videoRef} className="hidden" autoPlay playsInline muted />
       <canvas ref={canvasRef} className="hidden" />
+
+      {/* Settings Dialog */}
+      <SettingsDialog
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        isDarkMode={isDarkMode}
+        onToggleDarkMode={toggleDarkMode}
+        settings={appSettings}
+        onSettingsChange={setAppSettings}
+      />
 
       </div>
     </div>
