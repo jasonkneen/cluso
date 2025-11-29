@@ -6,6 +6,9 @@ export interface TabState {
   url: string
   favicon?: string
 
+  // Project mapping - used to resolve source file paths
+  projectPath?: string
+
   // Browser state
   canGoBack: boolean
   canGoForward: boolean

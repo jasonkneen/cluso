@@ -439,6 +439,44 @@ function getSourceLocation(el) {
             }
           }
 
+          // Approach 4: Get component name even without source (production React builds)
+          if (!sourceInfo) {
+            try {
+              const componentNames = [];
+              for (const key of Object.keys(el)) {
+                if (key.startsWith('__reactFiber$') || key.startsWith('__reactInternalInstance$')) {
+                  let fiber = el[key];
+                  // Walk up the tree to find named components
+                  while (fiber && componentNames.length < 5) {
+                    const type = fiber.type;
+                    if (type) {
+                      const name = type.displayName || type.name || (typeof type === 'string' ? type : null);
+                      if (name && name !== 'Fragment' && !name.startsWith('_') && !componentNames.includes(name)) {
+                        componentNames.push(name);
+                      }
+                    }
+                    fiber = fiber.return;
+                  }
+                  break;
+                }
+              }
+              if (componentNames.length > 0) {
+                sourceInfo = {
+                  sources: componentNames.map(name => ({
+                    name: name,
+                    file: '',
+                    line: 0,
+                    column: 0
+                  })),
+                  summary: componentNames.join(' > ')
+                };
+                console.log('[Page] Component hierarchy (no source):', sourceInfo.summary);
+              }
+            } catch (e) {
+              console.log('[Page] Component name fallback error:', e.message);
+            }
+          }
+
           if (sourceInfo) {
             el.setAttribute('data-source-info', JSON.stringify(sourceInfo));
           } else {

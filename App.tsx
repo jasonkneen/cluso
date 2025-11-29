@@ -1,5 +1,5 @@
 
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useLiveGemini } from './hooks/useLiveGemini';
 import { useGit } from './hooks/useGit';
 import { INJECTION_SCRIPT } from './utils/iframe-injection';
@@ -328,6 +328,8 @@ export default function App() {
   const consoleResizeStartY = useRef<number>(0);
   const consoleResizeStartHeight = useRef<number>(192);
   const consoleEndRef = useRef<HTMLDivElement>(null);
+  const [selectedLogIndices, setSelectedLogIndices] = useState<Set<number>>(new Set());
+  const lastClickedLogIndex = useRef<number | null>(null);
 
   // Webview ready state (for sending messages)
   const [isWebviewReady, setIsWebviewReady] = useState(false);
@@ -951,6 +953,48 @@ export default function App() {
     }
   }, [consoleLogs, isConsolePanelOpen]);
 
+  // Handle console log row click with shift-click range selection
+  const handleLogRowClick = useCallback((index: number, event: React.MouseEvent) => {
+    setSelectedLogIndices(prev => {
+      const newSet = new Set(prev);
+
+      if (event.shiftKey && lastClickedLogIndex.current !== null) {
+        // Shift-click: select range from last clicked to current
+        const start = Math.min(lastClickedLogIndex.current, index);
+        const end = Math.max(lastClickedLogIndex.current, index);
+        for (let i = start; i <= end; i++) {
+          newSet.add(i);
+        }
+      } else {
+        // Regular click: toggle single item
+        if (newSet.has(index)) {
+          newSet.delete(index);
+        } else {
+          newSet.add(index);
+        }
+        lastClickedLogIndex.current = index;
+      }
+
+      return newSet;
+    });
+  }, []);
+
+  // Get selected logs content for chat chip
+  const selectedLogs = useMemo(() => {
+    if (selectedLogIndices.size === 0) return null;
+    return Array.from(selectedLogIndices)
+      .sort((a, b) => a - b)
+      .map(i => consoleLogs[i])
+      .filter(Boolean);
+  }, [selectedLogIndices, consoleLogs]);
+
+  // Clear selected logs when console is cleared
+  const handleClearConsole = useCallback(() => {
+    setConsoleLogs([]);
+    setSelectedLogIndices(new Set());
+    lastClickedLogIndex.current = null;
+  }, []);
+
   // Sync Inspector State with Webview
   useEffect(() => {
     console.log('[Inspector Sync] Effect triggered:', { isElectron, hasWebview: !!webviewRef.current, isWebviewReady, isInspectorActive, isScreenshotActive });
@@ -1083,6 +1127,14 @@ ${screenshotElement ? `Context: User selected element for visual reference: <${s
 
     if (attachLogs && logs.length > 0) {
         fullPromptText += `\n\nRecent Console Logs:\n${logs.join('\n')}`;
+    }
+
+    // Include selected logs if any
+    if (selectedLogs && selectedLogs.length > 0) {
+        const logsText = selectedLogs.map(log =>
+          `[${log.timestamp.toLocaleTimeString()}] [${log.type}] ${log.message}`
+        ).join('\n');
+        fullPromptText += `\n\nSelected Console Logs (${selectedLogs.length} entries):\n${logsText}`;
     }
 
     // Only include code execution instructions if user has selected an element
@@ -1275,13 +1327,22 @@ If you're not sure what the user wants, ask for clarification.
     if (!selectedElement?.sourceLocation?.sources?.[0]) return;
 
     const src = selectedElement.sourceLocation.sources[0];
-    const filePath = src.file;
+    let filePath = src.file;
     const startLine = src.line || 1;
     const endLine = src.endLine || startLine + 10;
 
     if (!filePath || !isElectron || !window.electronAPI?.readFile) {
       console.log('Cannot read file:', { filePath, isElectron });
       return;
+    }
+
+    // If path is relative and we have a project path, resolve it
+    if (!filePath.startsWith('/') && activeTab.projectPath) {
+      // Handle various relative path formats from bundlers
+      // e.g., "./src/App.tsx", "src/App.tsx", "/src/App.tsx" (relative to project root)
+      const cleanPath = filePath.replace(/^\.\//, '').replace(/^\/?/, '');
+      filePath = `${activeTab.projectPath}/${cleanPath}`;
+      console.log('Resolved relative path:', filePath);
     }
 
     try {
@@ -1305,7 +1366,7 @@ If you're not sure what the user wants, ask for clarification.
     } catch (error) {
       console.error('Failed to read source file:', error);
     }
-  }, [selectedElement, isElectron]);
+  }, [selectedElement, isElectron, activeTab.projectPath]);
 
   // Handle opening a project from new tab page - triggers setup flow
   const handleOpenProject = useCallback((projectPath: string, projectName: string) => {
@@ -1316,7 +1377,7 @@ If you're not sure what the user wants, ask for clarification.
   // Handle setup flow completion - actually opens the browser
   const handleSetupComplete = useCallback((url: string) => {
     if (setupProject) {
-      updateCurrentTab({ url, title: setupProject.name });
+      updateCurrentTab({ url, title: setupProject.name, projectPath: setupProject.path });
       // Update both display URL and navigation URL
       setUrlInput(url);
       setCurrentUrl(url);
@@ -1870,8 +1931,13 @@ If you're not sure what the user wants, ask for clarification.
                   </span>
                 </div>
                 <div className="flex items-center gap-1">
+                  {selectedLogIndices.size > 0 && (
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-600'}`}>
+                      {selectedLogIndices.size} selected
+                    </span>
+                  )}
                   <button
-                    onClick={() => setConsoleLogs([])}
+                    onClick={handleClearConsole}
                     className={`p-1 rounded hover:bg-opacity-80 transition ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'}`}
                     title="Clear console"
                   >
@@ -1895,12 +1961,16 @@ If you're not sure what the user wants, ask for clarification.
                   consoleLogs.map((log, index) => (
                     <div
                       key={index}
-                      className={`flex items-start gap-2 px-2 py-0.5 rounded ${
-                        log.type === 'error' ? (isDarkMode ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-600') :
-                        log.type === 'warn' ? (isDarkMode ? 'bg-yellow-500/10 text-yellow-400' : 'bg-yellow-50 text-yellow-600') :
-                        log.type === 'info' ? (isDarkMode ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600') :
-                        ''
+                      onClick={(e) => handleLogRowClick(index, e)}
+                      className={`flex items-start gap-2 px-2 py-0.5 rounded cursor-pointer select-none transition-colors ${
+                        selectedLogIndices.has(index)
+                          ? (isDarkMode ? 'bg-blue-500/20 ring-1 ring-blue-500/50' : 'bg-blue-100 ring-1 ring-blue-300')
+                          : log.type === 'error' ? (isDarkMode ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' : 'bg-red-50 text-red-600 hover:bg-red-100')
+                          : log.type === 'warn' ? (isDarkMode ? 'bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20' : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100')
+                          : log.type === 'info' ? (isDarkMode ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20' : 'bg-blue-50 text-blue-600 hover:bg-blue-100')
+                          : (isDarkMode ? 'hover:bg-neutral-700' : 'hover:bg-stone-100')
                       }`}
+                      title="Click to select, Shift+click for range"
                     >
                       <span className={`flex-shrink-0 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
                         {log.timestamp.toLocaleTimeString()}
@@ -1908,7 +1978,18 @@ If you're not sure what the user wants, ask for clarification.
                       <span className="flex-shrink-0 w-12 text-center">
                         [{log.type}]
                       </span>
-                      <span className="break-all">{log.message}</span>
+                      <span className="break-all flex-1">{log.message}</span>
+                      <span
+                        className={`flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                          selectedLogIndices.has(index)
+                            ? (isDarkMode ? 'bg-blue-500 border-blue-500' : 'bg-blue-500 border-blue-500')
+                            : (isDarkMode ? 'border-neutral-500 hover:border-neutral-400' : 'border-stone-300 hover:border-stone-400')
+                        }`}
+                      >
+                        {selectedLogIndices.has(index) && (
+                          <Check size={10} className="text-white" />
+                        )}
+                      </span>
                     </div>
                   ))
                 )}
@@ -1935,7 +2016,7 @@ If you're not sure what the user wants, ask for clarification.
 
         {/* --- Right Pane: Chat --- */}
       {isSidebarOpen && (
-      <div className={`flex flex-col rounded-xl shadow-sm flex-shrink-0 border ${isDarkMode ? 'bg-neutral-800 border-neutral-800' : 'bg-white border-stone-100'}`} style={{ width: sidebarWidth }}>
+      <div className={`flex flex-col rounded-xl shadow-sm flex-shrink-0 border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`} style={{ width: sidebarWidth }}>
 
           {/* Git Header */}
           <div className={`h-12 border-b flex items-center justify-between px-3 flex-shrink-0 ${isDarkMode ? 'border-neutral-700' : 'border-stone-100'}`}>
@@ -2100,7 +2181,7 @@ If you're not sure what the user wants, ask for clarification.
           <div className="p-4" style={{ overflow: 'visible' }}>
               <div className={`rounded-2xl border ${isDarkMode ? 'bg-neutral-700 border-neutral-600' : 'bg-stone-50 border-stone-200'}`} style={{ overflow: 'visible' }}>
                   {/* Selection Chips */}
-                  {(selectedElement || screenshotElement || attachLogs) && (
+                  {(selectedElement || screenshotElement || attachLogs || selectedLogs) && (
                       <div className="px-3 pt-3 flex flex-wrap gap-2">
                           {attachLogs && (
                               <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-yellow-50 text-yellow-700 rounded-lg text-xs border border-yellow-200">
@@ -2109,6 +2190,21 @@ If you're not sure what the user wants, ask for clarification.
                                   <button
                                       onClick={() => setAttachLogs(false)}
                                       className="ml-0.5 hover:text-yellow-900"
+                                  >
+                                      <X size={12} />
+                                  </button>
+                              </div>
+                          )}
+                          {selectedLogs && selectedLogs.length > 0 && (
+                              <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-purple-50 text-purple-700 rounded-lg text-xs border border-purple-200">
+                                  <Terminal size={12} />
+                                  <span className="font-medium">{selectedLogs.length} Log{selectedLogs.length > 1 ? 's' : ''} Selected</span>
+                                  <button
+                                      onClick={() => {
+                                        setSelectedLogIndices(new Set());
+                                        lastClickedLogIndex.current = null;
+                                      }}
+                                      className="ml-0.5 hover:text-purple-900"
                                   >
                                       <X size={12} />
                                   </button>
