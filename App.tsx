@@ -13,6 +13,7 @@ import { CodeBlock, CodeBlockCopyButton } from '@/components/ai-elements/code-bl
 import { Tool, ToolContent, ToolHeader, ToolOutput } from '@/components/ai-elements/tool';
 import { MessageResponse } from '@/components/ai-elements/message';
 import { useAIChat, getProviderForModel, ProviderConfig } from './hooks/useAIChat';
+import { useCodingAgent, CodingContext } from './hooks/useCodingAgent';
 import { GoogleGenAI } from '@google/genai'; // Keep for voice streaming
 import {
   ChevronLeft,
@@ -379,6 +380,17 @@ export default function App() {
   const { generate: generateAI, isLoading: isAILoading } = useAIChat({
     onError: (err) => console.error('[AI SDK] Error:', err),
   });
+
+  // Initialize Coding Agent hook
+  const {
+    context: codingContext,
+    lastIntent,
+    isProcessing: isAgentProcessing,
+    updateContext: updateCodingContext,
+    processMessage: processCodingMessage,
+    setProcessing: setAgentProcessing,
+    tools: codingTools,
+  } = useCodingAgent();
 
   // Stash Confirmation Dialog State
   const [isStashDialogOpen, setIsStashDialogOpen] = useState(false);
@@ -1176,6 +1188,20 @@ export default function App() {
       .filter(Boolean);
   }, [selectedLogIndices, consoleLogs]);
 
+  // Sync coding agent context when selections change
+  useEffect(() => {
+    updateCodingContext({
+      selectedElement: selectedElement || null,
+      selectedFiles: selectedFiles,
+      selectedLogs: selectedLogs?.map(log => ({
+        type: log.type,
+        message: log.message,
+      })) || [],
+      projectPath: projectPath,
+      recentMessages: messages.slice(-10) as any[],
+    });
+  }, [selectedElement, selectedFiles, selectedLogs, projectPath, messages, updateCodingContext]);
+
   // Clear selected logs when console is cleared
   const handleClearConsole = useCallback(() => {
     setConsoleLogs([]);
@@ -1479,16 +1505,36 @@ If you're not sure what the user wants, ask for clarification.
 
       let text: string | null = null;
 
+      // Process through coding agent for intent classification
+      const { intent, systemPrompt: agentSystemPrompt, tools } = processCodingMessage(userMessage.content);
+      console.log(`[Coding Agent] Intent: ${intent.type} (${Math.round(intent.confidence * 100)}%)`);
+
+      // Determine if we should use coding agent tools
+      // Use tools for file operations and code-related intents
+      const shouldUseTools = ['code_edit', 'code_create', 'code_delete', 'code_refactor', 'file_operation', 'debug']
+        .includes(intent.type);
+
       // Use AI SDK for OpenAI, Anthropic, and Google text models
       if (providerType && providerConfigs.length > 0) {
         console.log(`[AI SDK] Using provider: ${providerType} for model: ${selectedModel.id}`);
+        console.log(`[AI SDK] Using tools: ${shouldUseTools}`);
 
+        setAgentProcessing(true);
         const result = await generateAI({
           modelId: selectedModel.id,
           messages: [{ role: 'user', content: fullPromptText }],
           providers: providerConfigs,
+          system: shouldUseTools ? agentSystemPrompt : undefined,
+          tools: shouldUseTools ? tools : undefined,
+          maxSteps: 10,
         });
+        setAgentProcessing(false);
         text = result.text;
+
+        // Log tool usage if any
+        if (result.toolCalls && result.toolCalls.length > 0) {
+          console.log(`[AI SDK] Tool calls:`, result.toolCalls);
+        }
       } else {
         // Fallback to GoogleGenAI for backwards compatibility or if no provider configured
         console.log('[AI SDK] Falling back to GoogleGenAI');
