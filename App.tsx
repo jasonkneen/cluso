@@ -12,7 +12,8 @@ import { SettingsDialog, AppSettings, DEFAULT_SETTINGS, getFontSizeValue } from 
 import { CodeBlock, CodeBlockCopyButton } from '@/components/ai-elements/code-block';
 import { Tool, ToolContent, ToolHeader, ToolOutput } from '@/components/ai-elements/tool';
 import { MessageResponse } from '@/components/ai-elements/message';
-import { GoogleGenAI } from '@google/genai';
+import { useAIChat, getProviderForModel, ProviderConfig } from './hooks/useAIChat';
+import { GoogleGenAI } from '@google/genai'; // Keep for voice streaming
 import {
   ChevronLeft,
   ChevronRight,
@@ -308,6 +309,21 @@ export default function App() {
   const availableModels = useMemo(() => {
     return displayModels.filter(m => m.isAvailable);
   }, [displayModels]);
+
+  // Get provider configs for AI SDK from settings
+  const providerConfigs = useMemo((): ProviderConfig[] => {
+    return appSettings.providers
+      .filter(p => p.enabled && p.apiKey)
+      .map(p => ({
+        id: p.id as 'google' | 'openai' | 'anthropic',
+        apiKey: p.apiKey,
+      }));
+  }, [appSettings.providers]);
+
+  // Initialize AI Chat hook
+  const { generate: generateAI, isLoading: isAILoading } = useAIChat({
+    onError: (err) => console.error('[AI SDK] Error:', err),
+  });
 
   // Stash Confirmation Dialog State
   const [isStashDialogOpen, setIsStashDialogOpen] = useState(false);
@@ -1272,16 +1288,35 @@ If you're not sure what the user wants, ask for clarification.
     if (fileInputRef.current) fileInputRef.current.value = '';
 
     try {
-      const apiKey = process.env.API_KEY;
-      if (!apiKey) throw new Error("No API Key");
-      const ai = new GoogleGenAI({ apiKey });
+      // Determine which provider to use based on selected model
+      const providerType = getProviderForModel(selectedModel.id);
 
-      const response = await ai.models.generateContent({
-        model: selectedModel.id,
-        contents: contents
-      });
+      let text: string | null = null;
 
-      const text = response.text;
+      // Use AI SDK for OpenAI, Anthropic, and Google text models
+      if (providerType && providerConfigs.length > 0) {
+        console.log(`[AI SDK] Using provider: ${providerType} for model: ${selectedModel.id}`);
+
+        text = await generateAI({
+          modelId: selectedModel.id,
+          messages: [{ role: 'user', content: fullPromptText }],
+          providers: providerConfigs,
+        });
+      } else {
+        // Fallback to GoogleGenAI for backwards compatibility or if no provider configured
+        console.log('[AI SDK] Falling back to GoogleGenAI');
+        const apiKey = process.env.API_KEY;
+        if (!apiKey) throw new Error("No API Key configured. Please add your API key in Settings.");
+        const ai = new GoogleGenAI({ apiKey });
+
+        const response = await ai.models.generateContent({
+          model: selectedModel.id,
+          contents: contents
+        });
+
+        text = response.text;
+      }
+
       if (text) {
         // Check for executable code blocks
         const codeBlockRegex = /```json-exec\s*(\{[\s\S]*?\})\s*```/g;
@@ -1340,11 +1375,12 @@ If you're not sure what the user wants, ask for clarification.
         }
       }
     } catch (err) {
-      console.error(err);
+      console.error('[AI] Error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
         role: 'assistant',
-        content: "Sorry, I encountered an error processing that.",
+        content: `Sorry, I encountered an error: ${errorMessage}`,
         timestamp: new Date(),
         model: selectedModel.name
       }]);

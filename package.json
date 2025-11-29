@@ -16,6 +16,9 @@
     "electron:build:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^2.0.50",
+    "@ai-sdk/google": "^2.0.44",
+    "@ai-sdk/openai": "^2.0.74",
     "@ai-sdk/react": "^2.0.104",
     "@google/genai": "^1.30.0",
     "@radix-ui/react-collapsible": "^1.1.12",
