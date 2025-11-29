@@ -700,6 +700,27 @@ export default function App() {
     }
   }, [isInspectorActive, isScreenshotActive, isElectron, isWebviewReady]);
 
+  // Auto-reload webview on HMR (Hot Module Replacement)
+  useEffect(() => {
+    if (!isElectron || !webviewRef.current) return;
+
+    // Vite HMR - reload webview when app code changes
+    if (import.meta.hot) {
+      const handleHmrUpdate = () => {
+        console.log('[HMR] Reloading webview...');
+        if (webviewRef.current) {
+          webviewRef.current.reload();
+        }
+      };
+
+      import.meta.hot.on('vite:afterUpdate', handleHmrUpdate);
+
+      return () => {
+        import.meta.hot?.off('vite:afterUpdate', handleHmrUpdate);
+      };
+    }
+  }, [isElectron]);
+
   // Reset element chat when sidebar opens
   useEffect(() => {
     if (isSidebarOpen) {
@@ -1435,13 +1456,19 @@ Be concise. Confirm what you changed.
                           {selectedElement && (
                               <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs border border-blue-200">
                                   <Check size={12} />
-                                  <span className="font-medium">{selectedElement.tagName.toLowerCase()}</span>
                                   {selectedElement.sourceLocation ? (
-                                      <span className="text-blue-600 font-mono truncate max-w-[180px]" title={selectedElement.sourceLocation.summary}>
-                                          {selectedElement.sourceLocation.summary}
+                                      <span className="font-mono font-medium" title={selectedElement.sourceLocation.summary}>
+                                          {(() => {
+                                            const src = selectedElement.sourceLocation.sources?.[0];
+                                            if (!src) return selectedElement.sourceLocation.summary;
+                                            const fileName = src.file?.split('/').pop() || 'unknown';
+                                            const startLine = src.line || 0;
+                                            const endLine = src.endLine || startLine + 5;
+                                            return `${fileName} (${startLine}-${endLine})`;
+                                          })()}
                                       </span>
                                   ) : (
-                                      <span className="text-blue-500 truncate max-w-[120px]">{selectedElement.text || '(element)'}</span>
+                                      <span className="font-medium">{selectedElement.tagName.toLowerCase()}</span>
                                   )}
                                   <button
                                       onClick={() => setSelectedElement(null)}
