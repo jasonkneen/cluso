@@ -1100,28 +1100,38 @@ export default function App() {
   }, [updateTab]);
 
   // Ref callback for webview elements - sets up handlers when mounted
-  const webviewRefCallback = useCallback((tabId: string) => (element: HTMLElement | null) => {
-    if (element) {
-      const webview = element as unknown as WebviewElement;
-      webviewRefs.current.set(tabId, webview);
+  // Returns a STABLE callback for each tabId to prevent constant re-setup
+  const getWebviewRefCallback = useCallback((tabId: string) => {
+    // Return existing callback if we have one
+    let callback = webviewRefCallbacks.current.get(tabId);
+    if (callback) return callback;
 
-      // Small delay to ensure webview is fully mounted
-      setTimeout(() => {
-        // Clean up previous handlers if any
-        const prevCleanup = webviewCleanups.current.get(tabId);
-        if (prevCleanup) prevCleanup();
+    // Create new stable callback for this tab
+    callback = (element: HTMLElement | null) => {
+      if (element) {
+        const webview = element as unknown as WebviewElement;
+        webviewRefs.current.set(tabId, webview);
 
-        // Set up new handlers
-        const cleanup = setupWebviewHandlers(tabId, webview);
-        webviewCleanups.current.set(tabId, cleanup);
-      }, 100);
-    } else {
-      // Element unmounted - clean up
-      const cleanup = webviewCleanups.current.get(tabId);
-      if (cleanup) cleanup();
-      webviewCleanups.current.delete(tabId);
-      webviewRefs.current.delete(tabId);
-    }
+        // Small delay to ensure webview is fully mounted
+        setTimeout(() => {
+          // Clean up previous handlers if any
+          const prevCleanup = webviewCleanups.current.get(tabId);
+          if (prevCleanup) prevCleanup();
+
+          // Set up new handlers
+          const cleanup = setupWebviewHandlers(tabId, webview);
+          webviewCleanups.current.set(tabId, cleanup);
+        }, 100);
+      } else {
+        // Element unmounted - clean up
+        const cleanup = webviewCleanups.current.get(tabId);
+        if (cleanup) cleanup();
+        webviewCleanups.current.delete(tabId);
+        webviewRefs.current.delete(tabId);
+      }
+    };
+    webviewRefCallbacks.current.set(tabId, callback);
+    return callback;
   }, [setupWebviewHandlers]);
 
   // Auto-scroll console panel to bottom when new logs arrive
@@ -2045,7 +2055,7 @@ If you're not sure what the user wants, ask for clarification.
                     }}
                   >
                     <webview
-                      ref={webviewRefCallback(tab.id)}
+                      ref={getWebviewRefCallback(tab.id)}
                       src={tab.url || 'about:blank'}
                       preload={`file://${webviewPreloadPath}`}
                       className="w-full h-full"
