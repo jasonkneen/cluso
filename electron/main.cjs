@@ -984,6 +984,163 @@ function registerGitHandlers() {
     const folderName = path.basename(folderPath)
     return { success: true, data: { path: folderPath, name: folderName } }
   })
+
+  // Voice logging handlers
+  const os = require('os')
+  const voiceLogDir = path.join(os.homedir(), '.cluso', 'voice', 'logs')
+  const learningsDir = path.join(os.homedir(), '.cluso', 'learning')
+
+  // Ensure voice log directories exist
+  ipcMain.handle('voice:ensureLogDir', async () => {
+    try {
+      await fs.mkdir(voiceLogDir, { recursive: true })
+      await fs.mkdir(learningsDir, { recursive: true })
+      console.log('[Voice] Log directories ensured:', voiceLogDir)
+      return { success: true, path: voiceLogDir }
+    } catch (error) {
+      console.error('[Voice] Error creating log directories:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Save voice session log
+  ipcMain.handle('voice:saveLog', async (event, sessionId, content) => {
+    try {
+      await fs.mkdir(voiceLogDir, { recursive: true })
+      const filePath = path.join(voiceLogDir, `${sessionId}.json`)
+      await fs.writeFile(filePath, content, 'utf-8')
+      console.log('[Voice] Saved session log:', sessionId)
+      return { success: true, path: filePath }
+    } catch (error) {
+      console.error('[Voice] Error saving log:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // List voice session logs
+  ipcMain.handle('voice:listLogs', async () => {
+    try {
+      await fs.mkdir(voiceLogDir, { recursive: true })
+      const files = await fs.readdir(voiceLogDir)
+      const logs = files
+        .filter(f => f.endsWith('.json'))
+        .map(f => ({
+          sessionId: f.replace('.json', ''),
+          path: path.join(voiceLogDir, f)
+        }))
+      return { success: true, data: logs }
+    } catch (error) {
+      console.error('[Voice] Error listing logs:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Read voice session log
+  ipcMain.handle('voice:readLog', async (event, sessionId) => {
+    try {
+      const filePath = path.join(voiceLogDir, `${sessionId}.json`)
+      const content = await fs.readFile(filePath, 'utf-8')
+      return { success: true, data: JSON.parse(content) }
+    } catch (error) {
+      console.error('[Voice] Error reading log:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Get unprocessed logs (for learning worker)
+  ipcMain.handle('voice:getUnprocessedLogs', async () => {
+    try {
+      await fs.mkdir(voiceLogDir, { recursive: true })
+      const processedFile = path.join(voiceLogDir, '.processed')
+      let processedSessions = []
+      try {
+        const content = await fs.readFile(processedFile, 'utf-8')
+        processedSessions = content.split('\n').filter(Boolean)
+      } catch {
+        // No processed file yet
+      }
+
+      const files = await fs.readdir(voiceLogDir)
+      const unprocessed = []
+
+      for (const f of files) {
+        if (!f.endsWith('.json')) continue
+        const sessionId = f.replace('.json', '')
+        if (processedSessions.includes(sessionId)) continue
+
+        try {
+          const content = await fs.readFile(path.join(voiceLogDir, f), 'utf-8')
+          unprocessed.push(JSON.parse(content))
+        } catch {
+          // Skip invalid files
+        }
+      }
+
+      return { success: true, data: unprocessed }
+    } catch (error) {
+      console.error('[Voice] Error getting unprocessed logs:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Mark logs as processed
+  ipcMain.handle('voice:markProcessed', async (event, sessionIds) => {
+    try {
+      const processedFile = path.join(voiceLogDir, '.processed')
+      let existing = []
+      try {
+        const content = await fs.readFile(processedFile, 'utf-8')
+        existing = content.split('\n').filter(Boolean)
+      } catch {
+        // No file yet
+      }
+      const updated = [...new Set([...existing, ...sessionIds])]
+      await fs.writeFile(processedFile, updated.join('\n'), 'utf-8')
+      return { success: true }
+    } catch (error) {
+      console.error('[Voice] Error marking processed:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Save learnings
+  ipcMain.handle('voice:saveLearnings', async (event, content) => {
+    try {
+      await fs.mkdir(learningsDir, { recursive: true })
+      const filePath = path.join(learningsDir, 'voice-learnings.md')
+      await fs.writeFile(filePath, content, 'utf-8')
+      console.log('[Voice] Saved learnings:', filePath)
+      return { success: true, path: filePath }
+    } catch (error) {
+      console.error('[Voice] Error saving learnings:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Read learnings
+  ipcMain.handle('voice:readLearnings', async () => {
+    try {
+      const filePath = path.join(learningsDir, 'voice-learnings.md')
+      const content = await fs.readFile(filePath, 'utf-8')
+      return { success: true, data: content }
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return { success: true, data: '' }
+      }
+      console.error('[Voice] Error reading learnings:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Get log directory path
+  ipcMain.handle('voice:getLogPath', async () => {
+    return { success: true, data: voiceLogDir }
+  })
+
+  // Get learnings directory path
+  ipcMain.handle('voice:getLearningsPath', async () => {
+    return { success: true, data: learningsDir }
+  })
 }
 
 // Register Claude Code session handlers

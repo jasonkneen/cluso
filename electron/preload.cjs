@@ -93,6 +93,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
   },
 
+  // Voice logging operations
+  voice: {
+    ensureLogDir: () => ipcRenderer.invoke('voice:ensureLogDir'),
+    saveLog: (sessionId, content) => ipcRenderer.invoke('voice:saveLog', sessionId, content),
+    listLogs: () => ipcRenderer.invoke('voice:listLogs'),
+    readLog: (sessionId) => ipcRenderer.invoke('voice:readLog', sessionId),
+    getUnprocessedLogs: () => ipcRenderer.invoke('voice:getUnprocessedLogs'),
+    markProcessed: (sessionIds) => ipcRenderer.invoke('voice:markProcessed', sessionIds),
+    saveLearnings: (content) => ipcRenderer.invoke('voice:saveLearnings', content),
+    readLearnings: () => ipcRenderer.invoke('voice:readLearnings'),
+    getLogPath: () => ipcRenderer.invoke('voice:getLogPath'),
+    getLearningsPath: () => ipcRenderer.invoke('voice:getLearningsPath'),
+  },
+
   // Claude Code SDK operations (uses Claude Agent SDK with OAuth)
   claudeCode: {
     // Start a session with initial prompt

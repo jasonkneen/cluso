@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage, FunctionDeclaration, Type } from '@google/genai';
 import { createAudioBlob, base64ToArrayBuffer, pcmToAudioBuffer } from '../utils/audio';
 import { StreamState, SelectedElement } from '../types';
+import { voiceLogger } from '../utils/voiceLogger';
 
 interface UseLiveGeminiParams {
   videoRef: React.RefObject<HTMLVideoElement>;
@@ -17,7 +18,15 @@ interface UseLiveGeminiParams {
   onClickElement?: (selector: string) => Promise<{ success: boolean; error?: string }>;
   onNavigate?: (action: string, url?: string) => Promise<{ success: boolean; error?: string }>;
   onScroll?: (target: string) => Promise<{ success: boolean; error?: string }>;
+  onOpenItem?: (itemNumber: number) => Promise<string>;
+  onOpenFile?: (name?: string, path?: string) => Promise<string>;
+  onOpenFolder?: (name?: string, itemNumber?: number) => Promise<string>;
+  onBrowserBack?: () => string;
+  onCloseBrowser?: () => string;
   selectedElement?: SelectedElement | null;
+  // Context for logging
+  projectFolder?: string;
+  currentUrl?: string;
 }
 
 const updateUiTool: FunctionDeclaration = {
@@ -244,7 +253,101 @@ const scrollTool: FunctionDeclaration = {
   },
 };
 
-export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, selectedElement }: UseLiveGeminiParams) {
+// File Browser Overlay Tools
+const openFileBrowserItemTool: FunctionDeclaration = {
+  name: 'open_item',
+  description: 'Open an item from the file browser overlay by its number. Use after list_files shows the file browser.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      itemNumber: {
+        type: Type.NUMBER,
+        description: 'The number of the item to open (1-indexed)',
+      },
+    },
+    required: ['itemNumber'],
+  },
+};
+
+const fileBrowserBackTool: FunctionDeclaration = {
+  name: 'browser_back',
+  description: 'Go back to the previous panel in the file browser, or close it if at the root.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {},
+    required: [],
+  },
+};
+
+const closeFileBrowserTool: FunctionDeclaration = {
+  name: 'close_browser',
+  description: 'Close the file browser overlay completely. Use when user says "close that", "clear", "enough", "dismiss", etc.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {},
+    required: [],
+  },
+};
+
+const openFileTool: FunctionDeclaration = {
+  name: 'open_file',
+  description: `Open a file in the file browser by name or path.
+
+USE THIS WHEN:
+- User says "open LandingPage.tsx" → open_file({ name: "LandingPage.tsx" })
+- User says "show me the App component" → open_file({ name: "App.tsx" })
+- User says "open package.json" → open_file({ name: "package.json" })
+- User says "open that file" (after mentioning a file) → open_file({ name: "filename.tsx" })
+
+You can provide either:
+- name: Just the filename - will search in the current file browser directory
+- path: Full or relative path to the file
+
+The file will open in the file browser overlay for viewing.`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      name: {
+        type: Type.STRING,
+        description: 'The filename to open (e.g., "LandingPage.tsx", "package.json")',
+      },
+      path: {
+        type: Type.STRING,
+        description: 'Optional: Full path to the file if known',
+      },
+    },
+    required: [],
+  },
+};
+
+const openFolderTool: FunctionDeclaration = {
+  name: 'open_folder',
+  description: `Open a folder in the file browser by name or number.
+
+USE THIS WHEN:
+- User says "open the public folder" → open_folder({ name: "public" })
+- User says "open number 3" or "open 3" → open_folder({ itemNumber: 3 })
+- User says "go into src" → open_folder({ name: "src" })
+- User says "check the hooks folder" → open_folder({ name: "hooks" })
+
+You can use EITHER name OR itemNumber, not both. The itemNumber refers to the numbered items shown in the file browser overlay.`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      name: {
+        type: Type.STRING,
+        description: 'The folder name to open (e.g., "public", "src", "hooks")',
+      },
+      itemNumber: {
+        type: Type.NUMBER,
+        description: 'The number of the folder in the file browser (1-indexed)',
+      },
+    },
+    required: [],
+  },
+};
+
+export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, onOpenItem, onOpenFile, onOpenFolder, onBrowserBack, onCloseBrowser, selectedElement, projectFolder, currentUrl }: UseLiveGeminiParams) {
   const [streamState, setStreamState] = useState<StreamState>({
     isConnected: false,
     isStreaming: false,
@@ -325,63 +428,54 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
           },
-          tools: [{ functionDeclarations: [updateUiTool, selectElementTool, executeCodeTool, confirmSelectionTool, getPageElementsTool, patchSourceFileTool, listFilesTool, readFileTool, clickElementTool, navigateTool, scrollTool] }],
-          systemInstruction: `You are a specialized AI UI Engineer with voice control, element selection, file editing, and browser navigation capabilities.
+          tools: [{ functionDeclarations: [updateUiTool, selectElementTool, executeCodeTool, confirmSelectionTool, getPageElementsTool, patchSourceFileTool, listFilesTool, readFileTool, clickElementTool, navigateTool, scrollTool, openFileBrowserItemTool, openFileTool, openFolderTool, fileBrowserBackTool, closeFileBrowserTool] }],
+          systemInstruction: `You are a specialized AI UI Engineer with voice control, file browsing, element selection, and browser navigation.
 
           You can see the user's screen or video feed if enabled.
           You can hear the user's voice commands.
 
           CAPABILITIES:
-          📁 FILE SYSTEM: List files, read files, edit/patch source code
+          📁 FILE BROWSER: Browse files with numbered overlay, navigate folders, view files/images
           🔍 PAGE INSPECTION: Get page elements, select elements, execute code
           🧭 NAVIGATION: Click links, go back/forward, scroll, navigate to URLs
           ✏️ EDITING: Preview changes with execute_code, save with patch_source_file
 
-          CRITICAL - MODERN UI FRAMEWORKS:
-          Modern frameworks (shadcn, Radix, MUI, Tailwind) often don't use native HTML elements:
-          - "buttons" → 'button, [role="button"], [data-slot="button"]'
-          - "links" → 'a[href], [role="link"]'
-          - "inputs" → 'input, textarea, [role="textbox"]'
+          FILE BROWSER OVERLAY:
+          When user asks to see files ("show files", "list files", "check the public folder"), use list_files.
+          This shows a numbered overlay. User can then say "open 3" to navigate.
 
-          ALWAYS use compound selectors when user asks for common elements!
+          FILE BROWSER COMMANDS:
+          - "show me the files" / "list files" → list_files()
+          - "check the public folder" → list_files("public")
+          - "open 3" / "open three" / "number 3" → open_item(3) OR open_folder({ itemNumber: 3 })
+          - "open the src folder" / "go into hooks" → open_folder({ name: "src" })
+          - "open LandingPage.tsx" / "show me App.tsx" → open_file({ name: "LandingPage.tsx" })
+          - "go back" (in file browser) → browser_back()
+          - "close that" / "clear" / "enough" / "dismiss" → close_browser()
 
-          ${selectedElement ? `CURRENTLY SELECTED ELEMENT:
-          - Tag: ${selectedElement.tagName}
-          - ID: ${selectedElement.id || 'none'}
-          - Classes: ${selectedElement.className || 'none'}
-          - Text: "${selectedElement.text || ''}"
-          ${selectedElement.sourceLocation ? `- SOURCE FILE: ${selectedElement.sourceLocation.summary}` : ''}` : ''}
+          FILE TOOLS:
+          - open_file: Open a specific file by name - searches in current directory
+          - open_folder: For folders specifically - can use name OR number
+          - open_item: For any item by number (files or folders)
 
-          VOICE COMMANDS:
-          - "approve"/"yes"/"do it" → confirm_selection(true)
-          - "reject"/"no"/"cancel" → confirm_selection(false)
-          - "go back" → navigate("back")
-          - "scroll down/up/to top" → scroll("bottom"/"top")
-          - "click that link" → click_element(selector)
-          - "show me the files" → list_files()
-          - "read that file" → read_file(path)
-          - "save the changes" → patch_source_file()
+          CLOSING CONTEXT:
+          When user says "close that", "clear that", "enough of that", "dismiss":
+          - If file browser is showing → close_browser()
+          - If element is selected → confirm_selection(false)
+          - Otherwise → acknowledge and do nothing
 
-          AVAILABLE TOOLS:
-          📁 FILE TOOLS:
-          - list_files: List files/folders in a directory
-          - read_file: Read a file's contents
-          - patch_source_file: Save changes to source file
+          CRITICAL - CSS SELECTORS:
+          Modern frameworks use: 'button, [role="button"]' not just 'button'
+          NO :contains() - it will crash!
 
-          🔍 PAGE TOOLS:
-          - get_page_elements: See what elements exist on the page
-          - select_element: Highlight elements by CSS selector
-          - execute_code: Run JavaScript to modify the page (preview)
+          ${selectedElement ? `SELECTED ELEMENT: ${selectedElement.tagName} "${selectedElement.text || ''}"` : ''}
 
-          🧭 NAVIGATION TOOLS:
-          - click_element: Click a link/button
-          - navigate: Go back, forward, reload, or to URL
-          - scroll: Scroll to top, bottom, or element
+          VOICE COMMANDS SUMMARY:
+          FILE BROWSER: "show files", "open 3", "go back", "close that"
+          PAGE: "highlight buttons", "click that", "scroll down"
+          CONFIRM: "yes"/"approve", "no"/"reject"
 
-          ✅ CONFIRMATION:
-          - confirm_selection: Process user's yes/no
-
-          Be concise in your spoken responses. Describe what you're doing.`,
+          Be concise. Describe what you're doing.`,
         },
         callbacks: {
           onopen: () => {
@@ -753,6 +847,144 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                                         id: call.id,
                                         name: call.name,
                                         response: { error: 'scroll not available' }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                    else if (call.name === 'open_item') {
+                        const itemNumber = (call.args as any).itemNumber;
+                        console.log("AI opening item:", itemNumber);
+
+                        if (onOpenItem) {
+                            onOpenItem(itemNumber).then(result => {
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: { result }
+                                        }
+                                    });
+                                });
+                            });
+                        } else {
+                            sessionPromiseRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: call.id,
+                                        name: call.name,
+                                        response: { error: 'open_item not available' }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                    else if (call.name === 'open_file') {
+                        const name = (call.args as any).name;
+                        const path = (call.args as any).path;
+                        console.log("AI opening file:", name || path);
+
+                        if (onOpenFile) {
+                            onOpenFile(name, path).then(result => {
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: { result }
+                                        }
+                                    });
+                                });
+                            });
+                        } else {
+                            sessionPromiseRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: call.id,
+                                        name: call.name,
+                                        response: { error: 'open_file not available' }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                    else if (call.name === 'open_folder') {
+                        const name = (call.args as any).name;
+                        const itemNumber = (call.args as any).itemNumber;
+                        console.log("AI opening folder:", name || `item #${itemNumber}`);
+
+                        if (onOpenFolder) {
+                            onOpenFolder(name, itemNumber).then(result => {
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: { result }
+                                        }
+                                    });
+                                });
+                            });
+                        } else {
+                            sessionPromiseRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: call.id,
+                                        name: call.name,
+                                        response: { error: 'open_folder not available' }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                    else if (call.name === 'browser_back') {
+                        console.log("AI going back in file browser");
+
+                        if (onBrowserBack) {
+                            const result = onBrowserBack();
+                            sessionPromiseRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: call.id,
+                                        name: call.name,
+                                        response: { result }
+                                    }
+                                });
+                            });
+                        } else {
+                            sessionPromiseRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: call.id,
+                                        name: call.name,
+                                        response: { error: 'browser_back not available' }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                    else if (call.name === 'close_browser') {
+                        console.log("AI closing file browser");
+
+                        if (onCloseBrowser) {
+                            const result = onCloseBrowser();
+                            sessionPromiseRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: call.id,
+                                        name: call.name,
+                                        response: { result }
+                                    }
+                                });
+                            });
+                        } else {
+                            sessionPromiseRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: call.id,
+                                        name: call.name,
+                                        response: { error: 'close_browser not available' }
                                     }
                                 });
                             });

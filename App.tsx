@@ -65,6 +65,11 @@ import {
   Search,
   Palette,
   Bug,
+  FileText,
+  FileCode,
+  Globe,
+  Image,
+  FolderOpen,
 } from 'lucide-react';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
@@ -964,6 +969,33 @@ export default function App() {
     endLine: number;
   } | null>(null);
 
+  // File Browser Overlay State
+  interface FileBrowserItem {
+    name: string;
+    isDirectory: boolean;
+    path: string;
+  }
+  interface FileBrowserPanel {
+    type: 'directory' | 'file' | 'image';
+    path: string;
+    title: string;
+    items?: FileBrowserItem[];  // for directories
+    content?: string;           // for files
+  }
+  const [fileBrowserStack, setFileBrowserStack] = useState<FileBrowserPanel[]>([]);
+  const [fileBrowserVisible, setFileBrowserVisible] = useState(false);
+  const [fileBrowserBasePath, setFileBrowserBasePath] = useState<string>('');
+
+  // Refs for file browser state (to avoid stale closures in Gemini session callbacks)
+  const fileBrowserStackRef = useRef<FileBrowserPanel[]>([]);
+  const fileBrowserVisibleRef = useRef(false);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    fileBrowserStackRef.current = fileBrowserStack;
+    fileBrowserVisibleRef.current = fileBrowserVisible;
+  }, [fileBrowserStack, fileBrowserVisible]);
+
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1581,6 +1613,430 @@ export default function App() {
     }
   }, [isWebviewReady, activeTabId]);
 
+  // File Browser Overlay Functions
+  const showFileBrowser = useCallback(async (path?: string): Promise<string> => {
+    console.log('[FileBrowser] Opening:', path);
+    if (!isElectron || !window.electronAPI?.files) {
+      return 'Error: File browser only available in Electron mode';
+    }
+    try {
+      const targetPath = path || fileBrowserBasePath || '.';
+      const result = await window.electronAPI.files.listDirectory(targetPath);
+      if (result.success && result.data) {
+        const items: FileBrowserItem[] = result.data.map(f => ({
+          name: f.name,
+          isDirectory: f.isDirectory,
+          path: `${targetPath}/${f.name}`.replace(/\/\//g, '/')
+        }));
+
+        // Set base path if not set
+        if (!fileBrowserBasePath) {
+          setFileBrowserBasePath(targetPath);
+        }
+
+        const panel: FileBrowserPanel = {
+          type: 'directory',
+          path: targetPath,
+          title: targetPath.split('/').pop() || targetPath,
+          items
+        };
+
+        // Update refs immediately (before React re-renders) so subsequent tool calls see the update
+        fileBrowserStackRef.current = [panel];
+        fileBrowserVisibleRef.current = true;
+
+        setFileBrowserStack([panel]);
+        setFileBrowserVisible(true);
+
+        console.log('[FileBrowser] Opened - refs updated:', fileBrowserVisibleRef.current, fileBrowserStackRef.current.length);
+        return `Showing ${items.length} items. Say "open" followed by a number to open an item.`;
+      }
+      return 'Error: Could not list directory';
+    } catch (err) {
+      return 'Error: ' + (err as Error).message;
+    }
+  }, [isElectron, fileBrowserBasePath]);
+
+  const openFileBrowserItem = useCallback(async (itemNumber: number): Promise<string> => {
+    console.log('[FileBrowser] Opening item:', itemNumber);
+    console.log('[FileBrowser] State check - visible:', fileBrowserVisibleRef.current, 'stack length:', fileBrowserStackRef.current.length);
+
+    // Use refs to get the latest state (avoids stale closure in Gemini session)
+    const currentStack = fileBrowserStackRef.current;
+    const isVisible = fileBrowserVisibleRef.current;
+
+    if (!isVisible || currentStack.length === 0) {
+      return `Error: No file browser open. (visible: ${isVisible}, stack: ${currentStack.length})`;
+    }
+
+    const currentPanel = currentStack[currentStack.length - 1];
+    if (currentPanel.type !== 'directory' || !currentPanel.items) {
+      return 'Error: Current panel is not a directory';
+    }
+
+    const index = itemNumber - 1;
+    if (index < 0 || index >= currentPanel.items.length) {
+      return `Error: Invalid item number. Choose 1-${currentPanel.items.length}`;
+    }
+
+    const item = currentPanel.items[index];
+
+    if (item.isDirectory) {
+      // Open directory
+      if (!isElectron || !window.electronAPI?.files) {
+        return 'Error: File browser only available in Electron mode';
+      }
+      const result = await window.electronAPI.files.listDirectory(item.path);
+      if (result.success && result.data) {
+        const items: FileBrowserItem[] = result.data.map(f => ({
+          name: f.name,
+          isDirectory: f.isDirectory,
+          path: `${item.path}/${f.name}`.replace(/\/\//g, '/')
+        }));
+
+        const panel: FileBrowserPanel = {
+          type: 'directory',
+          path: item.path,
+          title: item.name,
+          items
+        };
+
+        // Update ref immediately
+        fileBrowserStackRef.current = [...currentStack, panel];
+        setFileBrowserStack(prev => [...prev, panel]);
+        return `Opened folder "${item.name}" with ${items.length} items.`;
+      }
+      return 'Error: Could not open folder';
+    } else {
+      // Open file
+      const ext = item.name.split('.').pop()?.toLowerCase();
+      const isImage = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext || '');
+
+      if (isImage) {
+        const panel: FileBrowserPanel = {
+          type: 'image',
+          path: item.path,
+          title: item.name
+        };
+        // Update ref immediately
+        fileBrowserStackRef.current = [...currentStack, panel];
+        setFileBrowserStack(prev => [...prev, panel]);
+        return `Showing image "${item.name}"`;
+      } else {
+        // Read file content
+        if (!isElectron || !window.electronAPI?.files) {
+          return 'Error: File reading only available in Electron mode';
+        }
+        const result = await window.electronAPI.files.readFile(item.path);
+        if (result.success && result.data) {
+          const content = result.data.length > 50000
+            ? result.data.substring(0, 50000) + '\n... (truncated)'
+            : result.data;
+
+          const panel: FileBrowserPanel = {
+            type: 'file',
+            path: item.path,
+            title: item.name,
+            content
+          };
+          // Update ref immediately
+          fileBrowserStackRef.current = [...currentStack, panel];
+          setFileBrowserStack(prev => [...prev, panel]);
+          return `Opened file "${item.name}"`;
+        }
+        return 'Error: Could not read file';
+      }
+    }
+  }, [isElectron]); // Uses refs for state, so no dependency on fileBrowserVisible/fileBrowserStack
+
+  const fileBrowserBack = useCallback((): string => {
+    // Use refs to get the latest state (avoids stale closure in Gemini session)
+    const isVisible = fileBrowserVisibleRef.current;
+    const currentStack = fileBrowserStackRef.current;
+
+    if (!isVisible) {
+      return 'No file browser open';
+    }
+    if (currentStack.length <= 1) {
+      // Update refs immediately
+      fileBrowserVisibleRef.current = false;
+      fileBrowserStackRef.current = [];
+      setFileBrowserVisible(false);
+      setFileBrowserStack([]);
+      return 'Closed file browser';
+    }
+    // Update ref immediately
+    fileBrowserStackRef.current = currentStack.slice(0, -1);
+    setFileBrowserStack(prev => prev.slice(0, -1));
+    const prevPanel = currentStack[currentStack.length - 2];
+    return `Back to "${prevPanel?.title || 'root'}"`;
+  }, []); // Uses refs for state
+
+  const closeFileBrowser = useCallback((): string => {
+    // Update refs immediately
+    fileBrowserVisibleRef.current = false;
+    fileBrowserStackRef.current = [];
+    setFileBrowserVisible(false);
+    setFileBrowserStack([]);
+    return 'Closed file browser';
+  }, []);
+
+  // Open folder by name or number
+  const openFolder = useCallback(async (name?: string, itemNumber?: number): Promise<string> => {
+    console.log('[FileBrowser] Opening folder:', name || `#${itemNumber}`);
+    console.log('[FileBrowser] State check - visible:', fileBrowserVisibleRef.current, 'stack length:', fileBrowserStackRef.current.length);
+
+    // Use refs to get the latest state (avoids stale closure in Gemini session)
+    const currentStack = fileBrowserStackRef.current;
+    const isVisible = fileBrowserVisibleRef.current;
+
+    if (!isVisible || currentStack.length === 0) {
+      return `Error: No file browser open. Use list_files first to show the file browser. (visible: ${isVisible}, stack: ${currentStack.length})`;
+    }
+
+    const currentPanel = currentStack[currentStack.length - 1];
+    if (currentPanel.type !== 'directory' || !currentPanel.items) {
+      return 'Error: Current panel is not a directory';
+    }
+
+    let targetItem: FileBrowserItem | undefined;
+    let foundIndex: number = -1;
+
+    // Find by name
+    if (name) {
+      const lowerName = name.toLowerCase();
+      foundIndex = currentPanel.items.findIndex(item =>
+        item.isDirectory && item.name.toLowerCase() === lowerName
+      );
+      if (foundIndex === -1) {
+        // Try partial match
+        foundIndex = currentPanel.items.findIndex(item =>
+          item.isDirectory && item.name.toLowerCase().includes(lowerName)
+        );
+      }
+      if (foundIndex !== -1) {
+        targetItem = currentPanel.items[foundIndex];
+      } else {
+        const folders = currentPanel.items.filter(i => i.isDirectory).map(i => i.name).join(', ');
+        return `Error: No folder named "${name}" found. Available folders: ${folders || 'none'}`;
+      }
+    }
+    // Find by number
+    else if (itemNumber !== undefined) {
+      const index = itemNumber - 1;
+      if (index < 0 || index >= currentPanel.items.length) {
+        return `Error: Invalid item number. Choose 1-${currentPanel.items.length}`;
+      }
+      const item = currentPanel.items[index];
+      if (!item.isDirectory) {
+        return `Error: Item ${itemNumber} "${item.name}" is a file, not a folder. Use open_item for files.`;
+      }
+      targetItem = item;
+      foundIndex = index;
+    }
+    else {
+      return 'Error: Please provide either a folder name or item number';
+    }
+
+    // Open the folder
+    if (!targetItem) {
+      return 'Error: Could not find folder';
+    }
+
+    if (!isElectron || !window.electronAPI?.files) {
+      return 'Error: File browser only available in Electron mode';
+    }
+
+    const result = await window.electronAPI.files.listDirectory(targetItem.path);
+    if (result.success && result.data) {
+      const items: FileBrowserItem[] = result.data.map(f => ({
+        name: f.name,
+        isDirectory: f.isDirectory,
+        path: `${targetItem!.path}/${f.name}`.replace(/\/\//g, '/')
+      }));
+
+      const panel: FileBrowserPanel = {
+        type: 'directory',
+        path: targetItem.path,
+        title: targetItem.name,
+        items
+      };
+
+      // Update ref immediately
+      fileBrowserStackRef.current = [...currentStack, panel];
+      setFileBrowserStack(prev => [...prev, panel]);
+      return `Opened folder "${targetItem.name}" (item ${foundIndex + 1}) with ${items.length} items: ${items.slice(0, 5).map((i, idx) => `${idx + 1}. ${i.name}${i.isDirectory ? '/' : ''}`).join(', ')}${items.length > 5 ? '...' : ''}`;
+    }
+    return 'Error: Could not open folder';
+  }, [isElectron]); // Uses refs for state, so no dependency on fileBrowserVisible/fileBrowserStack
+
+  // Open file by name or path
+  const openFile = useCallback(async (name?: string, path?: string): Promise<string> => {
+    console.log('[FileBrowser] Opening file:', name || path);
+
+    if (!isElectron || !window.electronAPI?.files) {
+      return 'Error: File browser only available in Electron mode';
+    }
+
+    // If path is provided, use it directly
+    if (path) {
+      const result = await window.electronAPI.files.readFile(path);
+      if (result.success && result.data) {
+        const fileName = path.split('/').pop() || path;
+        const ext = fileName.split('.').pop()?.toLowerCase();
+        const isImage = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext || '');
+
+        if (isImage) {
+          const panel: FileBrowserPanel = {
+            type: 'image',
+            path: path,
+            title: fileName
+          };
+          fileBrowserStackRef.current = [panel];
+          fileBrowserVisibleRef.current = true;
+          setFileBrowserStack([panel]);
+          setFileBrowserVisible(true);
+          return `Showing image "${fileName}"`;
+        } else {
+          const content = result.data.length > 50000
+            ? result.data.substring(0, 50000) + '\n... (truncated)'
+            : result.data;
+
+          const panel: FileBrowserPanel = {
+            type: 'file',
+            path: path,
+            title: fileName,
+            content
+          };
+          fileBrowserStackRef.current = [panel];
+          fileBrowserVisibleRef.current = true;
+          setFileBrowserStack([panel]);
+          setFileBrowserVisible(true);
+          return `Opened file "${fileName}"`;
+        }
+      }
+      return `Error: Could not read file at ${path}`;
+    }
+
+    // Search by name
+    if (!name) {
+      return 'Error: Please provide either a file name or path';
+    }
+
+    // First check the current file browser directory
+    const currentStack = fileBrowserStackRef.current;
+    let searchPath = fileBrowserBasePath || '.';
+
+    if (currentStack.length > 0 && currentStack[currentStack.length - 1].type === 'directory') {
+      searchPath = currentStack[currentStack.length - 1].path;
+    }
+
+    // List directory and search for file
+    const result = await window.electronAPI.files.listDirectory(searchPath);
+    if (result.success && result.data) {
+      const lowerName = name.toLowerCase();
+      // Find exact match first
+      let found = result.data.find(f => !f.isDirectory && f.name.toLowerCase() === lowerName);
+      // Then try partial match
+      if (!found) {
+        found = result.data.find(f => !f.isDirectory && f.name.toLowerCase().includes(lowerName));
+      }
+
+      if (found) {
+        const filePath = `${searchPath}/${found.name}`.replace(/\/\//g, '/');
+        const fileResult = await window.electronAPI.files.readFile(filePath);
+
+        if (fileResult.success && fileResult.data) {
+          const ext = found.name.split('.').pop()?.toLowerCase();
+          const isImage = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext || '');
+
+          // If browser not visible, show it first with the directory
+          if (!fileBrowserVisibleRef.current) {
+            const dirItems: FileBrowserItem[] = result.data.map(f => ({
+              name: f.name,
+              isDirectory: f.isDirectory,
+              path: `${searchPath}/${f.name}`.replace(/\/\//g, '/')
+            }));
+
+            const dirPanel: FileBrowserPanel = {
+              type: 'directory',
+              path: searchPath,
+              title: searchPath.split('/').pop() || searchPath,
+              items: dirItems
+            };
+
+            if (isImage) {
+              const filePanel: FileBrowserPanel = {
+                type: 'image',
+                path: filePath,
+                title: found.name
+              };
+              fileBrowserStackRef.current = [dirPanel, filePanel];
+              fileBrowserVisibleRef.current = true;
+              setFileBrowserStack([dirPanel, filePanel]);
+              setFileBrowserVisible(true);
+              return `Showing image "${found.name}"`;
+            } else {
+              const content = fileResult.data.length > 50000
+                ? fileResult.data.substring(0, 50000) + '\n... (truncated)'
+                : fileResult.data;
+
+              const filePanel: FileBrowserPanel = {
+                type: 'file',
+                path: filePath,
+                title: found.name,
+                content
+              };
+              fileBrowserStackRef.current = [dirPanel, filePanel];
+              fileBrowserVisibleRef.current = true;
+              setFileBrowserStack([dirPanel, filePanel]);
+              setFileBrowserVisible(true);
+              return `Opened file "${found.name}"`;
+            }
+          } else {
+            // Browser already visible, just add the file panel
+            if (isImage) {
+              const panel: FileBrowserPanel = {
+                type: 'image',
+                path: filePath,
+                title: found.name
+              };
+              fileBrowserStackRef.current = [...currentStack, panel];
+              setFileBrowserStack(prev => [...prev, panel]);
+              return `Showing image "${found.name}"`;
+            } else {
+              const content = fileResult.data.length > 50000
+                ? fileResult.data.substring(0, 50000) + '\n... (truncated)'
+                : fileResult.data;
+
+              const panel: FileBrowserPanel = {
+                type: 'file',
+                path: filePath,
+                title: found.name,
+                content
+              };
+              fileBrowserStackRef.current = [...currentStack, panel];
+              setFileBrowserStack(prev => [...prev, panel]);
+              return `Opened file "${found.name}"`;
+            }
+          }
+        }
+        return `Error: Could not read file "${found.name}"`;
+      }
+
+      // File not found in current directory
+      const files = result.data.filter(f => !f.isDirectory).map(f => f.name).slice(0, 10).join(', ');
+      return `Error: File "${name}" not found in ${searchPath}. Available files: ${files || 'none'}${result.data.filter(f => !f.isDirectory).length > 10 ? '...' : ''}`;
+    }
+
+    return 'Error: Could not search directory';
+  }, [isElectron, fileBrowserBasePath]);
+
+  // Update handleListFiles to show overlay
+  const handleListFilesWithOverlay = useCallback(async (path?: string): Promise<string> => {
+    return showFileBrowser(path);
+  }, [showFileBrowser]);
+
   const {
     streamState,
     connect,
@@ -1597,11 +2053,16 @@ export default function App() {
     onConfirmSelection: handleConfirmSelection,
     onGetPageElements: handleGetPageElements,
     onPatchSourceFile: handlePatchSourceFile,
-    onListFiles: handleListFiles,
+    onListFiles: handleListFilesWithOverlay,
     onReadFile: handleReadFile,
     onClickElement: handleClickElement,
     onNavigate: handleNavigate,
     onScroll: handleScroll,
+    onOpenItem: openFileBrowserItem,
+    onOpenFile: openFile,
+    onOpenFolder: openFolder,
+    onBrowserBack: fileBrowserBack,
+    onCloseBrowser: closeFileBrowser,
     selectedElement: selectedElement
   });
 
@@ -5227,6 +5688,165 @@ If you're not sure what the user wants, ask for clarification.
       <video ref={videoRef} className="hidden" autoPlay playsInline muted />
       <canvas ref={canvasRef} className="hidden" />
 
+
+      {/* File Browser Overlay */}
+      {fileBrowserVisible && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/70 z-[100] backdrop-blur-md"
+            onClick={closeFileBrowser}
+          />
+
+          {/* Stacked Panels */}
+          <div className="fixed inset-0 z-[101] flex items-center justify-center pointer-events-none">
+            {fileBrowserStack.map((panel, index) => {
+              const isActive = index === fileBrowserStack.length - 1;
+              const stackOffset = (fileBrowserStack.length - 1 - index) * 350; // Much bigger offset
+
+              // Get file icon based on extension
+              const getFileIcon = (name: string, isDir: boolean) => {
+                if (isDir) return <Folder size={18} className="text-blue-400" />;
+                const ext = name.split('.').pop()?.toLowerCase() || '';
+                if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext))
+                  return <Image size={18} className="text-purple-400" />;
+                if (['ts', 'tsx'].includes(ext))
+                  return <FileCode size={18} className="text-blue-400" />;
+                if (['js', 'jsx'].includes(ext))
+                  return <FileCode size={18} className="text-yellow-400" />;
+                if (['css', 'scss', 'less'].includes(ext))
+                  return <Palette size={18} className="text-pink-400" />;
+                if (['json', 'yaml', 'yml', 'toml'].includes(ext))
+                  return <Settings size={18} className="text-orange-400" />;
+                if (['md', 'txt', 'mdx'].includes(ext))
+                  return <FileText size={18} className="text-neutral-400" />;
+                if (['html', 'htm'].includes(ext))
+                  return <Globe size={18} className="text-orange-400" />;
+                return <File size={18} className="text-neutral-500" />;
+              };
+
+              return (
+                <div
+                  key={`${panel.path}-${index}`}
+                  className={`absolute pointer-events-auto transition-all duration-500 ease-out backdrop-blur-xl border rounded-xl shadow-2xl overflow-hidden ${
+                    isDarkMode
+                      ? 'bg-neutral-900/80 border-white/10'
+                      : 'bg-white/80 border-black/10'
+                  }`}
+                  style={{
+                    width: panel.type === 'image' ? 'auto' : '480px',
+                    maxWidth: '90vw',
+                    maxHeight: '60vh',
+                    transform: isActive
+                      ? 'translateX(0) scale(1)'
+                      : `translateX(-${stackOffset}px) scale(0.95)`,
+                    opacity: isActive ? 1 : 0.4,
+                    zIndex: index,
+                  }}
+                >
+                  {/* Header - Compact */}
+                  <div className={`flex items-center gap-2 px-3 py-2 border-b ${
+                    isDarkMode ? 'border-white/10' : 'border-black/5'
+                  }`}>
+                    <button
+                      onClick={fileBrowserBack}
+                      className={`p-1 rounded transition ${
+                        isDarkMode ? 'hover:bg-white/10 text-neutral-400' : 'hover:bg-black/5 text-neutral-500'
+                      }`}
+                    >
+                      <ChevronLeft size={18} />
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <div className={`text-sm font-medium truncate ${isDarkMode ? 'text-white' : 'text-neutral-900'}`}>
+                        {panel.title}
+                      </div>
+                    </div>
+                    <button
+                      onClick={closeFileBrowser}
+                      className={`p-1 rounded transition ${
+                        isDarkMode ? 'hover:bg-white/10 text-neutral-400' : 'hover:bg-black/5 text-neutral-500'
+                      }`}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  {/* Content */}
+                  <div className="overflow-y-auto" style={{ maxHeight: 'calc(60vh - 44px)' }}>
+                    {panel.type === 'directory' && panel.items && (
+                      <div className="py-1">
+                        {panel.items.length === 0 ? (
+                          <div className={`text-center py-6 text-sm ${isDarkMode ? 'text-neutral-500' : 'text-neutral-400'}`}>
+                            Empty folder
+                          </div>
+                        ) : (
+                          panel.items.map((item, itemIndex) => (
+                            <button
+                              key={item.path}
+                              onClick={() => openFileBrowserItem(itemIndex + 1)}
+                              className={`w-full flex items-center gap-3 px-3 py-2 text-left transition ${
+                                isDarkMode ? 'hover:bg-white/5' : 'hover:bg-black/5'
+                              }`}
+                            >
+                              {/* Number badge */}
+                              <div className={`w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                                isDarkMode ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-500/10 text-blue-600'
+                              }`}>
+                                {itemIndex + 1}
+                              </div>
+                              {/* Icon */}
+                              <div className="flex-shrink-0">
+                                {getFileIcon(item.name, item.isDirectory)}
+                              </div>
+                              {/* Name */}
+                              <div className={`flex-1 min-w-0 text-sm truncate ${
+                                isDarkMode ? 'text-white' : 'text-neutral-900'
+                              }`}>
+                                {item.name}
+                              </div>
+                              {/* Arrow for folders */}
+                              {item.isDirectory && (
+                                <ChevronRight size={16} className={isDarkMode ? 'text-neutral-600' : 'text-neutral-400'} />
+                              )}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+
+                    {panel.type === 'file' && panel.content && (
+                      <pre className={`p-3 text-xs font-mono overflow-x-auto ${
+                        isDarkMode ? 'text-neutral-300' : 'text-neutral-700'
+                      }`}>
+                        {panel.content}
+                      </pre>
+                    )}
+
+                    {panel.type === 'image' && (
+                      <div className="p-3 flex items-center justify-center">
+                        <img
+                          src={`file://${panel.path}`}
+                          alt={panel.title}
+                          className="max-w-full max-h-[50vh] object-contain rounded"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Voice hint */}
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[102] pointer-events-none">
+            <div className={`px-3 py-1.5 rounded-full text-xs backdrop-blur-xl ${
+              isDarkMode ? 'bg-white/10 text-white/60' : 'bg-black/10 text-black/60'
+            }`}>
+              "open 3" / "open App.tsx" / "open src folder" / "go back" / "close"
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Settings Dialog */}
       <SettingsDialog

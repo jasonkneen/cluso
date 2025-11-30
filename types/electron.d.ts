@@ -366,6 +366,54 @@ interface ElectronMCPAPI {
   onEvent: (callback: (event: MCPEvent) => void) => () => void
 }
 
+// Voice logging types
+interface VoiceLogSession {
+  sessionId: string
+  startTime: string
+  endTime?: string
+  context: {
+    projectFolder: string
+    currentUrl?: string
+    selectedElement?: {
+      tagName: string
+      text?: string
+      className?: string
+    } | null
+  }
+  entries: VoiceLogEntry[]
+  summary?: {
+    totalUserInputs: number
+    totalAiResponses: number
+    toolCallsCount: number
+    errorsCount: number
+    clarificationsCount: number
+  }
+}
+
+interface VoiceLogEntry {
+  timestamp: string
+  type: 'session_start' | 'session_end' | 'user_input' | 'ai_response' | 'tool_call' | 'error' | 'clarification'
+  data: Record<string, unknown>
+}
+
+interface VoiceLogInfo {
+  sessionId: string
+  path: string
+}
+
+interface ElectronVoiceAPI {
+  ensureLogDir: () => Promise<GitResult<string>>
+  saveLog: (sessionId: string, content: string) => Promise<GitResult<string>>
+  listLogs: () => Promise<GitResult<VoiceLogInfo[]>>
+  readLog: (sessionId: string) => Promise<GitResult<VoiceLogSession>>
+  getUnprocessedLogs: () => Promise<GitResult<VoiceLogSession[]>>
+  markProcessed: (sessionIds: string[]) => Promise<GitResult>
+  saveLearnings: (content: string) => Promise<GitResult<string>>
+  readLearnings: () => Promise<GitResult<string>>
+  getLogPath: () => Promise<GitResult<string>>
+  getLearningsPath: () => Promise<GitResult<string>>
+}
+
 interface ElectronAPI {
   git: ElectronGitAPI
   files: ElectronFilesAPI
@@ -374,6 +422,7 @@ interface ElectronAPI {
   api: ElectronApiAPI
   claudeCode: ElectronClaudeCodeAPI
   mcp?: ElectronMCPAPI
+  voice?: ElectronVoiceAPI
   getWebviewPreloadPath: () => Promise<string>
   isElectron: boolean
 }
