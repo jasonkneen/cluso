@@ -14,14 +14,14 @@ const styles = `
     --text-primary: #ffffff;
     --text-secondary: #a1a1a1;
     --text-muted: #666666;
-    --accent: #3b82f6;
-    --accent-hover: #2563eb;
+    --accent: #f97316;
+    --accent-hover: #ea580c;
     --border: #262626;
-    --gradient-start: #3b82f6;
-    --gradient-end: #8b5cf6;
+    --gradient-start: #f97316;
+    --gradient-end: #fb923c;
     --nav-bg: rgba(10, 10, 10, 0.8);
-    --hero-glow: rgba(59, 130, 246, 0.15);
-    --cta-glow: rgba(59, 130, 246, 0.1);
+    --hero-glow: rgba(249, 115, 22, 0.15);
+    --cta-glow: rgba(249, 115, 22, 0.1);
     --shadow-color: rgba(0, 0, 0, 0.5);
   }
 
@@ -34,8 +34,8 @@ const styles = `
     --text-muted: #a1a1a1;
     --border: #e5e5e5;
     --nav-bg: rgba(255, 255, 255, 0.8);
-    --hero-glow: rgba(59, 130, 246, 0.08);
-    --cta-glow: rgba(59, 130, 246, 0.05);
+    --hero-glow: rgba(249, 115, 22, 0.08);
+    --cta-glow: rgba(249, 115, 22, 0.05);
     --shadow-color: rgba(0, 0, 0, 0.1);
   }
 
@@ -281,6 +281,7 @@ const styles = `
     max-width: 1100px;
     width: 100%;
     position: relative;
+    padding-bottom: 3rem;
   }
 
   .hero-image-placeholder {
@@ -795,7 +796,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               style={{
                 width: '100%',
                 borderRadius: '16px',
-                boxShadow: isDark ? '0 25px 50px -12px rgba(0, 0, 0, 0.5)' : '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
+                boxShadow: isDark
+                  ? '0 25px 80px -12px rgba(0, 0, 0, 0.7), 0 10px 30px -5px rgba(0, 0, 0, 0.4)'
+                  : '0 25px 60px -12px rgba(0, 0, 0, 0.25), 0 10px 20px -5px rgba(0, 0, 0, 0.1)',
                 border: '1px solid var(--border)'
               }}
             />
