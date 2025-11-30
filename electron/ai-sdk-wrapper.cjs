@@ -9,6 +9,9 @@
  */
 
 const { ipcMain } = require('electron')
+const fs = require('fs').promises
+const path = require('path')
+const { execSync } = require('child_process')
 
 // Dynamic imports for ESM modules (AI SDK is ESM-only)
 let ai = null
