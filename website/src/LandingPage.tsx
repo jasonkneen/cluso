@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 const styles = `
   * {
@@ -94,6 +94,159 @@ const styles = `
     width: 16px;
     height: 16px;
     color: var(--text-secondary);
+  }
+
+  /* Sticky Scroll Header */
+  .scroll-header {
+    position: fixed;
+    top: 0;
+    z-index: 101;
+    padding: 0.75rem 1.25rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-top: none;
+    transform: translateY(-100%);
+    transition: transform 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border-radius: 0 0 20px 20px;
+    width: 600px;
+    left: 50%;
+    margin-left: -300px;
+  }
+
+  .scroll-header.visible {
+    transform: translateY(0);
+  }
+
+  .scroll-header .scroll-email-form {
+    display: flex;
+    align-items: center;
+    width: 200px;
+    overflow: hidden;
+  }
+
+  .scroll-header .scroll-email-form input {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    padding: 0.5rem 1rem;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    width: 200px;
+    outline: none;
+    transition: all 0.3s ease;
+    transform: translateX(220px);
+    opacity: 0;
+  }
+
+  .scroll-header:hover .scroll-email-form input {
+    transform: translateX(0);
+    opacity: 1;
+  }
+
+  .scroll-header .scroll-email-form input:focus {
+    border-color: var(--accent);
+  }
+
+  .scroll-header .scroll-email-form input::placeholder {
+    color: var(--text-muted);
+  }
+
+  .scroll-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .scroll-header-logo {
+    width: 32px;
+    height: 32px;
+    background: #ffffff;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .scroll-header-logo svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .scroll-header-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+
+  .scroll-header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  /* Email Input */
+  .email-form {
+    display: flex;
+    align-items: center;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    padding: 0.5rem 0.5rem 0.5rem 1.25rem;
+    max-width: 520px;
+    width: 100%;
+    transition: border-color 0.2s;
+  }
+
+  .email-form:focus-within {
+    border-color: var(--accent);
+  }
+
+  .email-form-icon {
+    color: var(--text-muted);
+    margin-right: 0.75rem;
+    flex-shrink: 0;
+  }
+
+  .email-form-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .email-form input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    min-width: 0;
+  }
+
+  .email-form input::placeholder {
+    color: var(--text-muted);
+  }
+
+  .email-form .btn {
+    flex-shrink: 0;
+    padding: 0.6rem 1.25rem;
+    font-size: 0.9rem;
+  }
+
+  .email-form-small {
+    padding: 0.35rem 0.35rem 0.35rem 1rem;
+  }
+
+  .email-form-small .btn {
+    padding: 0.45rem 1rem;
+    font-size: 0.85rem;
+  }
+
+  .footer-email-form {
+    margin-top: 1.5rem;
+    max-width: 450px;
   }
 
   .nav-container {
@@ -476,6 +629,32 @@ const styles = `
     border-radius: 9999px;
   }
 
+  .pricing-card.blurred {
+    filter: blur(8px);
+    pointer-events: none;
+    user-select: none;
+    position: relative;
+  }
+
+  .pricing-card-wrapper {
+    position: relative;
+  }
+
+  .pricing-card-wrapper .coming-soon {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    padding: 0.5rem 1rem;
+    border-radius: 9999px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+  }
+
   .pricing-card h3 {
     font-size: 1.25rem;
     font-weight: 700;
@@ -714,20 +893,90 @@ const styles = `
     }
   }
 `;
-
 interface LandingPageProps {
   onDownload?: () => void;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
   const [isDark, setIsDark] = useState(true);
+  const [email, setEmail] = useState('');
+  const [showScrollHeader, setShowScrollHeader] = useState(false);
+  const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'submitted'>('idle');
 
   const toggleTheme = () => setIsDark(!isDark);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowScrollHeader(window.scrollY > 400);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submitState === 'submitted') return;
+
+    setSubmitState('submitting');
+    console.log('Email submitted:', email);
+
+    // Simulate API call
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // TODO: Add actual submission logic
+    setSubmitState('submitted');
+    setEmail('');
+  };
+
+  const getButtonText = () => {
+    switch (submitState) {
+      case 'submitting': return 'Joining...';
+      case 'submitted': return 'Joined';
+      default: return 'Join Waitlist';
+    }
+  };
 
   return (
     <>
       <style>{styles}</style>
       <div className={`landing-page ${isDark ? '' : 'light'}`}>
+        {/* Sticky Scroll Header */}
+        <div className={`scroll-header ${showScrollHeader ? 'visible' : ''}`}>
+          <div className="scroll-header-left">
+            <img
+              src="/icon.png"
+              alt="Cluso"
+              style={{ height: '35px', width: 'auto' }}
+            />
+          </div>
+          <div className="scroll-header-right">
+            <form className="scroll-email-form" onSubmit={handleSubmit}>
+              <input
+                type="email"
+                placeholder="Enter email..."
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </form>
+            <button type="submit" className="btn btn-primary" onClick={handleSubmit} disabled={submitState === 'submitting'}>
+              {getButtonText()}
+            </button>
+            <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
+              {isDark ? (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="5"/>
+                  <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                </svg>
+              )}
+            </button>
+          </div>
+        </div>
+
         {/* Navigation */}
         <nav className="landing-nav">
           <div className="nav-container">
@@ -760,7 +1009,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
         <section className="hero">
           <div className="hero-badge">
             <span className="dot"></span>
-            <span>Download NOW</span>
+            <span>Download</span>
           </div>
 
           <h1>
@@ -772,22 +1021,27 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
             Cluso brings voice-powered development to your browser.
           </p>
 
-          <div className="hero-buttons" id="download">
-            <a href="#" className="btn btn-primary btn-large" onClick={(e) => { e.preventDefault(); onDownload?.(); }}>
-              <svg className="btn-icon" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 22 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.1 22C7.79 22.05 6.8 20.68 5.96 19.47C4.25 17 2.94 12.45 4.7 9.39C5.57 7.87 7.13 6.91 8.82 6.88C10.1 6.86 11.32 7.75 12.11 7.75C12.89 7.75 14.37 6.68 15.92 6.84C16.57 6.87 18.39 7.1 19.56 8.82C19.47 8.88 17.39 10.1 17.41 12.63C17.44 15.65 20.06 16.66 20.09 16.67C20.06 16.74 19.67 18.11 18.71 19.5ZM13 3.5C13.73 2.67 14.94 2.04 15.94 2C16.07 3.17 15.6 4.35 14.9 5.19C14.21 6.04 13.07 6.7 11.95 6.61C11.8 5.46 12.36 4.26 13 3.5Z"/>
+          <form className="email-form" onSubmit={handleSubmit} id="download">
+            <div className="email-form-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                <polyline points="22,6 12,13 2,6"/>
               </svg>
-              macOS
-            </a>
-            <a href="#" className="btn btn-secondary btn-large" onClick={(e) => { e.preventDefault(); onDownload?.(); }}>
-              <svg className="btn-icon" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M3 5.5L10.5 4.5V11.5H3V5.5ZM3 18.5V12.5H10.5V19.5L3 18.5ZM11.5 19.5V12.5H21V18.5L11.5 19.5ZM21 11.5H11.5V4.5L21 3.5V11.5Z"/>
-              </svg>
-              Windows
-            </a>
-          </div>
+            </div>
+            <input
+              id="hero-email"
+              type="email"
+              placeholder="Enter your email..."
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+            <button type="submit" className="btn btn-primary" disabled={submitState === 'submitting'}>
+              {getButtonText()}
+            </button>
+          </form>
 
-          <p className="hero-note">No signup required. Just download and start building.</p>
+          <p className="hero-note">Join the waitlist to get early access.</p>
 
           <div className="hero-image">
             <img
@@ -897,70 +1151,76 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                 <a href="#download" className="btn btn-secondary">Get Started</a>
               </div>
 
-              <div className="pricing-card featured">
-                <h3>Pro</h3>
-                <div className="price">$19<span>/mo</span></div>
-                <p className="price-note">For serious developers</p>
-                <ul>
-                  <li>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                    Everything in Free
-                  </li>
-                  <li>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                    Unlimited AI requests
-                  </li>
-                  <li>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                    Advanced code generation
-                  </li>
-                  <li>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                    Priority support
-                  </li>
-                </ul>
-                <a href="#download" className="btn btn-primary">Start Free Trial</a>
+              <div className="pricing-card-wrapper">
+                <span className="coming-soon">Coming Soon</span>
+                <div className="pricing-card featured blurred">
+                  <h3>Pro</h3>
+                  <div className="price">$19<span>/mo</span></div>
+                  <p className="price-note">For serious developers</p>
+                  <ul>
+                    <li>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Everything in Free
+                    </li>
+                    <li>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Unlimited AI requests
+                    </li>
+                    <li>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Advanced code generation
+                    </li>
+                    <li>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Priority support
+                    </li>
+                  </ul>
+                  <a href="#download" className="btn btn-primary">Start Free Trial</a>
+                </div>
               </div>
 
-              <div className="pricing-card">
-                <h3>Team</h3>
-                <div className="price">$49<span>/mo</span></div>
-                <p className="price-note">Per seat, billed annually</p>
-                <ul>
-                  <li>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                    Everything in Pro
-                  </li>
-                  <li>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                    Team collaboration
-                  </li>
-                  <li>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                    Shared component library
-                  </li>
-                  <li>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                    Admin dashboard
-                  </li>
-                </ul>
-                <a href="#download" className="btn btn-secondary">Contact Sales</a>
+              <div className="pricing-card-wrapper">
+                <span className="coming-soon">Coming Soon</span>
+                <div className="pricing-card blurred">
+                  <h3>Team</h3>
+                  <div className="price">$49<span>/mo</span></div>
+                  <p className="price-note">Per seat, billed annually</p>
+                  <ul>
+                    <li>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Everything in Pro
+                    </li>
+                    <li>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Team collaboration
+                    </li>
+                    <li>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Shared component library
+                    </li>
+                    <li>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Admin dashboard
+                    </li>
+                  </ul>
+                  <a href="#download" className="btn btn-secondary">Contact Sales</a>
+                </div>
               </div>
             </div>
           </div>
@@ -991,14 +1251,32 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                   AI-powered browser dev tools that let you build UIs
                   with your voice. Open source and free forever.
                 </p>
+                <form className="email-form footer-email-form" onSubmit={handleSubmit}>
+                  <div className="email-form-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                      <polyline points="22,6 12,13 2,6"/>
+                    </svg>
+                  </div>
+                  <input
+                    type="email"
+                    placeholder="Enter your email..."
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                  />
+                  <button type="submit" className="btn btn-primary" disabled={submitState === 'submitting'}>
+                    {getButtonText()}
+                  </button>
+                </form>
               </div>
 
               <div className="footer-links">
                 <h4>Product</h4>
                 <ul>
                   <li><a href="#features">Features</a></li>
-                  <li><a href="#download">Download</a></li>
-                  <li><a href="#how-it-works">How it works</a></li>
+                  <li><a href="#pricing">Pricing</a></li>
+                  <li><a href="#download">Join Waitlist</a></li>
                 </ul>
               </div>
 
