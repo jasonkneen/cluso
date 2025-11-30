@@ -587,11 +587,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
         {/* Navigation */}
         <nav className="landing-nav">
           <div className="nav-container">
-            <div className="logo">Cluso</div>
+            <img src="/logo_dark.png" alt="Cluso" className="logo" style={{ height: '64px', width: 'auto' }} />
             <div className="nav-links">
               <a href="#features">Features</a>
               <a href="#how-it-works">How it works</a>
-              <a href="https://github.com/jkneen/cluso" target="_blank" rel="noopener noreferrer">GitHub</a>
               <a href="#download" className="btn btn-primary">Download Free</a>
             </div>
           </div>
@@ -631,18 +630,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
           <p className="hero-note">No signup required. Just download and start building.</p>
 
           <div className="hero-image">
-            <div className="hero-image-placeholder">
-              <div className="placeholder-content">
-                <div className="placeholder-icon">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <rect x="3" y="3" width="18" height="18" rx="2"/>
-                    <path d="M3 9h18"/>
-                    <path d="M9 21V9"/>
-                  </svg>
-                </div>
-                <span>App Screenshot</span>
-              </div>
-            </div>
+            <img
+              src="/screenshot1.png"
+              alt="Cluso app screenshot showing AI-powered browser development"
+              style={{
+                width: '100%',
+                borderRadius: '16px',
+                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+                border: '1px solid var(--border)'
+              }}
+            />
           </div>
         </section>
 
@@ -777,7 +774,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
           <div className="footer-container">
             <div className="footer-top">
               <div className="footer-brand">
-                <div className="logo">Cluso</div>
+                <img src="/logo_dark.png" alt="Cluso" className="logo" style={{ height: '56px', width: 'auto', marginBottom: '1rem' }} />
                 <p>
                   AI-powered browser dev tools that let you build UIs
                   with your voice. Open source and free forever.
