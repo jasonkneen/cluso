@@ -738,9 +738,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
             />
             <div className="nav-links">
               <a href="#features">Features</a>
-              <a href="#how-it-works">How it works</a>
               <a href="#pricing">Pricing</a>
-              <a href="#download" className="btn btn-primary">Download Free</a>
               <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
                 {isDark ? (
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
