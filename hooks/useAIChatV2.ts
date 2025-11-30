@@ -259,6 +259,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     enableReasoning = false,
     onReasoningChunk,
     mcpTools = [],
+    projectFolder,
   }: {
     modelId: string
     messages: CoreMessage[]
@@ -271,6 +272,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     enableReasoning?: boolean
     onReasoningChunk?: (chunk: string) => void
     mcpTools?: MCPToolDefinition[]
+    projectFolder?: string
   }): Promise<{
     text: string | null
     toolCalls?: ToolCallPart[]
@@ -446,7 +448,19 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
                 const required: string[] = []
 
                 for (const [propName, propSchema] of Object.entries(shape)) {
-                  const propDef = propSchema as { _def?: { typeName?: string; description?: string }; isOptional?: () => boolean; description?: string }
+                  const originalDef = propSchema as any
+                  let propDef = originalDef
+
+                  // Unwrap wrappers to get inner type (handle Optional, Nullable, Default, Effects)
+                  while (propDef._def && (
+                    propDef._def.typeName === 'ZodOptional' ||
+                    propDef._def.typeName === 'ZodNullable' ||
+                    propDef._def.typeName === 'ZodDefault' ||
+                    propDef._def.typeName === 'ZodEffects'
+                  )) {
+                    propDef = propDef._def.innerType || propDef._def.schema
+                  }
+
                   const typeName = propDef._def?.typeName || 'ZodString'
                   const typeMap: Record<string, string> = {
                     ZodString: 'string',
@@ -454,13 +468,17 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
                     ZodBoolean: 'boolean',
                     ZodArray: 'array',
                     ZodObject: 'object',
+                    ZodEnum: 'string',
+                    ZodNativeEnum: 'string',
                   }
+                  
                   properties[propName] = {
                     type: typeMap[typeName] || 'string',
-                    description: propDef._def?.description || propDef.description || '',
+                    description: propDef._def?.description || propDef.description || originalDef.description || '',
                   }
-                  // Check if required (not optional)
-                  if (!propDef.isOptional?.()) {
+                  
+                  // Check if required (use original definition)
+                  if (!originalDef.isOptional?.()) {
                     required.push(propName)
                   }
                 }
@@ -513,6 +531,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
         maxSteps,
         enableReasoning,
         mcpTools,
+        projectFolder,
       }).catch((err: Error) => {
         setError(err)
         optionsRef.current.onError?.(err)
@@ -533,6 +552,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     tools,
     maxSteps = 5,
     mcpTools = [],
+    projectFolder,
   }: {
     modelId: string
     messages: CoreMessage[]
@@ -541,6 +561,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     tools?: ToolsMap
     maxSteps?: number
     mcpTools?: MCPToolDefinition[]
+    projectFolder?: string
   }): Promise<{
     text: string | null
     toolCalls?: ToolCallPart[]
@@ -621,6 +642,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
         tools: serializableTools,
         maxSteps,
         mcpTools,
+        projectFolder,
       })
 
       if (!result.success) {

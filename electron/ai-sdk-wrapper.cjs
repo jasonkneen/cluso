@@ -10,8 +10,10 @@
 
 const { ipcMain } = require('electron')
 const fs = require('fs').promises
+const fsSync = require('fs')
 const path = require('path')
 const { execSync } = require('child_process')
+const os = require('os')
 
 // Dynamic imports for ESM modules (AI SDK is ESM-only)
 let ai = null
@@ -273,6 +275,7 @@ function createClaudeCodeFetch() {
         }
 
         console.log('[Claude Code Fetch] System prompt type:', Array.isArray(parsed.system) ? 'array' : typeof parsed.system)
+        console.log('[Claude Code Fetch] Tool count:', parsed.tools?.length || 0)
 
         // FIX: Ensure all tools have proper input_schema.type
         if (parsed.tools && Array.isArray(parsed.tools)) {
@@ -468,11 +471,534 @@ async function getProvider(providerType, apiKey = '') {
 const GOOGLE_PLACEHOLDER_DESCRIPTION = 'Placeholder parameter (can be omitted)'
 
 /**
+ * Default project root for filesystem operations
+ */
+const PROJECT_ROOT = path.join(__dirname, '..')
+
+function normalizeToolPath(inputPath, baseDir = PROJECT_ROOT) {
+  if (!inputPath || typeof inputPath !== 'string') return null
+  const tildeExpanded = inputPath.startsWith('~/')
+    ? path.join(os.homedir(), inputPath.slice(2))
+    : inputPath
+  if (path.isAbsolute(tildeExpanded)) {
+    if (fsSync.existsSync(tildeExpanded)) {
+      return tildeExpanded
+    }
+    const stripped = tildeExpanded.replace(/^\/+/, '')
+    return path.resolve(baseDir, stripped)
+  }
+  const cleaned = tildeExpanded.replace(/^\.\/+/, '')
+  return path.resolve(baseDir, cleaned)
+}
+
+function getProjectRoot(context) {
+  if (context && typeof context.projectRoot === 'string' && context.projectRoot.length > 0) {
+    return context.projectRoot
+  }
+  return PROJECT_ROOT
+}
+
+/**
+ * Run a git command and return { success, data? , error? }
+ */
+function gitExec(command) {
+  try {
+    const result = execSync(`git ${command}`, {
+      cwd: process.cwd(),
+      encoding: 'utf-8',
+    })
+    return { success: true, data: result.trim() }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
+/**
+ * Built-in tool executors for local coding agent tools
+ */
+const BUILT_IN_TOOL_EXECUTORS = {
+  async read_file({ path, filePath }, context = {}) {
+    const requestedPath = path ?? filePath
+    const baseDir = getProjectRoot(context)
+    console.log('[AI-SDK-Wrapper] read_file requested:', requestedPath)
+    const targetPath = normalizeToolPath(requestedPath, baseDir)
+    if (!targetPath) {
+      console.warn('[AI-SDK-Wrapper] read_file missing path', { path, filePath })
+      return { error: 'read_file requires a "path" argument' }
+    }
+    console.log('[AI-SDK-Wrapper] read_file normalized path:', targetPath)
+    try {
+      const content = await fs.readFile(targetPath, 'utf-8')
+      return { content, path: targetPath }
+    } catch (error) {
+      console.error('[AI-SDK-Wrapper] read_file failed:', targetPath, error.message)
+      return { error: error.message }
+    }
+  },
+
+  async write_file({ path, filePath, content }, context = {}) {
+    try {
+      const baseDir = getProjectRoot(context)
+      const targetPath = normalizeToolPath(path ?? filePath, baseDir)
+      if (!targetPath) {
+        return { error: 'write_file requires "path"' }
+      }
+      await fs.writeFile(targetPath, content, 'utf-8')
+      return { success: true, path: targetPath, bytesWritten: Buffer.byteLength(content, 'utf-8') }
+    } catch (error) {
+      return { error: error.message }
+    }
+  },
+
+  async create_file({ path, filePath, content = '' }, context = {}) {
+    try {
+      const baseDir = getProjectRoot(context)
+      const targetPath = normalizeToolPath(path ?? filePath, baseDir)
+      if (!targetPath) {
+        return { error: 'create_file requires a "path" argument' }
+      }
+      try {
+        await fs.access(targetPath)
+        return { error: 'File already exists' }
+      } catch {
+        // File not found - proceed
+      }
+      await fs.writeFile(targetPath, content, 'utf-8')
+      return { success: true, path: targetPath }
+    } catch (error) {
+      return { error: error.message }
+    }
+  },
+
+  async delete_file({ path, filePath }, context = {}) {
+    try {
+      const baseDir = getProjectRoot(context)
+      const targetPath = normalizeToolPath(path ?? filePath, baseDir)
+      if (!targetPath) {
+        return { error: 'delete_file requires a "path" argument' }
+      }
+      await fs.unlink(targetPath)
+      return { success: true, path: targetPath }
+    } catch (error) {
+      return { error: error.message }
+    }
+  },
+
+  async rename_file({ oldPath, newPath }, context = {}) {
+    try {
+      const baseDir = getProjectRoot(context)
+      const sourcePath = normalizeToolPath(oldPath, baseDir)
+      const destPath = normalizeToolPath(newPath, baseDir)
+      if (!sourcePath || !destPath) {
+        return { error: 'rename_file requires both oldPath and newPath' }
+      }
+      await fs.rename(sourcePath, destPath)
+      return { success: true, oldPath: sourcePath, newPath: destPath }
+    } catch (error) {
+      return { error: error.message }
+    }
+  },
+
+  async list_directory({ path: dirPath } = {}, context = {}) {
+    try {
+      const baseDir = getProjectRoot(context)
+      const targetDir = dirPath ? normalizeToolPath(dirPath, baseDir) : baseDir
+      if (!targetDir) {
+        return { error: 'list_directory requires a valid path' }
+      }
+      const entries = await fs.readdir(targetDir, { withFileTypes: true })
+      const files = entries
+        .map(entry => ({
+          name: entry.name,
+          path: path.join(targetDir, entry.name),
+          isDirectory: entry.isDirectory(),
+        }))
+        .sort((a, b) => {
+          if (a.isDirectory && !b.isDirectory) return -1
+          if (!a.isDirectory && b.isDirectory) return 1
+          return a.name.localeCompare(b.name)
+        })
+      return { entries: files, path: targetDir }
+    } catch (error) {
+      return { error: error.message }
+    }
+  },
+
+  async create_directory({ path: dirPath }, context = {}) {
+    try {
+      const baseDir = getProjectRoot(context)
+      const targetDir = normalizeToolPath(dirPath, baseDir)
+      if (!targetDir) {
+        return { error: 'create_directory requires a "path" argument' }
+      }
+      await fs.mkdir(targetDir, { recursive: true })
+      return { success: true, path: targetDir }
+    } catch (error) {
+      return { error: error.message }
+    }
+  },
+
+  async file_exists({ path, filePath }, context = {}) {
+    const baseDir = getProjectRoot(context)
+    const targetPath = normalizeToolPath(path ?? filePath, baseDir)
+    if (!targetPath) {
+      return { error: 'file_exists requires a "path" argument' }
+    }
+    try {
+      await fs.access(targetPath)
+      return { exists: true, path: targetPath }
+    } catch {
+      return { exists: false, path: targetPath }
+    }
+  },
+
+  async file_stat({ path, filePath }, context = {}) {
+    try {
+      const baseDir = getProjectRoot(context)
+      const targetPath = normalizeToolPath(path ?? filePath, baseDir)
+      if (!targetPath) {
+        return { error: 'file_stat requires a "path" argument' }
+      }
+      const stats = await fs.stat(targetPath)
+      return {
+        path: targetPath,
+        size: stats.size,
+        isFile: stats.isFile(),
+        isDirectory: stats.isDirectory(),
+        created: stats.birthtime.toISOString(),
+        modified: stats.mtime.toISOString(),
+      }
+    } catch (error) {
+      return { error: error.message }
+    }
+  },
+
+  async git_status() {
+    const result = gitExec('status --porcelain')
+    if (!result.success) {
+      return { error: result.error || 'Failed to get git status' }
+    }
+    const files = result.data
+      .split('\n')
+      .filter(line => line.trim())
+      .map(line => ({
+        status: line.substring(0, 2).trim(),
+        file: line.substring(3),
+      }))
+    return { files, hasChanges: files.length > 0 }
+  },
+
+  async git_commit({ message }) {
+    const addResult = gitExec('add -A')
+    if (!addResult.success) {
+      return { error: addResult.error || 'Failed to stage changes' }
+    }
+    const commitResult = gitExec(`commit -m "${message.replace(/"/g, '\\"')}"`)
+    if (!commitResult.success) {
+      return { error: commitResult.error || 'Failed to commit changes' }
+    }
+    return { success: true, message }
+  },
+
+  async search_in_files({ pattern, directory, filePattern, caseSensitive, maxResults }, context = {}) {
+    try {
+      const limit = typeof maxResults === 'number' ? maxResults : 100
+      const baseDir = getProjectRoot(context)
+      const searchDir = directory ? normalizeToolPath(directory, baseDir) : baseDir
+      if (!searchDir) {
+        return { error: 'search_in_files requires a valid directory' }
+      }
+      const regex = new RegExp(pattern, caseSensitive ? 'g' : 'gi')
+      const results = []
+
+      async function searchDirectory(dir, depth = 0) {
+        if (depth > 10 || results.length >= limit) return
+
+        const entries = await fs.readdir(dir, { withFileTypes: true })
+        for (const entry of entries) {
+          if (results.length >= limit) break
+
+          const fullPath = path.join(dir, entry.name)
+
+          if (entry.name === 'node_modules' || entry.name === '.git' || entry.name.startsWith('.')) {
+            continue
+          }
+
+          if (entry.isDirectory()) {
+            await searchDirectory(fullPath, depth + 1)
+          } else if (entry.isFile()) {
+            if (filePattern && filePattern !== '*') {
+              const patterns = filePattern.split(',').map(p => p.trim())
+              const matches = patterns.some(p => {
+                if (p.startsWith('*.')) {
+                  return entry.name.endsWith(p.slice(1))
+                }
+                return entry.name.includes(p)
+              })
+              if (!matches) continue
+            }
+
+            try {
+              const content = await fs.readFile(fullPath, 'utf-8')
+              const lines = content.split('\n')
+              for (let i = 0; i < lines.length; i++) {
+                regex.lastIndex = 0
+                if (regex.test(lines[i])) {
+                  results.push({
+                    file: fullPath,
+                    line: i + 1,
+                    content: lines[i].trim().substring(0, 200),
+                  })
+                  if (results.length >= limit) break
+                }
+              }
+            } catch {
+              // Skip unreadable files
+            }
+          }
+        }
+      }
+
+      await searchDirectory(searchDir)
+      return { matches: results, count: results.length }
+    } catch (error) {
+      return { error: error.message }
+    }
+  },
+
+  async find_files({ pattern, directory }, context = {}) {
+    try {
+      const results = []
+      const baseDir = getProjectRoot(context)
+      const searchDir = directory ? normalizeToolPath(directory, baseDir) : baseDir
+      if (!searchDir) {
+        return { error: 'find_files requires a valid directory' }
+      }
+
+      function matchGlob(filename, globPattern) {
+        const regexPattern = globPattern
+          .replace(/\*\*/g, '<<<DOUBLESTAR>>>')
+          .replace(/\*/g, '[^/]*')
+          .replace(/<<<DOUBLESTAR>>>/g, '.*')
+          .replace(/\?/g, '.')
+        return new RegExp(`^${regexPattern}$`).test(filename)
+      }
+
+      async function walk(dir, relativePath = '') {
+        if (results.length >= 1000) return
+
+        const entries = await fs.readdir(dir, { withFileTypes: true })
+        for (const entry of entries) {
+          if (results.length >= 1000) break
+
+          if (entry.name === 'node_modules' || entry.name === '.git') continue
+
+          const fullPath = path.join(dir, entry.name)
+          const relPath = relativePath ? `${relativePath}/${entry.name}` : entry.name
+
+          if (matchGlob(relPath, pattern) || matchGlob(entry.name, pattern)) {
+            results.push({
+              path: fullPath,
+              relativePath: relPath,
+              isDirectory: entry.isDirectory(),
+            })
+          }
+
+          if (entry.isDirectory()) {
+            if (pattern.includes('**') || pattern.includes('/')) {
+              await walk(fullPath, relPath)
+            }
+          }
+        }
+      }
+
+      await walk(searchDir)
+      return { files: results, count: results.length }
+    } catch (error) {
+      return { error: error.message }
+    }
+  },
+
+  async copy_file({ sourcePath, destPath }, context = {}) {
+    try {
+      const baseDir = getProjectRoot(context)
+      const fromPath = normalizeToolPath(sourcePath, baseDir)
+      const toPath = normalizeToolPath(destPath, baseDir)
+      if (!fromPath || !toPath) {
+        return { error: 'copy_file requires sourcePath and destPath' }
+      }
+      await fs.copyFile(fromPath, toPath)
+      return { success: true, sourcePath: fromPath, destPath: toPath }
+    } catch (error) {
+      return { error: error.message }
+    }
+  },
+
+  async read_multiple_files({ paths }, context = {}) {
+    try {
+      const baseDir = getProjectRoot(context)
+      const results = await Promise.all(
+        paths.map(async filePath => {
+          try {
+            const targetPath = normalizeToolPath(filePath, baseDir)
+            if (!targetPath) {
+              return { path: filePath, success: false, error: 'Invalid path' }
+            }
+            const content = await fs.readFile(targetPath, 'utf-8')
+            return { path: targetPath, success: true, content }
+          } catch (error) {
+            return { path: filePath, success: false, error: error.message }
+          }
+        })
+      )
+      return { files: results }
+    } catch (error) {
+      return { error: error.message }
+    }
+  },
+
+  async get_file_tree({ directory, maxDepth = 5, includeHidden = false }, context = {}) {
+    try {
+      const baseDir = getProjectRoot(context)
+      const startDir = directory ? normalizeToolPath(directory, baseDir) : baseDir
+      if (!startDir) {
+        return { error: 'get_file_tree requires a valid directory' }
+      }
+
+      async function buildTree(dir, depth = 0) {
+        if (depth >= maxDepth) return null
+
+        const entries = await fs.readdir(dir, { withFileTypes: true })
+        const children = []
+
+        for (const entry of entries) {
+          if (!includeHidden && entry.name.startsWith('.')) continue
+          if (entry.name === 'node_modules') continue
+
+          const fullPath = path.join(dir, entry.name)
+          const node = {
+            name: entry.name,
+            path: fullPath,
+            type: entry.isDirectory() ? 'directory' : 'file',
+          }
+
+          if (entry.isDirectory()) {
+            const subTree = await buildTree(fullPath, depth + 1)
+            if (subTree) {
+              node.children = subTree
+            }
+          }
+
+          children.push(node)
+        }
+
+        return children.sort((a, b) => {
+          if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
+          return a.name.localeCompare(b.name)
+        })
+      }
+
+      const tree = await buildTree(startDir)
+      return { tree }
+    } catch (error) {
+      return { error: error.message }
+    }
+  },
+}
+
+/**
+ * Execute a tool call using the registered executor map
+ */
+async function executeToolFromMap(executorMap, toolCall) {
+  const execInfo = executorMap.get(toolCall.toolName)
+  if (!execInfo) {
+    console.warn('[AI-SDK-Wrapper] No executor for tool:', toolCall.toolName)
+    return { error: `Tool ${toolCall.toolName} is not available in this environment.` }
+  }
+
+  try {
+    let result
+    if (execInfo.type === 'mcp') {
+      return await executeMCPTool(execInfo.serverId, execInfo.toolName, toolCall.args || {})
+    }
+    result = await execInfo.executor(toolCall.args || {})
+
+    if (toolCall.toolName === 'find_files' && result && Array.isArray(result.files) && result.files.length > 0) {
+      const preferred = result.files.find(f => f.path && /\.(tsx?|jsx?|md|html|css)$/i.test(f.path))
+        || result.files[0]
+      if (preferred?.path && BUILT_IN_TOOL_EXECUTORS.read_file) {
+        try {
+          const fileContent = await BUILT_IN_TOOL_EXECUTORS.read_file({ path: preferred.path })
+          result.autoReadFile = {
+            path: preferred.path,
+            content: fileContent.content,
+          }
+        } catch (error) {
+          result.autoReadFile = { path: preferred.path, error: error instanceof Error ? error.message : String(error) }
+        }
+      }
+    }
+
+    return result
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Unknown tool execution error' }
+  }
+}
+
+/**
  * Convert JSON Schema to Zod schema
  * @param {Object} schema - JSON Schema object
  */
 function jsonSchemaToZod(schema) {
   const z = require('zod')
+
+  function convertType(prop) {
+    let zodType
+
+    switch (prop.type) {
+      case 'string':
+        zodType = z.string()
+        break
+      case 'number':
+      case 'integer':
+        zodType = z.number()
+        break
+      case 'boolean':
+        zodType = z.boolean()
+        break
+      case 'array':
+        if (prop.items) {
+          zodType = z.array(convertType(prop.items))
+        } else {
+          zodType = z.array(z.any())
+        }
+        break
+      case 'object':
+        if (prop.properties) {
+          const shape = {}
+          const required = prop.required || []
+          for (const [key, subProp] of Object.entries(prop.properties)) {
+            let subZodType = convertType(subProp)
+            if (!required.includes(key)) {
+              subZodType = subZodType.optional()
+            }
+            shape[key] = subZodType
+          }
+          zodType = z.object(shape).passthrough()
+        } else {
+          zodType = z.object({}).passthrough()
+        }
+        break
+      default:
+        zodType = z.any()
+    }
+
+    if (prop.description) {
+      zodType = zodType.describe(prop.description)
+    }
+
+    return zodType
+  }
 
   if (!schema || schema.type !== 'object') {
     return z.object({})
@@ -483,31 +1009,7 @@ function jsonSchemaToZod(schema) {
   const required = schema.required || []
 
   for (const [key, prop] of Object.entries(properties)) {
-    let zodType
-
-    switch (prop.type) {
-      case 'string':
-        zodType = z.string()
-        break
-      case 'number':
-        zodType = z.number()
-        break
-      case 'boolean':
-        zodType = z.boolean()
-        break
-      case 'array':
-        zodType = z.array(z.any())
-        break
-      case 'object':
-        zodType = z.object({})
-        break
-      default:
-        zodType = z.any()
-    }
-
-    if (prop.description) {
-      zodType = zodType.describe(prop.description)
-    }
+    let zodType = convertType(prop)
 
     if (!required.includes(key)) {
       zodType = zodType.optional()
@@ -606,6 +1108,7 @@ async function streamChat(options) {
     maxSteps = 5,
     enableReasoning = false,
     mcpTools = [],
+    projectFolder,
   } = options
 
   await initialize()
@@ -636,6 +1139,20 @@ async function streamChat(options) {
     }
   }
 
+  let activeProjectRoot = PROJECT_ROOT
+  if (projectFolder && typeof projectFolder === 'string') {
+    try {
+      const resolved = path.resolve(projectFolder)
+      const stats = await fs.stat(resolved)
+      if (stats.isDirectory()) {
+        activeProjectRoot = resolved
+      }
+    } catch {
+      activeProjectRoot = PROJECT_ROOT
+    }
+  }
+  console.log('[AI-SDK-Wrapper] streamChat project root:', activeProjectRoot)
+
   try {
     const provider = await getProvider(providerType, apiKey)
     const normalizedModelId = normalizeModelId(modelId, providerType)
@@ -643,26 +1160,105 @@ async function streamChat(options) {
     // Filter out system messages (provider-specific handling)
     const filteredMessages = messages.filter(msg => msg.role !== 'system')
 
-    // Merge custom tools with MCP tools
-    const allTools = { ...tools }
+    // Prepare tools with execution logic
+    const sdkTools = {}
 
-    // Convert MCP tools to tool definitions
+    // Helper to wrap tool execution with logging and event emission
+    const wrapExecutor = (name, executeFn) => async (args, context) => {
+      const execContext = { ...context, projectRoot: activeProjectRoot }
+      const toolCallId = execContext?.toolCallId || 'unknown'
+      try {
+        let result = await executeFn(args, execContext)
+
+        // Handle find_files auto-read
+        if (name === 'find_files' && result && Array.isArray(result.files) && result.files.length > 0) {
+          const preferred = result.files.find(f => f.path && /\.(tsx?|jsx?|md|html|css)$/i.test(f.path))
+            || result.files[0]
+          if (preferred?.path && BUILT_IN_TOOL_EXECUTORS.read_file) {
+            try {
+              const fileContent = await BUILT_IN_TOOL_EXECUTORS.read_file({ path: preferred.path }, execContext)
+              result.autoReadFile = {
+                path: preferred.path,
+                content: fileContent.content,
+              }
+            } catch (error) {
+              result.autoReadFile = { path: preferred.path, error: error instanceof Error ? error.message : String(error) }
+            }
+          }
+        }
+
+        // Send result to renderer immediately
+        sendToRenderer('ai-sdk:step-finish', {
+          requestId,
+          text: '',
+          toolCalls: [],
+          toolResults: [{
+            toolCallId,
+            toolName: name,
+            result
+          }]
+        })
+
+        return result
+      } catch (error) {
+        const errorResult = { error: error.message || String(error) }
+        sendToRenderer('ai-sdk:step-finish', {
+          requestId,
+          text: '',
+          toolCalls: [],
+          toolResults: [{
+            toolCallId,
+            toolName: name,
+            result: errorResult
+          }]
+        })
+        return errorResult
+      }
+    }
+
+    // 1. Custom/Built-in tools
+    console.log('[AI-SDK-Wrapper] Processing tools:', Object.keys(tools))
+    for (const [name, def] of Object.entries(tools)) {
+      let parameters = def.parameters || { type: 'object', properties: {} }
+      if (typeof parameters === 'object' && !parameters.type) parameters = { type: 'object', ...parameters }
+      if (typeof parameters === 'object' && parameters.type === 'object' && !parameters.properties) parameters = { ...parameters, properties: {} }
+
+      if (providerType === 'google' && parameters && typeof parameters === 'object' && parameters.type === 'object') {
+        if (!parameters.properties || Object.keys(parameters.properties).length === 0) {
+          parameters = { type: 'object', properties: { _placeholder: { type: 'string', description: 'Placeholder' } } }
+        }
+      }
+
+      const zodSchema = jsonSchemaToZod(parameters)
+
+      if (BUILT_IN_TOOL_EXECUTORS[name]) {
+        // console.log(`[AI-SDK-Wrapper] Registering built-in tool: ${name}`)
+        sdkTools[name] = ai.tool({
+          description: def.description || `Tool: ${name}`,
+          parameters: zodSchema,
+          execute: wrapExecutor(name, BUILT_IN_TOOL_EXECUTORS[name])
+        })
+      } else {
+        console.warn(`[AI-SDK-Wrapper] No built-in executor for tool: ${name}`)
+      }
+    }
+
+    // 2. MCP Tools
     for (const mcpTool of mcpTools) {
       const uniqueName = `mcp_${mcpTool.serverId}_${mcpTool.name}`
-      // Ensure MCP tool inputSchema has required type field
       let mcpParams = mcpTool.inputSchema || { type: 'object', properties: {} }
-      if (typeof mcpParams === 'object' && !mcpParams.type) {
-        mcpParams = { type: 'object', ...mcpParams }
-      }
-      if (typeof mcpParams === 'object' && !mcpParams.properties) {
-        mcpParams = { ...mcpParams, properties: {} }
-      }
-      allTools[uniqueName] = {
-        description: mcpTool.description || `MCP tool: ${mcpTool.name}`,
-        parameters: mcpParams,
-        _mcpServerId: mcpTool.serverId,
-        _mcpToolName: mcpTool.name,
-      }
+      if (typeof mcpParams === 'object' && !mcpParams.type) mcpParams = { type: 'object', ...mcpParams }
+      if (typeof mcpParams === 'object' && !mcpParams.properties) mcpParams = { ...mcpParams, properties: {} }
+
+      const zodSchema = jsonSchemaToZod(mcpParams)
+
+      sdkTools[uniqueName] = ai.tool({
+        description: mcpTool.description,
+        parameters: zodSchema,
+        execute: wrapExecutor(uniqueName, async (args) => {
+          return await executeMCPTool(mcpTool.serverId, mcpTool.name, args)
+        })
+      })
     }
 
     // Build stream options
@@ -680,58 +1276,38 @@ async function streamChat(options) {
       }
     }
 
+    console.log('[AI-SDK-Wrapper] Final SDK tools:', Object.keys(sdkTools))
+
     const streamOptions = {
       model: modelInstance,
       messages: filteredMessages,
       system,
-    }
+      tools: Object.keys(sdkTools).length > 0 ? sdkTools : undefined,
+      maxSteps,
+      onStepFinish: (event) => {
+        const stepToolCalls = event.toolCalls?.map(tc => ({
+          toolCallId: tc.toolCallId,
+          toolName: tc.toolName,
+          args: tc.args
+        })) || []
 
-    // Add tools if provided
-    if (Object.keys(allTools).length > 0) {
-      // Log raw tools before conversion
-      const firstRawToolName = Object.keys(allTools)[0]
-      if (firstRawToolName) {
-        console.log('[AI-SDK-Wrapper] Raw tool before conversion:', firstRawToolName, JSON.stringify(allTools[firstRawToolName], null, 2))
-      }
-      const convertedTools = convertTools(allTools, providerType)
-      console.log('[AI-SDK-Wrapper] Converted tools count:', Object.keys(convertedTools).length)
-      streamOptions.tools = convertedTools
-      streamOptions.maxSteps = maxSteps
+        const stepToolResults = event.toolResults?.map(tr => ({
+          toolCallId: tr.toolCallId,
+          toolName: tr.toolName,
+          result: tr.result
+        })) || []
 
-      // Handle step finish callback
-      streamOptions.onStepFinish = async (event) => {
-        const stepData = {
-          requestId,
-          text: event.text,
-          toolCalls: [],
-          toolResults: [],
+        if (event.text || stepToolCalls.length > 0 || stepToolResults.length > 0) {
+          sendToRenderer('ai-sdk:step-finish', {
+            requestId,
+            text: event.text,
+            toolCalls: stepToolCalls,
+            toolResults: stepToolResults
+          })
         }
-
-        if (event.toolCalls) {
-          for (const tc of event.toolCalls) {
-            stepData.toolCalls.push({
-              toolCallId: tc.toolCallId,
-              toolName: tc.toolName,
-              args: tc.args,
-            })
-          }
-        }
-
-        if (event.toolResults) {
-          for (const tr of event.toolResults) {
-            stepData.toolResults.push({
-              toolCallId: tr.toolCallId,
-              toolName: tr.toolName,
-              result: tr.result,
-            })
-          }
-        }
-
-        sendToRenderer('ai-sdk:step-finish', stepData)
       }
     }
 
-    // Add reasoning configuration
     if (enableReasoning) {
       if (providerType === 'anthropic' || providerType === 'claude-code') {
         streamOptions.providerOptions = {
@@ -752,28 +1328,24 @@ async function streamChat(options) {
           },
         }
       } else if (providerType === 'openai' || providerType === 'codex') {
-        // Add reasoning prompt for OpenAI/Codex
         const reasoningPrompt = '\n\nIMPORTANT: Before providing your answer, first show your thinking process in a <thinking> tag. Reason through the problem step by step, then provide your final answer outside the thinking tag.'
         streamOptions.system = (streamOptions.system || '') + reasoningPrompt
       }
     }
 
-    // Start streaming
-    console.log('[AI-SDK-Wrapper] Starting stream for model:', normalizedModelId)
+    console.log('[AI-SDK-Wrapper] Streaming with maxSteps:', maxSteps, 'for model:', normalizedModelId)
+    console.log('[AI-SDK-Wrapper] System prompt length:', system?.length || 0)
+    console.log('[AI-SDK-Wrapper] Active tools:', Object.keys(sdkTools))
+    
     const result = ai.streamText(streamOptions)
 
     let fullText = ''
-    let fullReasoning = ''
-    const allToolCalls = []
-    const allToolResults = []
-
-    // Process text stream
     for await (const chunk of result.textStream) {
       fullText += chunk
       sendToRenderer('ai-sdk:text-chunk', { requestId, chunk })
     }
 
-    // Try to get reasoning
+    let fullReasoning = ''
     try {
       if ('reasoning' in result) {
         const reasoningResult = await result.reasoning
@@ -798,63 +1370,36 @@ async function streamChat(options) {
       console.log('[AI-SDK-Wrapper] Reasoning not available:', e.message)
     }
 
-    // Await final result
-    const finalResult = await result
+    // Wait for all promises to resolve
+    const allToolCalls = await result.toolCalls
+    const allToolResults = await result.toolResults
+    const finishReason = await result.finishReason
 
-    // Process steps for tool calls/results (ensure serializable)
-    if (Array.isArray(finalResult.steps)) {
-      for (const step of finalResult.steps) {
-        if (step.toolCalls) {
-          for (const tc of step.toolCalls) {
-            allToolCalls.push({
-              toolCallId: String(tc.toolCallId || ''),
-              toolName: String(tc.toolName || ''),
-              args: JSON.parse(JSON.stringify(tc.args || {})),
-            })
-          }
-        }
-        if (step.toolResults) {
-          for (const tr of step.toolResults) {
-            // Safely serialize result - it may contain non-serializable objects
-            let safeResult
-            try {
-              safeResult = JSON.parse(JSON.stringify(tr.result))
-            } catch {
-              safeResult = String(tr.result)
-            }
-            allToolResults.push({
-              toolCallId: String(tr.toolCallId || ''),
-              toolName: String(tr.toolName || ''),
-              result: safeResult,
-            })
-          }
-        }
-      }
-    }
-
-    // Extract <thinking> tags if reasoning not available
-    let finalText = await finalResult.text
-    if (!fullReasoning && finalText && enableReasoning) {
-      const thinkingMatch = finalText.match(/<thinking>([\s\S]*?)<\/thinking>/i)
-      if (thinkingMatch) {
-        fullReasoning = thinkingMatch[1].trim()
-        finalText = finalText.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '').trim()
-      }
-    }
-
-    // Send completion event (ensure all data is serializable)
     sendToRenderer('ai-sdk:complete', {
       requestId,
-      text: String(finalText || ''),
+      text: fullText,
       reasoning: fullReasoning || undefined,
-      toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-      toolResults: allToolResults.length > 0 ? allToolResults : undefined,
-      finishReason: String(finalResult.finishReason || 'stop'),
+      toolCalls: allToolCalls,
+      toolResults: allToolResults,
+      finishReason,
     })
 
     console.log('[AI-SDK-Wrapper] Stream completed for request:', requestId)
 
   } catch (error) {
+    const isNoOutput = error && (error.name === 'AI_NoOutputGeneratedError' || error.message?.includes('No output generated'))
+    const isInvalidPrompt = error && (error.name === 'AI_InvalidPromptError' || error.message?.includes('Invalid prompt'))
+
+    if (isNoOutput || isInvalidPrompt) {
+      console.warn('[AI-SDK-Wrapper] Stream recovered from non-fatal error:', error.message || error)
+      sendToRenderer('ai-sdk:complete', {
+        requestId,
+        text: 'No response generated.',
+        finishReason: 'stop',
+      })
+      return
+    }
+
     console.error('[AI-SDK-Wrapper] Stream error:', error)
     sendToRenderer('ai-sdk:error', {
       requestId,
@@ -918,6 +1463,9 @@ async function generateChat(options) {
     if (Object.keys(allTools).length > 0) {
       generateOptions.tools = convertTools(allTools, providerType)
       generateOptions.maxSteps = maxSteps
+      if (ai?.stepCountIs && typeof ai.stepCountIs === 'function') {
+        generateOptions.stopWhen = ai.stepCountIs(maxSteps)
+      }
     }
 
     console.log('[AI-SDK-Wrapper] Generating for model:', normalizedModelId)
@@ -1062,4 +1610,8 @@ module.exports = {
   generateChat,
   executeMCPTool,
   MODEL_PROVIDER_MAP,
+  __test__: {
+    convertTools,
+    BUILT_IN_TOOL_EXECUTORS,
+  },
 }

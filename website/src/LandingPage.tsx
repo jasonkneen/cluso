@@ -1321,7 +1321,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                 <h4>Resources</h4>
                 <ul>
                   <li><a href="#">Documentation</a></li>
-                  <li><a href="#">Changelog</a></li>
+                  
                   <li><a href="https://github.com/jkneen/cluso" target="_blank" rel="noopener noreferrer">GitHub</a></li>
                 </ul>
               </div>
@@ -1330,12 +1330,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                 <h4>Connect</h4>
                 <ul>
                   <li><a href="#">Twitter</a></li>
-                  <li><a href="#">Discord</a></li>
                   <li><a href="mailto:hello@cluso.dev">Contact</a></li>
                 </ul>
               </div>
-</div>
-<div className="footer-bottom">
+            </div>
+
+            <div className="footer-bottom">
               <span>&copy; 2024 Cluso. All rights reserved.</span>
               <div className="social-links">
                 <a href="#" aria-label="Twitter">

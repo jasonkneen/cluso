@@ -325,7 +325,7 @@ If the question requires looking at additional files, use the read_file tool.`)
 For UI work:
 1. Analyze the element's structure and styling
 2. If modifying, identify the source file and component
-3. Suggest specific CSS or React changes
+3. Apply the changes to the source code using the write_file tool
 4. Consider accessibility and responsive design`)
       break
 
@@ -377,17 +377,22 @@ export function createCodingAgentTools(): ToolsMap {
     read_file: {
       description: 'Read the contents of a file',
       parameters: z.object({
-        path: z.string().describe('Absolute path to the file'),
+        path: z.string().describe('Absolute path to the file').optional(),
+        filePath: z.string().describe('Legacy alias for path').optional(),
       }),
       execute: async (args: unknown) => {
-        const { path } = args as { path: string }
+        const { path, filePath } = args as { path?: string; filePath?: string }
+        const resolvedPath = path ?? filePath
+        if (!resolvedPath) {
+          return { error: 'read_file requires a "path" argument' }
+        }
         const electronAPI = getElectronAPI()
         if (!electronAPI?.files?.readFile) {
           return { error: 'File operations not available (not in Electron)' }
         }
-        const result = await electronAPI.files.readFile(path)
+        const result = await electronAPI.files.readFile(resolvedPath)
         if (result.success) {
-          return { content: result.data, path }
+          return { content: result.data, path: resolvedPath }
         }
         return { error: result.error }
       },
@@ -740,15 +745,8 @@ export function useCodingAgent(options: UseCodingAgentOptions = {}) {
   // Memoize combined tools (coding agent + MCP)
   const combinedTools = useMemo(() => {
     // DISABLED: MCP tools merging to fix schema issues
+    // We now pass MCP tools separately to the AI SDK wrapper
     return toolsRef.current
-    /*
-    if (!mcpTools.length || !callMCPTool) {
-      return toolsRef.current
-    }
-
-    const mcpToolsMap = mcpToolsToAISDKFormat(mcpTools, callMCPTool)
-    return mergeTools(toolsRef.current, mcpToolsMap)
-    */
   }, [mcpTools, callMCPTool])
 
   // Update context

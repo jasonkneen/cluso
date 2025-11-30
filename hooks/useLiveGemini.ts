@@ -208,12 +208,16 @@ const readFileTool: FunctionDeclaration = {
   parameters: {
     type: Type.OBJECT,
     properties: {
+      path: {
+        type: Type.STRING,
+        description: 'Absolute or relative path to the file to read',
+      },
       filePath: {
         type: Type.STRING,
-        description: 'Path to the file to read',
+        description: '(Deprecated) Legacy alias for path; prefer using "path"',
       },
     },
-    required: ['filePath'],
+    required: [],
   },
 };
 
@@ -750,8 +754,21 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         }
                     }
                     else if (call.name === 'read_file') {
-                        const filePath = (call.args as any).filePath;
+                        const filePath = (call.args as any).path ?? (call.args as any).filePath;
                         console.log("AI reading file:", filePath);
+
+                        if (!filePath) {
+                            sessionPromiseRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: call.id,
+                                        name: call.name,
+                                        response: { error: 'read_file requires a "path" argument' }
+                                    }
+                                });
+                            });
+                            return;
+                        }
 
                         if (onReadFile) {
                             onReadFile(filePath).then(result => {
