@@ -513,22 +513,37 @@ const styles = `
   }
 
   .features-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-    gap: 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 3rem;
   }
 
   .feature-card {
+    display: grid;
+    grid-template-columns: 1fr 1.5fr;
+    gap: 3rem;
+    align-items: center;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 16px;
-    padding: 2rem;
+    padding: 2.5rem;
     transition: all 0.3s;
+  }
+
+  .feature-card:nth-child(2) {
+    grid-template-columns: 1.5fr 1fr;
+  }
+
+  .feature-card:nth-child(2) .feature-content {
+    order: 2;
+  }
+
+  .feature-card:nth-child(2) .feature-image {
+    order: 1;
   }
 
   .feature-card:hover {
     border-color: #404040;
-    transform: translateY(-4px);
   }
 
   .landing-page.light .feature-card {
@@ -540,41 +555,57 @@ const styles = `
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
   }
 
+  .feature-content {
+    display: flex;
+    flex-direction: column;
+  }
+
   .feature-number {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
-    border-radius: 8px;
+    border-radius: 10px;
     font-weight: 700;
-    font-size: 0.9rem;
+    font-size: 1rem;
     margin-bottom: 1.5rem;
   }
 
   .feature-card h3 {
-    font-size: 1.25rem;
+    font-size: 1.5rem;
     font-weight: 700;
-    margin-bottom: 0.75rem;
+    margin-bottom: 1rem;
   }
 
   .feature-card p {
     color: var(--text-secondary);
-    font-size: 0.95rem;
-    line-height: 1.7;
+    font-size: 1rem;
+    line-height: 1.8;
   }
 
   .feature-image {
-    margin-top: 1.5rem;
-    aspect-ratio: 16/9;
+    aspect-ratio: 4/3;
     background: var(--bg-secondary);
-    border-radius: 8px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--text-muted);
-    font-size: 0.85rem;
+    font-size: 0.9rem;
+  }
+
+  @media (max-width: 800px) {
+    .feature-card {
+      grid-template-columns: 1fr !important;
+      gap: 1.5rem;
+    }
+    .feature-card:nth-child(2) .feature-content,
+    .feature-card:nth-child(2) .feature-image {
+      order: unset;
+    }
   }
 
   /* Pricing Section */
@@ -1072,35 +1103,41 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
 
           <div className="features-grid">
             <div className="feature-card">
-              <div className="feature-number">1</div>
-              <h3>Point & Select</h3>
-              <p>
-                Click on any element in your page to select it. Cluso automatically
-                captures the HTML, CSS, and context needed for AI to understand what
-                you're working with.
-</p>
+              <div className="feature-content">
+                <div className="feature-number">1</div>
+                <h3>Point & Select</h3>
+                <p>
+                  Click on any element in your page to select it. Cluso automatically
+                  captures the HTML, CSS, and context needed for AI to understand what
+                  you're working with.
+                </p>
+              </div>
               <div className="feature-image">Element Selection Preview</div>
             </div>
 
             <div className="feature-card">
-              <div className="feature-number">2</div>
-              <h3>Talk to AI</h3>
-              <p>
-                Use your voice or type to describe what changes you want.
-                "Make this button bigger", "Change the color to blue",
-                "Add a hover animation" - just say it.
-              </p>
+              <div className="feature-content">
+                <div className="feature-number">2</div>
+                <h3>Talk to AI</h3>
+                <p>
+                  Use your voice or type to describe what changes you want.
+                  "Make this button bigger", "Change the color to blue",
+                  "Add a hover animation" - just say it.
+                </p>
+              </div>
               <div className="feature-image">Voice Interface Preview</div>
             </div>
 
             <div className="feature-card">
-              <div className="feature-number">3</div>
-              <h3>Preview & Apply</h3>
-              <p>
-                See changes instantly in your browser. Preview the before/after,
-                approve what you like, or reject and try again. Your code updates
-                in real-time.
-              </p>
+              <div className="feature-content">
+                <div className="feature-number">3</div>
+                <h3>Preview & Apply</h3>
+                <p>
+                  See changes instantly in your browser. Preview the before/after,
+                  approve what you like, or reject and try again. Your code updates
+                  in real-time.
+                </p>
+              </div>
               <div className="feature-image">Preview Controls Preview</div>
             </div>
           </div>
