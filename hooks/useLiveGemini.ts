@@ -48,10 +48,13 @@ const selectElementTool: FunctionDeclaration = {
   name: 'select_element',
   description: `Select elements on the page using a CSS selector.
 
-⚠️ FORBIDDEN - THESE WILL CRASH:
-- :contains() - NEVER USE THIS
-- :has(text) - NEVER USE THIS
-- Any jQuery pseudo-selectors
+⚠️ PREREQUISITE: You MUST call get_page_elements() FIRST before using this tool!
+Never guess selectors - always check what elements actually exist on the page.
+
+⚠️ FORBIDDEN SYNTAX (WILL CRASH):
+- :contains() - NEVER USE
+- :has(text) - NEVER USE
+- jQuery pseudo-selectors
 
 ✅ VALID CSS SELECTORS:
 - Tag: 'button', 'a', 'div', 'img', 'h1', 'h2', 'section'
@@ -61,15 +64,14 @@ const selectElementTool: FunctionDeclaration = {
 - Attribute exact: '[data-testid="login"]'
 - Combined: 'button, [role="button"]', 'img, [role="img"]'
 
-🔍 TO FIND ELEMENTS BY TEXT/CONTENT:
-1. FIRST call get_page_elements to see what's on the page
-2. Use attribute selectors: '[aria-label*="Download"]', '[title*="Windows"]'
-3. Use class names: '.download-btn', '.hero-image'
-4. Use structural selectors: 'section img', '.hero img', 'main img'
+WORKFLOW:
+1. Call get_page_elements() to see what exists
+2. If element count is 0 → tell user it doesn't exist
+3. If elements exist → use selectors from the returned data
 
-EXAMPLES:
-- "screenshot image" → 'img[alt*="screenshot"], img[src*="screenshot"], .screenshot img, section img'
-- "download button" → 'a[href*="download"], button[aria-label*="download"], .download'
+EXAMPLES (only after confirming elements exist):
+- "screenshot image" → 'img[alt*="screenshot"], img[src*="screenshot"]'
+- "download button" → 'a[href*="download"], button[aria-label*="download"]'
 - "all buttons" → 'button, [role="button"], input[type="button"]'`,
   parameters: {
     type: Type.OBJECT,
@@ -89,13 +91,25 @@ EXAMPLES:
 
 const getPageElementsTool: FunctionDeclaration = {
   name: 'get_page_elements',
-  description: 'Get a summary of interactive elements on the current page. Use this BEFORE selecting elements to understand what\'s available. Returns counts and examples of buttons, links, inputs, and other interactive elements.',
+  description: `🔍 DISCOVERY TOOL - Call this FIRST before any select_element call!
+
+Returns counts and details of elements on the page. Use the results to:
+- Know if an element type exists (count > 0)
+- Get class names and attributes for accurate selectors
+- Tell the user "no [X] found" if count is 0
+
+Categories: "buttons", "links", "inputs", "images", "headings", "all"
+
+REQUIRED WORKFLOW:
+User: "select the image" → YOU: get_page_elements("images")
+  - If images.count = 0 → "I don't see any images on this page"
+  - If images.count > 0 → Use returned selectors in select_element()`,
   parameters: {
     type: Type.OBJECT,
     properties: {
       category: {
         type: Type.STRING,
-        description: 'Optional: Filter to specific category - "buttons", "links", "inputs", "images", "headings", or "all" (default)',
+        description: 'Filter to specific category - "buttons", "links", "inputs", "images", "headings", or "all" (default)',
       },
     },
     required: [],
@@ -439,6 +453,18 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
           🔍 PAGE INSPECTION: Get page elements, select elements, execute code
           🧭 NAVIGATION: Click links, go back/forward, scroll, navigate to URLs
           ✏️ EDITING: Preview changes with execute_code, save with patch_source_file
+
+          ⚠️ MANDATORY ELEMENT SELECTION WORKFLOW:
+          NEVER guess selectors! ALWAYS follow this sequence:
+          1. FIRST: Call get_page_elements() to see what's actually on the page
+          2. THEN: Review the returned elements - check their counts, classes, and attributes
+          3. FINALLY: Use select_element() with selectors based on what you found
+
+          Example: User says "select the image"
+          ❌ WRONG: Immediately call select_element('img') - might not exist!
+          ✅ RIGHT: Call get_page_elements('images') first, see results, then select
+
+          If get_page_elements returns 0 for a category, tell the user "I don't see any [X] on this page."
 
           FILE BROWSER OVERLAY:
           When user asks to see files ("show files", "list files", "check the public folder"), use list_files.

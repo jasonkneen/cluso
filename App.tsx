@@ -5,8 +5,10 @@ import { useGit } from './hooks/useGit';
 import { INJECTION_SCRIPT } from './utils/iframe-injection';
 import { SelectedElement, Message as ChatMessage, ToolUsage } from './types';
 import { TabState, createNewTab } from './types/tab';
-import { TabBar, Tab } from './components/TabBar';
+import { TabBar, Tab, TabType } from './components/TabBar';
+import { KanbanTab, TodosTab, NotesTab } from './components/tabs';
 import { NewTabPage } from './components/NewTabPage';
+import { KanbanColumn, TodoItem } from './types/tab';
 import { ProjectSetupFlow } from './components/ProjectSetupFlow';
 import { SettingsDialog, AppSettings, DEFAULT_SETTINGS, getFontSizeValue } from './components/SettingsDialog';
 import { CodeBlock, CodeBlockCopyButton } from '@/components/ai-elements/code-block';
@@ -461,7 +463,7 @@ export default function App() {
   // Tab State - manages multiple browser tabs
   // First tab starts with the default URL so browser loads immediately
   const [tabs, setTabs] = useState<TabState[]>(() => [{
-    ...createNewTab('tab-1'),
+    ...createNewTab('tab-1', 'browser'),
     url: DEFAULT_URL,
     title: 'New Tab'
   }]);
@@ -471,8 +473,8 @@ export default function App() {
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
 
   // Tab management functions
-  const handleNewTab = useCallback(() => {
-    const newTab = createNewTab();
+  const handleNewTab = useCallback((type: 'browser' | 'kanban' | 'todos' | 'notes' = 'browser') => {
+    const newTab = createNewTab(undefined, type);
     setTabs(prev => [...prev, newTab]);
     setActiveTabId(newTab.id);
   }, []);
@@ -503,6 +505,66 @@ export default function App() {
     setUrlInput(activeTab.url || '');
   }, [activeTabId, activeTab.url]);
 
+  // Load existing tab data from disk on startup
+  useEffect(() => {
+    async function loadTabData() {
+      if (!window.electronAPI?.tabdata) return;
+
+      try {
+        // Load kanban, todos, and notes data from disk
+        const [kanbanResult, todosResult, notesResult] = await Promise.all([
+          window.electronAPI.tabdata.loadKanban(undefined),
+          window.electronAPI.tabdata.loadTodos(undefined),
+          window.electronAPI.tabdata.loadNotes(undefined)
+        ]);
+
+        // If any data exists, create tabs for them
+        const tabsToAdd: TabState[] = [];
+
+        // Load all kanban boards (data is now an array)
+        if (kanbanResult.success && Array.isArray(kanbanResult.data) && kanbanResult.data.length > 0) {
+          for (const board of kanbanResult.data) {
+            console.log('[TabData] Loaded kanban board:', board.boardId, board.boardTitle);
+            tabsToAdd.push({
+              ...createNewTab(undefined, 'kanban'),
+              title: board.boardTitle || 'Kanban',
+              kanbanData: {
+                boardId: board.boardId,
+                boardTitle: board.boardTitle || 'Kanban',
+                columns: board.columns || []
+              }
+            });
+          }
+        }
+
+        if (todosResult.success && todosResult.data) {
+          console.log('[TabData] Loaded todos data');
+          tabsToAdd.push({
+            ...createNewTab(undefined, 'todos'),
+            todosData: { items: todosResult.data.items }
+          });
+        }
+
+        if (notesResult.success && notesResult.data) {
+          console.log('[TabData] Loaded notes data');
+          tabsToAdd.push({
+            ...createNewTab(undefined, 'notes'),
+            notesData: { content: notesResult.data.content }
+          });
+        }
+
+        // Add loaded tabs to the existing tabs
+        if (tabsToAdd.length > 0) {
+          setTabs(prev => [...prev, ...tabsToAdd]);
+        }
+      } catch (error) {
+        console.error('[TabData] Error loading tab data:', error);
+      }
+    }
+
+    loadTabData();
+  }, []);
+
   // Update current tab state helper
   const updateCurrentTab = useCallback((updates: Partial<TabState>) => {
     setTabs(prev => prev.map(tab =>
@@ -517,12 +579,143 @@ export default function App() {
     ));
   }, []);
 
+  // Tab-specific data update handlers with persistence
+  const saveKanbanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const saveTodosTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const saveNotesTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Use refs to avoid stale closures in debounced callbacks
+  const tabsRef = useRef(tabs);
+  const activeTabIdRef = useRef(activeTabId);
+  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
+  useEffect(() => { activeTabIdRef.current = activeTabId; }, [activeTabId]);
+
+  const handleUpdateKanbanColumns = useCallback((columns: KanbanColumn[]) => {
+    console.log('[TabData] handleUpdateKanbanColumns called, columns:', columns.length);
+    const currentActiveTab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
+    if (!currentActiveTab?.kanbanData) return;
+
+    updateCurrentTab({
+      kanbanData: {
+        ...currentActiveTab.kanbanData,
+        columns
+      }
+    });
+
+    // Debounced save to disk
+    if (saveKanbanTimeoutRef.current) {
+      clearTimeout(saveKanbanTimeoutRef.current);
+    }
+    saveKanbanTimeoutRef.current = setTimeout(async () => {
+      const tab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
+      console.log('[TabData] Debounce fired, activeTab:', tab?.id, 'type:', tab?.type, 'hasTabdata:', !!window.electronAPI?.tabdata);
+      if (window.electronAPI?.tabdata && tab?.kanbanData) {
+        try {
+          const result = await window.electronAPI.tabdata.saveKanban(tab.projectPath, {
+            boardId: tab.kanbanData.boardId,
+            boardTitle: tab.kanbanData.boardTitle,
+            columns,
+            updatedAt: new Date().toISOString()
+          });
+          console.log('[TabData] Kanban save result:', result);
+        } catch (e) {
+          console.error('[TabData] Failed to save kanban:', e);
+        }
+      } else {
+        console.warn('[TabData] Cannot save - tabdata API:', !!window.electronAPI?.tabdata, 'activeTab:', !!tab);
+      }
+    }, 500);
+  }, [updateCurrentTab]);
+
+  const handleUpdateTodoItems = useCallback((items: TodoItem[]) => {
+    updateCurrentTab({ todosData: { items } });
+
+    // Debounced save to disk
+    if (saveTodosTimeoutRef.current) {
+      clearTimeout(saveTodosTimeoutRef.current);
+    }
+    saveTodosTimeoutRef.current = setTimeout(async () => {
+      const currentActiveTab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
+      if (window.electronAPI?.tabdata && currentActiveTab) {
+        try {
+          await window.electronAPI.tabdata.saveTodos(currentActiveTab.projectPath, {
+            items,
+            updatedAt: new Date().toISOString()
+          });
+          console.log('[TabData] Todos saved');
+        } catch (e) {
+          console.error('[TabData] Failed to save todos:', e);
+        }
+      }
+    }, 500);
+  }, [updateCurrentTab]);
+
+  const handleUpdateNotesContent = useCallback((content: string) => {
+    updateCurrentTab({ notesData: { content } });
+
+    // Debounced save to disk
+    if (saveNotesTimeoutRef.current) {
+      clearTimeout(saveNotesTimeoutRef.current);
+    }
+    saveNotesTimeoutRef.current = setTimeout(async () => {
+      const currentActiveTab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
+      if (window.electronAPI?.tabdata && currentActiveTab) {
+        try {
+          await window.electronAPI.tabdata.saveNotes(currentActiveTab.projectPath, {
+            content,
+            updatedAt: new Date().toISOString()
+          });
+          console.log('[TabData] Notes saved');
+        } catch (e) {
+          console.error('[TabData] Failed to save notes:', e);
+        }
+      }
+    }, 500);
+  }, [updateCurrentTab]);
+
+  // Handle kanban board title update
+  const handleUpdateKanbanTitle = useCallback((title: string) => {
+    const currentActiveTab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
+    if (!currentActiveTab?.kanbanData) return;
+
+    // Update both tab title and kanban boardTitle
+    updateCurrentTab({
+      title,
+      kanbanData: {
+        ...currentActiveTab.kanbanData,
+        boardTitle: title
+      }
+    });
+
+    // Trigger save with the updated title
+    if (saveKanbanTimeoutRef.current) {
+      clearTimeout(saveKanbanTimeoutRef.current);
+    }
+    saveKanbanTimeoutRef.current = setTimeout(async () => {
+      const tab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
+      if (window.electronAPI?.tabdata && tab?.kanbanData) {
+        try {
+          const result = await window.electronAPI.tabdata.saveKanban(tab.projectPath, {
+            boardId: tab.kanbanData.boardId,
+            boardTitle: title,
+            columns: tab.kanbanData.columns,
+            updatedAt: new Date().toISOString()
+          });
+          console.log('[TabData] Kanban title saved:', result);
+        } catch (e) {
+          console.error('[TabData] Failed to save kanban title:', e);
+        }
+      }
+    }, 500);
+  }, [updateCurrentTab]);
+
   // Convert TabState to Tab for TabBar
   const tabBarTabs: Tab[] = tabs.map(t => ({
     id: t.id,
     title: t.title || 'Cluso',
     url: t.url,
     favicon: t.favicon,
+    type: t.type || 'browser',
   }));
 
   // Browser State
@@ -2638,6 +2831,11 @@ export default function App() {
 
   // Sync Inspector State with Webview
   useEffect(() => {
+    // Only sync for browser tabs
+    if (activeTab.type !== 'browser') {
+      return;
+    }
+
     const webview = webviewRefs.current.get(activeTabId);
     console.log('[Inspector Sync] Effect triggered:', { isElectron, hasWebview: !!webview, isWebviewReady, isInspectorActive, isScreenshotActive });
     if (!isElectron) {
@@ -2653,9 +2851,25 @@ export default function App() {
       return;
     }
 
+    // Extra safety check - ensure webview is attached to DOM
+    try {
+      // This will throw if webview is not attached
+      if (!webview.isConnected) {
+        console.log('[Inspector Sync] Skipping: webview not connected to DOM');
+        return;
+      }
+    } catch (e) {
+      console.log('[Inspector Sync] Skipping: webview check failed', e);
+      return;
+    }
+
     console.log('[Inspector Sync] Sending inspector modes to webview:', { isInspectorActive, isScreenshotActive });
-    webview.send('set-inspector-mode', isInspectorActive);
-    webview.send('set-screenshot-mode', isScreenshotActive);
+    try {
+      webview.send('set-inspector-mode', isInspectorActive);
+      webview.send('set-screenshot-mode', isScreenshotActive);
+    } catch (e) {
+      console.warn('[Inspector Sync] Failed to send to webview:', e);
+    }
 
     if (!isInspectorActive) {
       setSelectedElement(null);
@@ -3720,7 +3934,7 @@ If you're not sure what the user wants, ask for clarification.
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden pt-1 pb-2 px-2 gap-1">
 
-        {/* --- Left Pane: Browser, New Tab Page, or Project Setup --- */}
+        {/* --- Left Pane: Browser, New Tab Page, Kanban, Todos, Notes, or Project Setup --- */}
         {setupProject ? (
           <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
             <ProjectSetupFlow
@@ -3729,6 +3943,32 @@ If you're not sure what the user wants, ask for clarification.
               isDarkMode={isDarkMode}
               onComplete={handleSetupComplete}
               onCancel={handleSetupCancel}
+            />
+          </div>
+        ) : activeTab.type === 'kanban' ? (
+          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
+            <KanbanTab
+              columns={activeTab.kanbanData?.columns || []}
+              boardTitle={activeTab.kanbanData?.boardTitle || 'New Board'}
+              isDarkMode={isDarkMode}
+              onUpdateColumns={handleUpdateKanbanColumns}
+              onUpdateTitle={handleUpdateKanbanTitle}
+            />
+          </div>
+        ) : activeTab.type === 'todos' ? (
+          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
+            <TodosTab
+              items={activeTab.todosData?.items || []}
+              isDarkMode={isDarkMode}
+              onUpdateItems={handleUpdateTodoItems}
+            />
+          </div>
+        ) : activeTab.type === 'notes' ? (
+          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
+            <NotesTab
+              content={activeTab.notesData?.content || ''}
+              isDarkMode={isDarkMode}
+              onUpdateContent={handleUpdateNotesContent}
             />
           </div>
         ) : isNewTabPage ? (

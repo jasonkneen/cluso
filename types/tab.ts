@@ -1,15 +1,18 @@
 import { Message, SelectedElement } from '../types'
 
+export type TabType = 'browser' | 'kanban' | 'todos' | 'notes'
+
 export interface TabState {
   id: string
   title: string
   url: string
   favicon?: string
+  type: TabType
 
   // Project mapping - used to resolve source file paths
   projectPath?: string
 
-  // Browser state
+  // Browser state (for browser tabs)
   canGoBack: boolean
   canGoForward: boolean
   isLoading: boolean
@@ -38,14 +41,68 @@ export interface TabState {
     count?: number
     elements?: SelectedElement[]
   } | null
+
+  // Kanban data (for kanban tabs)
+  kanbanData?: {
+    boardId: string // Unique ID for saving
+    boardTitle: string // Editable board name
+    columns: KanbanColumn[]
+  }
+
+  // Todos data (for todos tabs)
+  todosData?: {
+    items: TodoItem[]
+  }
+
+  // Notes data (for notes tabs)
+  notesData?: {
+    content: string // HTML content
+  }
 }
 
-export function createNewTab(id?: string): TabState {
-  return {
+// Kanban types
+export interface KanbanColumn {
+  id: string
+  title: string
+  cards: KanbanCard[]
+}
+
+export interface KanbanCard {
+  id: string
+  title: string
+  description?: string
+  labels?: string[]
+  dueDate?: string
+  createdAt: string
+}
+
+// Todo types
+export interface TodoItem {
+  id: string
+  text: string
+  completed: boolean
+  priority?: 'low' | 'medium' | 'high'
+  dueDate?: string
+  createdAt: string
+  completedAt?: string
+  source?: 'user' | 'agent' // Who created it
+  agentName?: string // Which agent created it
+}
+
+const TAB_TITLES: Record<TabType, string> = {
+  browser: 'Cluso',
+  kanban: 'Kanban',
+  todos: 'Todos',
+  notes: 'Notes',
+}
+
+export function createNewTab(id?: string, type: TabType = 'browser'): TabState {
+  const baseTab = {
     id: id || `tab-${Date.now()}`,
-    title: 'Cluso',
+    title: TAB_TITLES[type],
     url: '',
     favicon: undefined,
+    type,
 
     canGoBack: false,
     canGoForward: false,
@@ -61,4 +118,43 @@ export function createNewTab(id?: string): TabState {
     pendingChange: null,
     aiSelectedElement: null,
   }
+
+  // Add type-specific data
+  if (type === 'kanban') {
+    const boardId = `kanban-${Date.now()}`
+    return {
+      ...baseTab,
+      title: 'New Board',
+      kanbanData: {
+        boardId,
+        boardTitle: 'New Board',
+        columns: [
+          { id: 'backlog', title: 'Backlog', cards: [] },
+          { id: 'todo', title: 'To Do', cards: [] },
+          { id: 'in-progress', title: 'In Progress', cards: [] },
+          { id: 'done', title: 'Done', cards: [] },
+        ]
+      }
+    }
+  }
+
+  if (type === 'todos') {
+    return {
+      ...baseTab,
+      todosData: {
+        items: []
+      }
+    }
+  }
+
+  if (type === 'notes') {
+    return {
+      ...baseTab,
+      notesData: {
+        content: ''
+      }
+    }
+  }
+
+  return baseTab
 }

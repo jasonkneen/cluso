@@ -414,6 +414,35 @@ interface ElectronVoiceAPI {
   getLearningsPath: () => Promise<GitResult<string>>
 }
 
+// Tab data persistence types
+import { KanbanColumn, TodoItem } from './tab'
+
+interface TabDataKanban {
+  columns: KanbanColumn[]
+  updatedAt?: string
+}
+
+interface TabDataTodos {
+  items: TodoItem[]
+  updatedAt?: string
+}
+
+interface TabDataNotes {
+  content: string
+  updatedAt?: string
+}
+
+interface ElectronTabDataAPI {
+  ensureDir: (projectPath?: string) => Promise<GitResult<string>>
+  saveKanban: (projectPath: string | undefined, data: TabDataKanban) => Promise<GitResult<string>>
+  loadKanban: (projectPath?: string) => Promise<GitResult<TabDataKanban | null>>
+  saveTodos: (projectPath: string | undefined, data: TabDataTodos) => Promise<GitResult<string>>
+  loadTodos: (projectPath?: string) => Promise<GitResult<TabDataTodos | null>>
+  saveNotes: (projectPath: string | undefined, data: TabDataNotes) => Promise<GitResult<string>>
+  loadNotes: (projectPath?: string) => Promise<GitResult<TabDataNotes | null>>
+  list: (projectPath?: string) => Promise<GitResult<string[]>>
+}
+
 interface ElectronAPI {
   git: ElectronGitAPI
   files: ElectronFilesAPI
@@ -423,6 +452,7 @@ interface ElectronAPI {
   claudeCode: ElectronClaudeCodeAPI
   mcp?: ElectronMCPAPI
   voice?: ElectronVoiceAPI
+  tabdata?: ElectronTabDataAPI
   getWebviewPreloadPath: () => Promise<string>
   isElectron: boolean
 }
