@@ -107,6 +107,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getLearningsPath: () => ipcRenderer.invoke('voice:getLearningsPath'),
   },
 
+  // Tab data persistence operations (kanban, todos, notes)
+  tabdata: {
+    ensureDir: (projectPath) => ipcRenderer.invoke('tabdata:ensureDir', projectPath),
+    saveKanban: (projectPath, data) => ipcRenderer.invoke('tabdata:saveKanban', projectPath, data),
+    loadKanban: (projectPath) => ipcRenderer.invoke('tabdata:loadKanban', projectPath),
+    saveTodos: (projectPath, data) => ipcRenderer.invoke('tabdata:saveTodos', projectPath, data),
+    loadTodos: (projectPath) => ipcRenderer.invoke('tabdata:loadTodos', projectPath),
+    saveNotes: (projectPath, data) => ipcRenderer.invoke('tabdata:saveNotes', projectPath, data),
+    loadNotes: (projectPath) => ipcRenderer.invoke('tabdata:loadNotes', projectPath),
+    list: (projectPath) => ipcRenderer.invoke('tabdata:list', projectPath),
+  },
+
   // Claude Code SDK operations (uses Claude Agent SDK with OAuth)
   claudeCode: {
     // Start a session with initial prompt

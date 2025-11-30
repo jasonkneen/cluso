@@ -1,11 +1,14 @@
-import React from 'react'
-import { Plus, X, Sun, Moon, Settings } from 'lucide-react'
+import React, { useState, useRef, useEffect } from 'react'
+import { Plus, X, Sun, Moon, Settings, Globe, LayoutGrid, CheckSquare, FileText, Columns3 } from 'lucide-react'
+
+export type TabType = 'browser' | 'kanban' | 'todos' | 'notes'
 
 export interface Tab {
   id: string
   title: string
   url: string
   favicon?: string
+  type: TabType
 }
 
 interface TabBarProps {
@@ -13,10 +16,27 @@ interface TabBarProps {
   activeTabId: string
   onTabSelect: (tabId: string) => void
   onTabClose: (tabId: string) => void
-  onNewTab: () => void
+  onNewTab: (type?: TabType) => void
   isDarkMode: boolean
   onToggleDarkMode: () => void
   onOpenSettings: () => void
+}
+
+const TAB_TYPES = [
+  { type: 'browser' as TabType, label: 'Browser', icon: Globe, description: 'Web browser' },
+  { type: 'kanban' as TabType, label: 'Kanban', icon: Columns3, description: 'Project board' },
+  { type: 'todos' as TabType, label: 'Todos', icon: CheckSquare, description: 'Task list' },
+  { type: 'notes' as TabType, label: 'Notes', icon: FileText, description: 'Rich text notes' },
+]
+
+function getTabIcon(type: TabType) {
+  switch (type) {
+    case 'browser': return Globe
+    case 'kanban': return Columns3
+    case 'todos': return CheckSquare
+    case 'notes': return FileText
+    default: return Globe
+  }
 }
 
 export function TabBar({
@@ -29,6 +49,50 @@ export function TabBar({
   onToggleDarkMode,
   onOpenSettings
 }: TabBarProps) {
+  const [showMenu, setShowMenu] = useState(false)
+  const menuTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Handle mouse enter on button
+  const handleMouseEnter = () => {
+    if (menuTimeoutRef.current) {
+      clearTimeout(menuTimeoutRef.current)
+      menuTimeoutRef.current = null
+    }
+    setShowMenu(true)
+  }
+
+  // Handle mouse leave - delay hiding
+  const handleMouseLeave = () => {
+    menuTimeoutRef.current = setTimeout(() => {
+      setShowMenu(false)
+    }, 150)
+  }
+
+  // Handle menu mouse enter - cancel hide
+  const handleMenuMouseEnter = () => {
+    if (menuTimeoutRef.current) {
+      clearTimeout(menuTimeoutRef.current)
+      menuTimeoutRef.current = null
+    }
+  }
+
+  // Clean up timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (menuTimeoutRef.current) {
+        clearTimeout(menuTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  // Handle tab type selection
+  const handleNewTab = (type: TabType) => {
+    setShowMenu(false)
+    onNewTab(type)
+  }
+
   return (
     <div
       className={`h-11 flex items-center justify-between select-none ${
@@ -43,80 +107,123 @@ export function TabBar({
 
       {/* Tabs container */}
       <div
-        className="flex-1 flex items-center gap-0.5 h-full overflow-x-auto px-1"
+        className="flex-1 flex items-center gap-0.5 h-full overflow-x-auto overflow-y-visible px-1"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
-        {tabs.map((tab) => (
-          <div
-            key={tab.id}
-            onClick={() => onTabSelect(tab.id)}
+        {tabs.map((tab) => {
+          const TabIcon = getTabIcon(tab.type || 'browser')
+          return (
+            <div
+              key={tab.id}
+              onClick={() => onTabSelect(tab.id)}
+              className={`
+                group relative flex items-center gap-2 h-8 px-3 rounded-lg cursor-pointer
+                transition-all duration-150 min-w-[120px] max-w-[200px]
+                ${tab.id === activeTabId
+                  ? isDarkMode
+                    ? 'bg-neutral-700/80 text-white'
+                    : 'bg-white text-stone-900 shadow-sm'
+                  : isDarkMode
+                    ? 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
+                    : 'text-stone-500 hover:bg-stone-200/60 hover:text-stone-700'
+                }
+              `}
+              style={{ position: 'relative', top: '3px' }}
+            >
+              {/* Tab Type Icon or Favicon */}
+              {tab.type === 'browser' && tab.favicon ? (
+                <img src={tab.favicon} alt="" className="w-4 h-4 flex-shrink-0" />
+              ) : (
+                <TabIcon size={14} className="flex-shrink-0" />
+              )}
+
+              {/* Title */}
+              <span className="text-xs font-medium truncate flex-1">
+                {tab.title}
+              </span>
+
+              {/* Close button */}
+              {tabs.length > 1 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onTabClose(tab.id)
+                  }}
+                  className={`
+                    w-4 h-4 rounded flex items-center justify-center flex-shrink-0
+                    opacity-0 group-hover:opacity-100 transition-opacity
+                    ${isDarkMode
+                      ? 'hover:bg-neutral-600 text-neutral-400 hover:text-white'
+                      : 'hover:bg-stone-300 text-stone-400 hover:text-stone-700'
+                    }
+                  `}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          )
+        })}
+
+        {/* New Tab Button with Hover Menu */}
+        <div className="relative" style={{ top: '3px' }}>
+          <button
+            ref={buttonRef}
+            onClick={() => onNewTab('browser')}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
             className={`
-              group relative flex items-center gap-2 h-8 px-3 rounded-lg cursor-pointer
-              transition-all duration-150 min-w-[120px] max-w-[200px]
-              ${tab.id === activeTabId
-                ? isDarkMode
-                  ? 'bg-neutral-700/80 text-white'
-                  : 'bg-white text-stone-900 shadow-sm'
-                : isDarkMode
-                  ? 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
-                  : 'text-stone-500 hover:bg-stone-200/60 hover:text-stone-700'
+              w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
+              transition-colors
+              ${isDarkMode
+                ? 'text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300'
+                : 'text-stone-400 hover:bg-stone-200 hover:text-stone-600'
               }
             `}
-            style={{ position: 'relative', top: '3px' }}
+            title="New tab"
           >
-            {/* Favicon */}
-            {tab.favicon ? (
-              <img src={tab.favicon} alt="" className="w-4 h-4 flex-shrink-0" />
-            ) : (
-              <div className={`w-4 h-4 rounded flex-shrink-0 flex items-center justify-center text-[10px] font-bold ${
-                isDarkMode ? 'bg-neutral-600 text-neutral-300' : 'bg-stone-300 text-stone-600'
-              }`}>
-                {tab.title.charAt(0).toUpperCase()}
-              </div>
-            )}
+            <Plus size={16} />
+          </button>
 
-            {/* Title */}
-            <span className="text-xs font-medium truncate flex-1">
-              {tab.title}
-            </span>
-
-            {/* Close button */}
-            {tabs.length > 1 && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onTabClose(tab.id)
-                }}
-                className={`
-                  w-4 h-4 rounded flex items-center justify-center flex-shrink-0
-                  opacity-0 group-hover:opacity-100 transition-opacity
-                  ${isDarkMode
-                    ? 'hover:bg-neutral-600 text-neutral-400 hover:text-white'
-                    : 'hover:bg-stone-300 text-stone-400 hover:text-stone-700'
-                  }
-                `}
-              >
-                <X size={12} />
-              </button>
-            )}
-          </div>
-        ))}
-
-        {/* New Tab Button */}
-        <button
-          onClick={onNewTab}
-          className={`
-            w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
-            transition-colors
-            ${isDarkMode
-              ? 'text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300'
-              : 'text-stone-400 hover:bg-stone-200 hover:text-stone-600'
-            }
-          `}
-          title="New tab"
-        >
-          <Plus size={16} />
-        </button>
+          {/* Popout Menu */}
+          {showMenu && buttonRef.current && (
+            <div
+              ref={menuRef}
+              onMouseEnter={handleMenuMouseEnter}
+              onMouseLeave={handleMouseLeave}
+              className={`fixed py-1 rounded-lg shadow-xl border z-[9999] min-w-[160px] ${
+                isDarkMode
+                  ? 'bg-neutral-800 border-neutral-700'
+                  : 'bg-white border-stone-200'
+              }`}
+              style={{
+                top: buttonRef.current.getBoundingClientRect().bottom + 4,
+                left: buttonRef.current.getBoundingClientRect().left,
+                WebkitAppRegion: 'no-drag'
+              } as React.CSSProperties}
+            >
+              {TAB_TYPES.map(({ type, label, icon: Icon, description }) => (
+                <button
+                  key={type}
+                  onClick={() => handleNewTab(type)}
+                  className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
+                    isDarkMode
+                      ? 'hover:bg-neutral-700 text-neutral-200'
+                      : 'hover:bg-stone-100 text-stone-700'
+                  }`}
+                >
+                  <Icon size={16} className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'} />
+                  <div className="flex-1">
+                    <div className="text-sm font-medium">{label}</div>
+                    <div className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                      {description}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Right side - Dark Mode & Settings */}
