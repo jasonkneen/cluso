@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 const styles = `
   * {
@@ -19,6 +19,24 @@ const styles = `
     --border: #262626;
     --gradient-start: #3b82f6;
     --gradient-end: #8b5cf6;
+    --nav-bg: rgba(10, 10, 10, 0.8);
+    --hero-glow: rgba(59, 130, 246, 0.15);
+    --cta-glow: rgba(59, 130, 246, 0.1);
+    --shadow-color: rgba(0, 0, 0, 0.5);
+  }
+
+  .landing-page.light {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f5f5f5;
+    --bg-card: #ffffff;
+    --text-primary: #0a0a0a;
+    --text-secondary: #525252;
+    --text-muted: #a1a1a1;
+    --border: #e5e5e5;
+    --nav-bg: rgba(255, 255, 255, 0.8);
+    --hero-glow: rgba(59, 130, 246, 0.08);
+    --cta-glow: rgba(59, 130, 246, 0.05);
+    --shadow-color: rgba(0, 0, 0, 0.1);
   }
 
   .landing-page {
@@ -28,6 +46,7 @@ const styles = `
     line-height: 1.6;
     overflow-x: hidden;
     min-height: 100vh;
+    transition: background 0.3s, color 0.3s;
   }
 
   .landing-page a {
@@ -42,9 +61,39 @@ const styles = `
     right: 0;
     z-index: 100;
     padding: 1rem 2rem;
-    background: rgba(10, 10, 10, 0.8);
+    background: var(--nav-bg);
     backdrop-filter: blur(20px);
     border-bottom: 1px solid var(--border);
+    transition: background 0.3s;
+  }
+
+  /* Theme Toggle */
+  .theme-toggle {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    padding: 0.5rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    margin-left: 0.5rem;
+  }
+
+  .theme-toggle:hover {
+    background: var(--bg-secondary);
+    border-color: var(--text-muted);
+  }
+
+  .landing-page.light .theme-toggle:hover {
+    border-color: #d4d4d4;
+  }
+
+  .theme-toggle svg {
+    width: 20px;
+    height: 20px;
+    color: var(--text-secondary);
   }
 
   .nav-container {
@@ -129,7 +178,7 @@ const styles = `
     justify-content: center;
     align-items: center;
     text-align: center;
-    padding: 8rem 2rem 4rem;
+    padding: 5rem 2rem 4rem;
     position: relative;
     overflow: hidden;
   }
@@ -142,7 +191,7 @@ const styles = `
     transform: translateX(-50%);
     width: 100%;
     height: 100%;
-    background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(59, 130, 246, 0.15), transparent);
+    background: radial-gradient(ellipse 80% 50% at 50% -20%, var(--hero-glow), transparent);
     pointer-events: none;
   }
 
@@ -233,7 +282,7 @@ const styles = `
     justify-content: center;
     color: var(--text-muted);
     font-size: 1rem;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 25px 50px -12px var(--shadow-color);
     overflow: hidden;
     position: relative;
   }
@@ -315,6 +364,15 @@ const styles = `
   .feature-card:hover {
     border-color: #404040;
     transform: translateY(-4px);
+  }
+
+  .landing-page.light .feature-card {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
+
+  .landing-page.light .feature-card:hover {
+    border-color: #d4d4d4;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
   }
 
   .feature-number {
@@ -421,7 +479,7 @@ const styles = `
     transform: translateX(-50%);
     width: 100%;
     height: 100%;
-    background: radial-gradient(ellipse 80% 50% at 50% 120%, rgba(59, 130, 246, 0.1), transparent);
+    background: radial-gradient(ellipse 80% 50% at 50% 120%, var(--cta-glow), transparent);
     pointer-events: none;
   }
 
@@ -580,18 +638,40 @@ interface LandingPageProps {
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
+  const [isDark, setIsDark] = useState(true);
+
+  const toggleTheme = () => setIsDark(!isDark);
+
   return (
     <>
       <style>{styles}</style>
-      <div className="landing-page">
+      <div className={`landing-page ${isDark ? '' : 'light'}`}>
         {/* Navigation */}
         <nav className="landing-nav">
           <div className="nav-container">
-            <img src="/logo_dark.png" alt="Cluso" className="logo" style={{ height: '64px', width: 'auto' }} />
+            <img
+              src={isDark ? '/logo_dark.png' : '/logo_light.png'}
+              alt="Cluso"
+              className="logo"
+              style={{ height: '64px', width: 'auto' }}
+            />
             <div className="nav-links">
               <a href="#features">Features</a>
               <a href="#how-it-works">How it works</a>
+              <a href="#pricing">Pricing</a>
               <a href="#download" className="btn btn-primary">Download Free</a>
+              <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
+                {isDark ? (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="5"/>
+                    <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                  </svg>
+                )}
+              </button>
             </div>
           </div>
         </nav>
@@ -636,7 +716,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               style={{
                 width: '100%',
                 borderRadius: '16px',
-                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+                boxShadow: isDark ? '0 25px 50px -12px rgba(0, 0, 0, 0.5)' : '0 25px 50px -12px rgba(0, 0, 0, 0.15)',
                 border: '1px solid var(--border)'
               }}
             />
@@ -774,7 +854,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
           <div className="footer-container">
             <div className="footer-top">
               <div className="footer-brand">
-                <img src="/logo_dark.png" alt="Cluso" className="logo" style={{ height: '56px', width: 'auto', marginBottom: '1rem' }} />
+                <img src={isDark ? '/logo_dark.png' : '/logo_light.png'} alt="Cluso" className="logo" style={{ height: '56px', width: 'auto', marginBottom: '1rem' }} />
                 <p>
                   AI-powered browser dev tools that let you build UIs
                   with your voice. Open source and free forever.
