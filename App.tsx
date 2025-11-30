@@ -4959,6 +4959,47 @@ If you're not sure what the user wants, ask for clarification.
                 </div>
               )}
 
+              {/* Pending Code Change in chat (json-exec) */}
+              {pendingChange?.source === 'code' && (
+                <div className={`mx-4 my-3 p-3 rounded-xl border ${
+                  isDarkMode
+                    ? 'bg-blue-950/50 border-blue-800/50'
+                    : 'bg-blue-50 border-blue-200'
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Code2 size={16} className={isDarkMode ? 'text-blue-400' : 'text-blue-600'} />
+                      <span className={`text-sm font-medium truncate ${isDarkMode ? 'text-blue-300' : 'text-blue-800'}`}>
+                        {pendingChange.description}
+                      </span>
+                    </div>
+                    <div className="flex gap-2 items-center shrink-0">
+                      <button
+                        onClick={handleRejectChange}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                          isDarkMode
+                            ? 'bg-neutral-700 hover:bg-neutral-600 text-neutral-300'
+                            : 'bg-stone-200 hover:bg-stone-300 text-stone-700'
+                        }`}
+                      >
+                        Reject
+                      </button>
+                      <button
+                        onClick={handleApproveChange}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
+                          isDarkMode
+                            ? 'bg-blue-600 hover:bg-blue-500 text-white'
+                            : 'bg-blue-600 hover:bg-blue-700 text-white'
+                        }`}
+                      >
+                        <Check size={14} />
+                        Accept
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Loading state while generating source patch */}
               {isGeneratingSourcePatch && (
                 <div className={`mx-4 my-3 p-3 rounded-xl border ${
@@ -5839,7 +5880,7 @@ If you're not sure what the user wants, ask for clarification.
       )}
 
       {/* Pending Code Change Preview - 3 Button Popup */}
-      {pendingChange?.source === 'dom' && (
+      {(pendingChange?.source === 'dom' || pendingChange?.source === 'code') && (
           <div className={`absolute bottom-24 left-1/2 transform -translate-x-1/2 flex items-center gap-2 rounded-full shadow-xl p-2 z-50 ${isDarkMode ? 'bg-neutral-800 border border-neutral-700' : 'bg-white border border-neutral-200'}`}>
               {/* Diff Stats */}
               <div className="flex items-center gap-1.5 px-2 text-xs font-mono">
@@ -5880,14 +5921,14 @@ If you're not sure what the user wants, ask for clarification.
               </button>
               <div className={`w-[1px] h-6 ${isDarkMode ? 'bg-neutral-600' : 'bg-neutral-200'}`}></div>
               <button
-                  onClick={handleRejectDOMApproval}
+                  onClick={pendingDOMApproval ? handleRejectDOMApproval : handleRejectChange}
                   className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${isDarkMode ? 'hover:bg-red-900/20 text-neutral-400 hover:text-red-400' : 'hover:bg-red-50 text-neutral-600 hover:text-red-600'}`}
                   title="Discard changes"
               >
                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
               </button>
               <button
-                  onClick={handleAcceptDOMApproval}
+                  onClick={pendingDOMApproval ? handleAcceptDOMApproval : handleApproveChange}
                   disabled={isGeneratingSourcePatch}
                   className={`w-10 h-10 rounded-full flex items-center justify-center shadow-md transition-colors disabled:opacity-50 ${
                     isGeneratingSourcePatch
