@@ -72,7 +72,7 @@ const styles = `
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 9999px;
-    padding: 0.5rem;
+    padding: 0.35rem;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -91,8 +91,8 @@ const styles = `
   }
 
   .theme-toggle svg {
-    width: 20px;
-    height: 20px;
+    width: 16px;
+    height: 16px;
     color: var(--text-secondary);
   }
 
@@ -145,13 +145,24 @@ const styles = `
   }
 
   .btn-primary {
-    background: var(--text-primary);
-    color: var(--bg-primary);
+    background: #ffffff;
+    color: #0a0a0a;
   }
 
   .btn-primary:hover {
     background: #e5e5e5;
+    color: #0a0a0a;
     transform: translateY(-1px);
+  }
+
+  .landing-page.light .btn-primary {
+    background: #0a0a0a;
+    color: #ffffff;
+  }
+
+  .landing-page.light .btn-primary:hover {
+    background: #1a1a1a;
+    color: #ffffff;
   }
 
   .btn-secondary {
@@ -166,8 +177,8 @@ const styles = `
   }
 
   .btn-large {
-    padding: 1rem 2rem;
-    font-size: 1rem;
+    padding: 0.75rem 1.5rem;
+    font-size: 0.95rem;
   }
 
   /* Hero Section */
@@ -178,7 +189,7 @@ const styles = `
     justify-content: center;
     align-items: center;
     text-align: center;
-    padding: 5rem 2rem 4rem;
+    padding: 8rem 2rem 2rem;
     position: relative;
     overflow: hidden;
   }
@@ -314,7 +325,7 @@ const styles = `
 
   /* Features Section */
   .features {
-    padding: 8rem 2rem;
+    padding: 2rem 2rem 8rem;
     max-width: 1200px;
     margin: 0 auto;
   }
@@ -412,55 +423,125 @@ const styles = `
     font-size: 0.85rem;
   }
 
-  /* How It Works */
-  .how-it-works {
-    padding: 8rem 2rem;
+  /* Pricing Section */
+  .pricing {
+    padding: 6rem 2rem;
     background: var(--bg-secondary);
   }
 
-  .how-it-works-container {
-    max-width: 1200px;
+  .pricing-container {
+    max-width: 1100px;
     margin: 0 auto;
   }
 
-  .steps {
+  .pricing-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 3rem;
-    margin-top: 4rem;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    margin-top: 3rem;
   }
 
-  .step {
-    text-align: center;
-  }
-
-  .step-icon {
-    width: 80px;
-    height: 80px;
-    margin: 0 auto 1.5rem;
+  .pricing-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 20px;
+    border-radius: 16px;
+    padding: 2rem;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-direction: column;
+    transition: all 0.3s;
   }
 
-  .step-icon svg {
-    width: 36px;
-    height: 36px;
-    color: var(--accent);
+  .pricing-card:hover {
+    border-color: #404040;
+    transform: translateY(-4px);
   }
 
-  .step h3 {
-    font-size: 1.1rem;
+  .pricing-card.featured {
+    border-color: var(--accent);
+    position: relative;
+  }
+
+  .pricing-card.featured::before {
+    content: 'Most Popular';
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+  }
+
+  .pricing-card h3 {
+    font-size: 1.25rem;
     font-weight: 700;
     margin-bottom: 0.5rem;
   }
 
-  .step p {
+  .pricing-card .price {
+    font-size: 2.5rem;
+    font-weight: 800;
+    margin-bottom: 0.25rem;
+  }
+
+  .pricing-card .price span {
+    font-size: 1rem;
+    font-weight: 400;
     color: var(--text-secondary);
-    font-size: 0.95rem;
+  }
+
+  .pricing-card .price-note {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 1.5rem;
+  }
+
+  .pricing-card ul {
+    list-style: none;
+    margin-bottom: 2rem;
+    flex-grow: 1;
+  }
+
+  .pricing-card li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+  }
+
+  .pricing-card li svg {
+    width: 16px;
+    height: 16px;
+    color: #22c55e;
+    flex-shrink: 0;
+  }
+
+  .pricing-card .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .landing-page.light .pricing-card {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
+
+  .landing-page.light .pricing-card:hover {
+    border-color: #d4d4d4;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  }
+
+  @media (max-width: 900px) {
+    .pricing-grid {
+      grid-template-columns: 1fr;
+      max-width: 400px;
+      margin-left: auto;
+      margin-right: auto;
+    }
   }
 
   /* CTA Section */
@@ -697,13 +778,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               <svg className="btn-icon" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 22 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.1 22C7.79 22.05 6.8 20.68 5.96 19.47C4.25 17 2.94 12.45 4.7 9.39C5.57 7.87 7.13 6.91 8.82 6.88C10.1 6.86 11.32 7.75 12.11 7.75C12.89 7.75 14.37 6.68 15.92 6.84C16.57 6.87 18.39 7.1 19.56 8.82C19.47 8.88 17.39 10.1 17.41 12.63C17.44 15.65 20.06 16.66 20.09 16.67C20.06 16.74 19.67 18.11 18.71 19.5ZM13 3.5C13.73 2.67 14.94 2.04 15.94 2C16.07 3.17 15.6 4.35 14.9 5.19C14.21 6.04 13.07 6.7 11.95 6.61C11.8 5.46 12.36 4.26 13 3.5Z"/>
               </svg>
-              Download for macOS
+              macOS
             </a>
             <a href="#" className="btn btn-secondary btn-large" onClick={(e) => { e.preventDefault(); onDownload?.(); }}>
               <svg className="btn-icon" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M3 5.5L10.5 4.5V11.5H3V5.5ZM3 18.5V12.5H10.5V19.5L3 18.5ZM11.5 19.5V12.5H21V18.5L11.5 19.5ZM21 11.5H11.5V4.5L21 3.5V11.5Z"/>
               </svg>
-              Download for Windows
+              Windows
             </a>
           </div>
 
@@ -770,62 +851,115 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
           </div>
         </section>
 
-        {/* How It Works */}
-        <section className="how-it-works" id="how-it-works">
-          <div className="how-it-works-container">
+        {/* Pricing */}
+        <section className="pricing" id="pricing">
+          <div className="pricing-container">
             <div className="section-header">
-              <p className="section-label">How it works</p>
-              <h2 className="section-title">From idea to implementation in seconds</h2>
+              <p className="section-label">Pricing</p>
+              <h2 className="section-title">Simple, transparent pricing</h2>
               <p className="section-subtitle">
-                No more context-switching between browser, editor, and AI chat.
+                Start free, upgrade when you need more power.
               </p>
             </div>
 
-            <div className="steps">
-              <div className="step">
-                <div className="step-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M12 6v6l4 2"/>
-                  </svg>
-                </div>
-                <h3>Open your localhost</h3>
-                <p>Point Cluso at your dev server running on any port</p>
+            <div className="pricing-grid">
+              <div className="pricing-card">
+                <h3>Free</h3>
+                <div className="price">$0</div>
+                <p className="price-note">Forever free</p>
+                <ul>
+                  <li>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Voice-powered UI editing
+                  </li>
+                  <li>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Element selection & inspection
+                  </li>
+                  <li>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Real-time preview
+                  </li>
+                  <li>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Basic AI requests
+                  </li>
+                </ul>
+                <a href="#download" className="btn btn-secondary">Get Started</a>
               </div>
 
-              <div className="step">
-                <div className="step-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                    <path d="M2 17l10 5 10-5"/>
-                    <path d="M2 12l10 5 10-5"/>
-                  </svg>
-                </div>
-                <h3>Select elements visually</h3>
-                <p>Click to inspect, right-click to capture screenshots</p>
+              <div className="pricing-card featured">
+                <h3>Pro</h3>
+                <div className="price">$19<span>/mo</span></div>
+                <p className="price-note">For serious developers</p>
+                <ul>
+                  <li>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Everything in Free
+                  </li>
+                  <li>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Unlimited AI requests
+                  </li>
+                  <li>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Advanced code generation
+                  </li>
+                  <li>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Priority support
+                  </li>
+                </ul>
+                <a href="#download" className="btn btn-primary">Start Free Trial</a>
               </div>
 
-              <div className="step">
-                <div className="step-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                    <line x1="12" y1="19" x2="12" y2="23"/>
-                    <line x1="8" y1="23" x2="16" y2="23"/>
-                  </svg>
-                </div>
-                <h3>Speak your changes</h3>
-                <p>Describe what you want in plain English</p>
-              </div>
-
-              <div className="step">
-                <div className="step-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <polyline points="20 6 9 17 4 12"/>
-                  </svg>
-                </div>
-                <h3>Ship it</h3>
-                <p>Approve changes and commit directly from the app</p>
+              <div className="pricing-card">
+                <h3>Team</h3>
+                <div className="price">$49<span>/mo</span></div>
+                <p className="price-note">Per seat, billed annually</p>
+                <ul>
+                  <li>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Everything in Pro
+                  </li>
+                  <li>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Team collaboration
+                  </li>
+                  <li>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Shared component library
+                  </li>
+                  <li>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Admin dashboard
+                  </li>
+                </ul>
+                <a href="#download" className="btn btn-secondary">Contact Sales</a>
               </div>
             </div>
           </div>
@@ -841,9 +975,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
             <div className="cta-buttons">
               <a href="#download" className="btn btn-primary btn-large">
                 Download Now
-              </a>
-              <a href="https://github.com/jkneen/cluso" target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-large">
-                View on GitHub
               </a>
             </div>
           </div>
@@ -905,12 +1036,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
             </div>
           </div>
         </footer>
-        <div className="instructions-section">
-          <h3 className="inspector-hover-target">Open the App</h3>
-          <p>
-            Add your project or create a new one
-          </p>
-        </div>
       </div>
     </>
   );
