@@ -373,18 +373,57 @@ function getSourceLocation(el) {
             }
           }
 
-          // Approach 2: React DevTools hook (works for most React apps in dev)
-          if (!sourceInfo && window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
+          // Approach 2: React 19 _debugStack (stack trace based)
+          // React 19 removed _debugSource and uses stack traces instead
+          if (!sourceInfo) {
             try {
-              const hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-              // Find fiber from element
               for (const key of Object.keys(el)) {
                 if (key.startsWith('__reactFiber$') || key.startsWith('__reactInternalInstance$')) {
                   let fiber = el[key];
-                  // Walk up to find component with _debugSource
-                  while (fiber) {
+                  console.log('[Page] Found fiber:', key);
+
+                  // Walk up to find component with stack info
+                  let depth = 0;
+                  while (fiber && depth < 20 && !sourceInfo) {
+                    depth++;
+
+                    // React 19: check _debugStack (Error object with stack trace)
+                    if (fiber._debugStack) {
+                      const stack = fiber._debugStack.stack || String(fiber._debugStack);
+                      console.log('[Page] Found _debugStack at depth', depth);
+
+                      // Parse stack trace to extract source location
+                      // Format: "    at ComponentName (http://localhost:4000/src/File.tsx:123:45)"
+                      // Or: "    at http://localhost:4000/src/File.tsx:123:45"
+                      const lines = stack.split('\\n');
+                      for (const line of lines) {
+                        // Match: ComponentName (url:line:col) or just (url:line:col)
+                        const match = line.match(/at\\s+(?:([\\w$]+)\\s+)?\\(?(?:https?:\\/\\/[^/]+)?(\\/[^:]+):([0-9]+):([0-9]+)\\)?/);
+                        if (match) {
+                          const [, name, file, lineNum, col] = match;
+                          // Skip node_modules
+                          if (file && !file.includes('node_modules')) {
+                            console.log('[Page] Parsed stack:', { name, file, lineNum, col });
+                            sourceInfo = {
+                              sources: [{
+                                name: name || fiber.type?.name || 'Component',
+                                file: file,
+                                line: parseInt(lineNum, 10),
+                                column: parseInt(col, 10)
+                              }],
+                              summary: file + ':' + lineNum
+                            };
+                            break;
+                          }
+                        }
+                      }
+                      if (sourceInfo) break;
+                    }
+
+                    // React 18 style: _debugSource
                     if (fiber._debugSource) {
                       const src = fiber._debugSource;
+                      console.log('[Page] Found _debugSource at depth', depth, ':', src);
                       sourceInfo = {
                         sources: [{
                           name: fiber.type?.name || fiber.type?.displayName || 'Component',
@@ -394,9 +433,9 @@ function getSourceLocation(el) {
                         }],
                         summary: (src.fileName || src.filename || 'unknown') + ':' + (src.lineNumber || src.line || 0)
                       };
-                      console.log('[Page] Source from _debugSource:', sourceInfo.summary);
                       break;
                     }
+
                     fiber = fiber.return;
                   }
                   if (sourceInfo) break;
@@ -407,13 +446,37 @@ function getSourceLocation(el) {
             }
           }
 
-          // Approach 3: Direct fiber key access (fallback)
+          // Approach 3: Inspect ALL fiber properties for source info
           if (!sourceInfo) {
             try {
               for (const key of Object.keys(el)) {
                 if (key.startsWith('__reactFiber$')) {
                   let fiber = el[key];
-                  while (fiber) {
+                  let depth = 0;
+                  while (fiber && depth < 15) {
+                    depth++;
+                    // Log ALL keys on fiber that might have source info
+                    const allKeys = Object.keys(fiber);
+                    const interestingKeys = allKeys.filter(k =>
+                      k.toLowerCase().includes('debug') ||
+                      k.toLowerCase().includes('source') ||
+                      k.toLowerCase().includes('stack') ||
+                      k.toLowerCase().includes('file') ||
+                      k.toLowerCase().includes('owner')
+                    );
+                    if (interestingKeys.length > 0) {
+                      console.log('[Page] Fiber depth', depth, 'interesting keys:', interestingKeys);
+                      // Log the values
+                      for (const ik of interestingKeys) {
+                        const val = fiber[ik];
+                        if (val && typeof val === 'object') {
+                          console.log('[Page]  -', ik, ':', JSON.stringify(val).substring(0, 200));
+                        } else if (val) {
+                          console.log('[Page]  -', ik, ':', String(val).substring(0, 200));
+                        }
+                      }
+                    }
+
                     // Check for _debugOwner which might have source
                     if (fiber._debugOwner && fiber._debugOwner._debugSource) {
                       const src = fiber._debugOwner._debugSource;

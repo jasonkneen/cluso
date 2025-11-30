@@ -13,6 +13,9 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@babel/plugin-transform-react-jsx": "^7.27.1",
+    "@babel/plugin-transform-react-jsx-development": "^7.27.1",
+    "@babel/preset-react": "^7.28.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",

@@ -69,14 +69,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listDirectory: (path) => ipcRenderer.invoke('files:listDirectory', path),
     listPrompts: () => ipcRenderer.invoke('files:listPrompts'),
     readPrompt: (name) => ipcRenderer.invoke('files:readPrompt', name),
+    readMultiple: (paths) => ipcRenderer.invoke('files:readMultiple', paths),
     // Write operations
     writeFile: (path, content) => ipcRenderer.invoke('files:writeFile', path, content),
     createFile: (path, content) => ipcRenderer.invoke('files:createFile', path, content),
     deleteFile: (path) => ipcRenderer.invoke('files:deleteFile', path),
     renameFile: (oldPath, newPath) => ipcRenderer.invoke('files:renameFile', oldPath, newPath),
+    copyFile: (srcPath, destPath) => ipcRenderer.invoke('files:copyFile', srcPath, destPath),
     // Directory operations
     createDirectory: (path) => ipcRenderer.invoke('files:createDirectory', path),
     deleteDirectory: (path) => ipcRenderer.invoke('files:deleteDirectory', path),
+    getTree: (path, options) => ipcRenderer.invoke('files:getTree', path, options),
+    // Search operations
+    searchInFiles: (pattern, dirPath, options) => ipcRenderer.invoke('files:searchInFiles', pattern, dirPath, options),
+    glob: (pattern, dirPath) => ipcRenderer.invoke('files:glob', pattern, dirPath),
     // Utility operations
     exists: (path) => ipcRenderer.invoke('files:exists', path),
     stat: (path) => ipcRenderer.invoke('files:stat', path),
@@ -119,6 +125,81 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onError: (callback) => {
       ipcRenderer.on('claude-code:error', (_event, error) => callback(error))
       return () => ipcRenderer.removeAllListeners('claude-code:error')
+    },
+  },
+
+  // MCP (Model Context Protocol) operations
+  mcp: {
+    // Connect to an MCP server
+    connect: (config) => ipcRenderer.invoke('mcp:connect', config),
+    // Disconnect from an MCP server
+    disconnect: (serverId) => ipcRenderer.invoke('mcp:disconnect', serverId),
+    // List tools from a connected server
+    listTools: (serverId) => ipcRenderer.invoke('mcp:list-tools', serverId),
+    // List resources from a connected server
+    listResources: (serverId) => ipcRenderer.invoke('mcp:list-resources', serverId),
+    // List prompts from a connected server
+    listPrompts: (serverId) => ipcRenderer.invoke('mcp:list-prompts', serverId),
+    // Call a tool on a connected server
+    callTool: (call) => ipcRenderer.invoke('mcp:call-tool', call),
+    // Read a resource from a connected server
+    readResource: (serverId, uri) => ipcRenderer.invoke('mcp:read-resource', { serverId, uri }),
+    // Get a prompt from a connected server
+    getPrompt: (serverId, name, args) => ipcRenderer.invoke('mcp:get-prompt', { serverId, name, arguments: args }),
+    // Get status of all connections
+    getStatus: () => ipcRenderer.invoke('mcp:get-status'),
+    // Listen for MCP events
+    onEvent: (callback) => {
+      ipcRenderer.on('mcp:event', (_event, mcpEvent) => callback(mcpEvent))
+      return () => ipcRenderer.removeAllListeners('mcp:event')
+    },
+  },
+
+  // AI SDK operations (unified wrapper for all providers)
+  aiSdk: {
+    // Initialize AI SDK modules
+    initialize: () => ipcRenderer.invoke('ai-sdk:initialize'),
+    // Stream chat completion (events sent via callbacks)
+    stream: (options) => ipcRenderer.invoke('ai-sdk:stream', options),
+    // Generate chat completion (non-streaming)
+    generate: (options) => ipcRenderer.invoke('ai-sdk:generate', options),
+    // Execute MCP tool
+    executeMCPTool: (serverId, toolName, args) =>
+      ipcRenderer.invoke('ai-sdk:execute-mcp-tool', { serverId, toolName, args }),
+    // Get supported models
+    getModels: () => ipcRenderer.invoke('ai-sdk:get-models'),
+    // Get provider for model
+    getProvider: (modelId) => ipcRenderer.invoke('ai-sdk:get-provider', modelId),
+    // Listen for streaming text chunks
+    onTextChunk: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('ai-sdk:text-chunk', handler)
+      return () => ipcRenderer.removeListener('ai-sdk:text-chunk', handler)
+    },
+    // Listen for step finish events
+    onStepFinish: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('ai-sdk:step-finish', handler)
+      return () => ipcRenderer.removeListener('ai-sdk:step-finish', handler)
+    },
+    // Listen for completion events
+    onComplete: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('ai-sdk:complete', handler)
+      return () => ipcRenderer.removeListener('ai-sdk:complete', handler)
+    },
+    // Listen for error events
+    onError: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('ai-sdk:error', handler)
+      return () => ipcRenderer.removeListener('ai-sdk:error', handler)
+    },
+    // Remove all listeners for a specific request
+    removeAllListeners: () => {
+      ipcRenderer.removeAllListeners('ai-sdk:text-chunk')
+      ipcRenderer.removeAllListeners('ai-sdk:step-finish')
+      ipcRenderer.removeAllListeners('ai-sdk:complete')
+      ipcRenderer.removeAllListeners('ai-sdk:error')
     },
   },
 

@@ -1,0 +1,62 @@
+[
+  {
+    "id": "ctx_1764504542225",
+    "name": "AISDK",
+    "content": "Use best practice from the aisdk",
+    "active": true,
+    "createdAt": 1764504542225,
+    "mode": "manual",
+    "lastUsedAt": 1764507515806,
+    "engagement": 8
+  },
+  {
+    "id": "ctx_1764505485947",
+    "name": "BEST_PRACTICE",
+    "content": "Use best practice for libaries like AISDK, AIelements",
+    "active": true,
+    "createdAt": 1764505485947,
+    "mode": "manual",
+    "lastUsedAt": 1764507515806,
+    "engagement": 8
+  },
+  {
+    "id": "ctx_1764505527516",
+    "name": "PLAN",
+    "content": "plan, review, think, execute",
+    "active": true,
+    "createdAt": 1764505527516,
+    "mode": "manual",
+    "lastUsedAt": 1764507515806,
+    "engagement": 8
+  },
+  {
+    "id": "ctx_1764505546656",
+    "name": "questions",
+    "content": "askin steering questions if unsure",
+    "active": true,
+    "createdAt": 1764505546656,
+    "mode": "manual",
+    "lastUsedAt": 1764507515806,
+    "engagement": 8
+  },
+  {
+    "id": "ctx_1764505744231",
+    "name": "todos",
+    "content": "Use  todo lists and plan",
+    "active": true,
+    "createdAt": 1764505744231,
+    "mode": "manual",
+    "lastUsedAt": 1764507515806,
+    "engagement": 8
+  },
+  {
+    "id": "ctx_1764505793677",
+    "name": "subagents",
+    "content": "Use subagents as much as possible",
+    "active": true,
+    "createdAt": 1764505793677,
+    "mode": "manual",
+    "lastUsedAt": 1764507515806,
+    "engagement": 8
+  }
+]

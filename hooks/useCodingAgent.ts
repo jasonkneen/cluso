@@ -1,7 +1,12 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useRef, useState, useMemo } from 'react'
 import { z } from 'zod'
-import { ToolsMap, ToolDefinition } from './useAIChat'
+import { ToolsMap, ToolDefinition, mcpToolsToAISDKFormat, MCPToolDefinition, MCPToolCaller, mergeTools } from './useAIChat'
 import { SelectedElement, Message } from '../types'
+
+// Helper to safely access electronAPI (fixes TS errors)
+const getElectronAPI = () => {
+  return (window as any).electronAPI
+}
 
 // Intent classification types
 export type IntentType =
@@ -95,8 +100,12 @@ const INTENT_PATTERNS: Array<{
       /(?:rename|move|copy)\s+(?:the\s+)?(?:file|folder)/i,
       /(?:what(?:'s| is)?\s+in)\s+(?:the\s+)?(?:folder|directory|\.)/i,
       /(?:ls|dir)\b/i,
+      /(?:read|open|view|cat)\s+(?:the\s+)?(?:file|content)/i,
+      /(?:write|save|create|edit|modify|update|change)\s+(?:the\s+)?(?:file|code)/i,
+      /(?:delete|remove)\s+(?:the\s+)?(?:file|folder)/i,
+      /(?:show|what's|whats|what is)\s+(?:in\s+)?(?:the\s+)?(?:project|folder|directory|codebase|repo)/i,
     ],
-    keywords: ['list files', 'show files', 'rename', 'move file', 'copy file', 'what files', 'whats in', 'folder contents', 'directory', 'ls'],
+    keywords: ['list files', 'show files', 'rename', 'move file', 'copy file', 'what files', 'whats in', 'folder contents', 'directory', 'ls', 'read file', 'write file', 'create file', 'edit file', 'save file', 'delete file', 'project files', 'codebase', 'show me'],
   },
   {
     type: 'ui_inspect',
@@ -109,10 +118,19 @@ const INTENT_PATTERNS: Array<{
   {
     type: 'ui_modify',
     patterns: [
-      /(?:change|modify|update)\s+(?:this\s+)?(?:element|button|style|color)/i,
-      /(?:make\s+(?:it|this)\s+)?(?:bigger|smaller|red|blue|green)/i,
+      /(?:change|modify|update)\s+(?:this\s+)?(?:element|button|style|color|text|font|background)?/i,
+      /(?:make\s+(?:it|this|that)\s*)/i,
+      /(?:set|change)\s+(?:the\s+)?(?:color|background|font|size|width|height|padding|margin)?/i,
+      /(?:add|remove)\s+(?:a\s+)?(?:border|shadow|padding|margin)/i,
+      /\b(?:red|blue|green|black|white|bigger|smaller|larger|bold|italic)\b/i,
+      // Match quoted text - likely asking to change element text to this value
+      /^["'][^"']+["']$/i,
+      // Match "change to X" or "set to X" patterns
+      /(?:change|set|update)\s+(?:it\s+)?to\s+/i,
+      // Match text change patterns
+      /(?:text|label|title|content)\s*(?:to|:|\=)\s*/i,
     ],
-    keywords: ['change element', 'modify style', 'update color'],
+    keywords: ['change', 'make it', 'make this', 'set', 'red', 'blue', 'green', 'black', 'white', 'bigger', 'smaller', 'larger', 'bold', 'italic', 'background', 'color', 'font', 'size', 'padding', 'margin', 'border', 'style', 'update', 'modify', 'change to', 'set to'],
   },
   {
     type: 'debug',
@@ -204,30 +222,46 @@ function classifyIntent(message: string, context: CodingContext): ClassifiedInte
 }
 
 // Build system prompt for coding agent
-function buildSystemPrompt(context: CodingContext, intent: ClassifiedIntent): string {
+function buildSystemPrompt(context: CodingContext, intent: ClassifiedIntent, mcpTools?: MCPToolDefinition[]): string {
   const parts: string[] = []
 
-  parts.push(`You are a coding assistant with direct access to the local file system.
+  parts.push(`You are a coding assistant running in Electron with DIRECT ACCESS to the local file system.
 
-IMPORTANT: You have tools to interact with the file system. USE THEM.
-Do NOT suggest terminal commands like 'ls', 'cat', 'mkdir', etc.
-Instead, use the tools provided:
+CRITICAL RULES - READ CAREFULLY:
+1. You are NOT a web app. You ARE running in Electron with full file system access.
+2. You have function-calling tools that EXECUTE DIRECTLY on the user's machine.
+3. When the user asks to read, write, list, or modify files - CALL THE TOOL IMMEDIATELY.
+4. NEVER output code snippets showing how to set up IPC or file operations.
+5. NEVER say "I can't access files" or "as a web app" - you CAN and MUST use the tools.
+6. NEVER suggest terminal commands. USE THE TOOLS.
 
-Available tools:
-- list_directory: List files and folders in a directory
-- read_file: Read file contents
-- write_file: Write/update a file
-- create_file: Create a new file
-- delete_file: Delete a file
-- rename_file: Rename or move a file
-- create_directory: Create a directory
-- file_exists: Check if a path exists
-- file_stat: Get file info (size, modified time)
-- git_status: Get git status
-- git_commit: Commit changes
+Your tools (call these directly):
 
-When asked to list files, read files, or modify files - USE THE TOOLS.
-Do not tell the user to run commands themselves.
+FILE READING:
+- list_directory: Lists files/folders - USE THIS for "show me files", "what's in this folder"
+- read_file: Reads file content - USE THIS for "show me", "read", "what's in this file"
+- read_multiple_files: Reads multiple files at once - efficient for reading several files
+- get_file_tree: Gets recursive directory tree - USE THIS for "project structure", "what files exist"
+
+FILE WRITING:
+- write_file: Writes to file - USE THIS for "edit", "update", "change", "save"
+- create_file: Creates new file - USE THIS for "create", "new file", "add file"
+- delete_file: Deletes file - USE THIS for "delete", "remove"
+- rename_file: Renames/moves - USE THIS for "rename", "move"
+- copy_file: Copies file - USE THIS for "copy", "duplicate"
+- create_directory: Creates folder - USE THIS for "new folder", "mkdir"
+
+SEARCH:
+- search_in_files: Grep-like search - USE THIS for "find", "search for", "where is"
+- find_files: Glob pattern match - USE THIS for "find all *.ts files", "list tsx files"
+
+UTILITIES:
+- file_exists: Checks if path exists
+- file_stat: Gets file info (size, dates)
+- git_status: Shows git status
+- git_commit: Commits changes
+
+EXECUTE THE TOOLS. Do not explain how to set them up. They are already set up and working.
 
 Current intent: ${intent.type} (${intent.description})
 Confidence: ${Math.round(intent.confidence * 100)}%`)
@@ -305,6 +339,34 @@ For debugging:
       break
   }
 
+  // Add MCP tools section if any are available
+  if (mcpTools && mcpTools.length > 0) {
+    // Group tools by server
+    const toolsByServer = mcpTools.reduce((acc, tool) => {
+      if (!acc[tool.serverId]) {
+        acc[tool.serverId] = []
+      }
+      acc[tool.serverId].push(tool)
+      return acc
+    }, {} as Record<string, MCPToolDefinition[]>)
+
+    parts.push(`\n## MCP Tools (External Capabilities)
+You have access to additional tools from connected MCP (Model Context Protocol) servers.
+These extend your capabilities beyond local file operations.
+
+To call an MCP tool, use the format: mcp_<serverId>_<toolName>`)
+
+    for (const [serverId, tools] of Object.entries(toolsByServer)) {
+      parts.push(`\n### Server: ${serverId}`)
+      for (const tool of tools) {
+        const paramNames = tool.inputSchema.properties
+          ? Object.keys(tool.inputSchema.properties).join(', ')
+          : 'none'
+        parts.push(`- **mcp_${serverId}_${tool.name}**: ${tool.description || 'No description'} (params: ${paramNames})`)
+      }
+    }
+  }
+
   return parts.join('\n')
 }
 
@@ -319,10 +381,11 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path: string }
-        if (!window.electronAPI?.files?.readFile) {
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.files?.readFile) {
           return { error: 'File operations not available (not in Electron)' }
         }
-        const result = await window.electronAPI.files.readFile(path)
+        const result = await electronAPI.files.readFile(path)
         if (result.success) {
           return { content: result.data, path }
         }
@@ -338,10 +401,11 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { path, content } = args as { path: string; content: string }
-        if (!window.electronAPI?.files?.writeFile) {
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.files?.writeFile) {
           return { error: 'File operations not available (not in Electron)' }
         }
-        const result = await window.electronAPI.files.writeFile(path, content)
+        const result = await electronAPI.files.writeFile(path, content)
         if (result.success) {
           return { success: true, path, bytesWritten: content.length }
         }
@@ -357,10 +421,11 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { path, content } = args as { path: string; content?: string }
-        if (!window.electronAPI?.files?.createFile) {
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.files?.createFile) {
           return { error: 'File operations not available (not in Electron)' }
         }
-        const result = await window.electronAPI.files.createFile(path, content || '')
+        const result = await electronAPI.files.createFile(path, content || '')
         if (result.success) {
           return { success: true, path }
         }
@@ -375,10 +440,11 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path: string }
-        if (!window.electronAPI?.files?.deleteFile) {
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.files?.deleteFile) {
           return { error: 'File operations not available (not in Electron)' }
         }
-        const result = await window.electronAPI.files.deleteFile(path)
+        const result = await electronAPI.files.deleteFile(path)
         if (result.success) {
           return { success: true, path }
         }
@@ -394,10 +460,11 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { oldPath, newPath } = args as { oldPath: string; newPath: string }
-        if (!window.electronAPI?.files?.renameFile) {
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.files?.renameFile) {
           return { error: 'File operations not available (not in Electron)' }
         }
-        const result = await window.electronAPI.files.renameFile(oldPath, newPath)
+        const result = await electronAPI.files.renameFile(oldPath, newPath)
         if (result.success) {
           return { success: true, oldPath, newPath }
         }
@@ -412,10 +479,11 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path?: string }
-        if (!window.electronAPI?.files?.listDirectory) {
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.files?.listDirectory) {
           return { error: 'File operations not available (not in Electron)' }
         }
-        const result = await window.electronAPI.files.listDirectory(path)
+        const result = await electronAPI.files.listDirectory(path)
         if (result.success) {
           return { entries: result.data, path: path || 'project root' }
         }
@@ -430,10 +498,11 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path: string }
-        if (!window.electronAPI?.files?.createDirectory) {
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.files?.createDirectory) {
           return { error: 'File operations not available (not in Electron)' }
         }
-        const result = await window.electronAPI.files.createDirectory(path)
+        const result = await electronAPI.files.createDirectory(path)
         if (result.success) {
           return { success: true, path }
         }
@@ -448,10 +517,11 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path: string }
-        if (!window.electronAPI?.files?.exists) {
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.files?.exists) {
           return { error: 'File operations not available (not in Electron)' }
         }
-        const result = await window.electronAPI.files.exists(path)
+        const result = await electronAPI.files.exists(path)
         return { exists: result.exists, path }
       },
     } as ToolDefinition,
@@ -463,10 +533,11 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path: string }
-        if (!window.electronAPI?.files?.stat) {
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.files?.stat) {
           return { error: 'File operations not available (not in Electron)' }
         }
-        const result = await window.electronAPI.files.stat(path)
+        const result = await electronAPI.files.stat(path)
         if (result.success) {
           return { ...result.data, path }
         }
@@ -481,10 +552,11 @@ export function createCodingAgentTools(): ToolsMap {
         includeUntracked: z.boolean().optional().describe('Include untracked files (default: true)'),
       }),
       execute: async () => {
-        if (!window.electronAPI?.git?.getStatus) {
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.git?.getStatus) {
           return { error: 'Git operations not available (not in Electron)' }
         }
-        const result = await window.electronAPI.git.getStatus()
+        const result = await electronAPI.git.getStatus()
         if (result.success) {
           return result.data
         }
@@ -499,10 +571,11 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { message } = args as { message: string }
-        if (!window.electronAPI?.git?.commit) {
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.git?.commit) {
           return { error: 'Git operations not available (not in Electron)' }
         }
-        const result = await window.electronAPI.git.commit(message)
+        const result = await electronAPI.git.commit(message)
         if (result.success) {
           return { success: true, message }
         }
@@ -510,22 +583,125 @@ export function createCodingAgentTools(): ToolsMap {
       },
     } as ToolDefinition,
 
-    // Search in files (simulated - would need grep-like IPC)
+    // Search in files (grep-like)
     search_in_files: {
-      description: 'Search for text pattern in files',
+      description: 'Search for text pattern in files (like grep). Returns matching lines with file paths and line numbers.',
       parameters: z.object({
         pattern: z.string().describe('Text or regex pattern to search'),
-        directory: z.string().optional().describe('Directory to search in'),
-        filePattern: z.string().optional().describe('File glob pattern (e.g., "*.ts")'),
+        directory: z.string().optional().describe('Directory to search in (defaults to project root)'),
+        filePattern: z.string().optional().describe('File pattern filter (e.g., "*.ts", "*.tsx,*.js")'),
+        caseSensitive: z.boolean().optional().describe('Case sensitive search (default: false)'),
+        maxResults: z.number().optional().describe('Maximum results to return (default: 100)'),
       }),
       execute: async (args: unknown) => {
-        // This would need a proper grep-like implementation in Electron
-        // For now, return a placeholder
-        const { pattern } = args as { pattern: string; directory?: string; filePattern?: string }
-        return {
-          message: `Search for "${pattern}" not yet implemented - use list_directory + read_file to search manually`,
-          pattern,
+        const { pattern, directory, filePattern, caseSensitive, maxResults } = args as {
+          pattern: string
+          directory?: string
+          filePattern?: string
+          caseSensitive?: boolean
+          maxResults?: number
         }
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.files?.searchInFiles) {
+          return { error: 'Search not available (not in Electron)' }
+        }
+        const result = await electronAPI.files.searchInFiles(pattern, directory, {
+          filePattern,
+          caseSensitive,
+          maxResults,
+        })
+        if (result.success) {
+          return { matches: result.data, count: result.data.length }
+        }
+        return { error: result.error }
+      },
+    } as ToolDefinition,
+
+    // Glob pattern file finder
+    find_files: {
+      description: 'Find files matching a glob pattern (e.g., "**/*.ts", "src/**/*.tsx")',
+      parameters: z.object({
+        pattern: z.string().describe('Glob pattern (supports *, **, ?)'),
+        directory: z.string().optional().describe('Directory to search in'),
+      }),
+      execute: async (args: unknown) => {
+        const { pattern, directory } = args as { pattern: string; directory?: string }
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.files?.glob) {
+          return { error: 'Glob not available (not in Electron)' }
+        }
+        const result = await electronAPI.files.glob(pattern, directory)
+        if (result.success) {
+          return { files: result.data, count: result.data.length }
+        }
+        return { error: result.error }
+      },
+    } as ToolDefinition,
+
+    // Copy file
+    copy_file: {
+      description: 'Copy a file to a new location',
+      parameters: z.object({
+        sourcePath: z.string().describe('Source file path'),
+        destPath: z.string().describe('Destination file path'),
+      }),
+      execute: async (args: unknown) => {
+        const { sourcePath, destPath } = args as { sourcePath: string; destPath: string }
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.files?.copyFile) {
+          return { error: 'Copy not available (not in Electron)' }
+        }
+        const result = await electronAPI.files.copyFile(sourcePath, destPath)
+        if (result.success) {
+          return { success: true, sourcePath, destPath }
+        }
+        return { error: result.error }
+      },
+    } as ToolDefinition,
+
+    // Read multiple files at once
+    read_multiple_files: {
+      description: 'Read multiple files at once - more efficient than calling read_file multiple times',
+      parameters: z.object({
+        paths: z.array(z.string()).describe('Array of file paths to read'),
+      }),
+      execute: async (args: unknown) => {
+        const { paths } = args as { paths: string[] }
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.files?.readMultiple) {
+          return { error: 'Read multiple not available (not in Electron)' }
+        }
+        const result = await electronAPI.files.readMultiple(paths)
+        if (result.success) {
+          return { files: result.data }
+        }
+        return { error: result.error }
+      },
+    } as ToolDefinition,
+
+    // Get file tree
+    get_file_tree: {
+      description: 'Get a recursive file tree of a directory - useful for understanding project structure',
+      parameters: z.object({
+        directory: z.string().optional().describe('Directory path (defaults to project root)'),
+        maxDepth: z.number().optional().describe('Maximum depth to traverse (default: 5)'),
+        includeHidden: z.boolean().optional().describe('Include hidden files (default: false)'),
+      }),
+      execute: async (args: unknown) => {
+        const { directory, maxDepth, includeHidden } = args as {
+          directory?: string
+          maxDepth?: number
+          includeHidden?: boolean
+        }
+        const electronAPI = getElectronAPI()
+        if (!electronAPI?.files?.getTree) {
+          return { error: 'Get tree not available (not in Electron)' }
+        }
+        const result = await electronAPI.files.getTree(directory, { maxDepth, includeHidden })
+        if (result.success) {
+          return { tree: result.data }
+        }
+        return { error: result.error }
       },
     } as ToolDefinition,
   }
@@ -538,7 +714,15 @@ interface CodingAgentState {
   isProcessing: boolean
 }
 
-export function useCodingAgent() {
+// Hook options
+interface UseCodingAgentOptions {
+  mcpTools?: MCPToolDefinition[]
+  callMCPTool?: MCPToolCaller
+}
+
+export function useCodingAgent(options: UseCodingAgentOptions = {}) {
+  const { mcpTools = [], callMCPTool } = options
+
   const [state, setState] = useState<CodingAgentState>({
     context: {
       selectedElement: null,
@@ -552,6 +736,20 @@ export function useCodingAgent() {
   })
 
   const toolsRef = useRef<ToolsMap>(createCodingAgentTools())
+
+  // Memoize combined tools (coding agent + MCP)
+  const combinedTools = useMemo(() => {
+    // DISABLED: MCP tools merging to fix schema issues
+    return toolsRef.current
+    /*
+    if (!mcpTools.length || !callMCPTool) {
+      return toolsRef.current
+    }
+
+    const mcpToolsMap = mcpToolsToAISDKFormat(mcpTools, callMCPTool)
+    return mergeTools(toolsRef.current, mcpToolsMap)
+    */
+  }, [mcpTools, callMCPTool])
 
   // Update context
   const updateContext = useCallback((updates: Partial<CodingContext>) => {
@@ -576,10 +774,10 @@ export function useCodingAgent() {
 
     return {
       intent,
-      systemPrompt: buildSystemPrompt(state.context, intent),
-      tools: toolsRef.current,
+      systemPrompt: buildSystemPrompt(state.context, intent, mcpTools.length > 0 ? mcpTools : undefined),
+      tools: combinedTools,
     }
-  }, [state.context])
+  }, [state.context, mcpTools, combinedTools])
 
   // Set processing state
   const setProcessing = useCallback((isProcessing: boolean) => {
@@ -593,7 +791,7 @@ export function useCodingAgent() {
     updateContext,
     processMessage,
     setProcessing,
-    tools: toolsRef.current,
+    tools: combinedTools,
   }
 }
 

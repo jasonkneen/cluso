@@ -1,0 +1,12 @@
+name = "codex-proxy"
+main = "codex-proxy.js"
+compatibility_date = "2024-01-01"
+
+# Optional: Set a custom route
+# routes = [{ pattern = "codex-proxy.your-domain.com/*", zone_name = "your-domain.com" }]
+
+# The worker will be deployed to: https://codex-proxy.<your-subdomain>.workers.dev
+
+[vars]
+# Optional: Set PROXY_API_KEY as a secret for authentication
+# wrangler secret put PROXY_API_KEY

@@ -13,15 +13,20 @@
     "electron:build": "npm run build && electron-builder",
     "electron:build:mac": "npm run build && electron-builder --mac",
     "electron:build:win": "npm run build && electron-builder --win",
-    "electron:build:linux": "npm run build && electron-builder --linux"
+    "electron:build:linux": "npm run build && electron-builder --linux",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.50",
     "@ai-sdk/google": "^2.0.44",
+    "@ai-sdk/mcp": "^0.0.11",
     "@ai-sdk/openai": "^2.0.74",
     "@ai-sdk/react": "^2.0.104",
     "@anthropic-ai/claude-agent-sdk": "^0.1.55",
     "@google/genai": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.23.0",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
@@ -38,17 +43,21 @@
     "shiki": "^3.17.0",
     "streamdown": "^1.6.9",
     "tailwind-merge": "^3.4.0",
-    "zod": "^4.1.13"
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@babel/plugin-transform-react-jsx-source": "^7.27.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "concurrently": "^9.2.1",
     "electron": "^39.2.4",
     "electron-builder": "^26.0.12",
+    "jsdom": "^27.2.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
+    "vitest": "^4.0.14",
     "wait-on": "^9.0.3"
   },
   "build": {

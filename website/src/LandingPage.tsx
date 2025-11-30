@@ -535,7 +535,7 @@ const styles = `
 
   .social-links a:hover {
     color: var(--text-primary);
-  }
+}
 
   /* Responsive */
   @media (max-width: 768px) {
@@ -601,7 +601,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
         <section className="hero">
           <div className="hero-badge">
             <span className="dot"></span>
-            <span>Free & Open Source</span>
+            <span>Download NOW</span>
           </div>
 
           <h1>
@@ -665,7 +665,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                 Click on any element in your page to select it. Cluso automatically
                 captures the HTML, CSS, and context needed for AI to understand what
                 you're working with.
-              </p>
+</p>
               <div className="feature-image">Element Selection Preview</div>
             </div>
 
@@ -810,9 +810,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                   <li><a href="mailto:hello@cluso.dev">Contact</a></li>
                 </ul>
               </div>
-            </div>
-
-            <div className="footer-bottom">
+</div>
+<div className="footer-bottom">
               <span>&copy; 2024 Cluso. All rights reserved.</span>
               <div className="social-links">
                 <a href="#" aria-label="Twitter">
@@ -829,6 +828,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
             </div>
           </div>
         </footer>
+        <div className="instructions-section">
+          <h3 className="inspector-hover-target">Open the App</h3>
+          <p>
+            Add your project or create a new one
+          </p>
+        </div>
       </div>
     </>
   );

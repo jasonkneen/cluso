@@ -241,12 +241,15 @@ export function NewTabPage({
           {/* Project List */}
           <div className={`rounded-xl overflow-hidden border ${isDarkMode ? 'border-neutral-800' : 'border-stone-200'}`}>
             {recentProjects.map((project, index) => (
-              <button
+              <div
                 key={project.path}
                 onClick={() => handleProjectClick(project)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => e.key === 'Enter' && handleProjectClick(project)}
                 className={`
                   w-full flex items-center justify-between px-4 py-3
-                  transition-colors text-left group
+                  transition-colors text-left group cursor-pointer
                   ${index !== recentProjects.length - 1 ? (isDarkMode ? 'border-b border-neutral-800' : 'border-b border-stone-100') : ''}
                   ${isDarkMode
                     ? 'hover:bg-neutral-800/50'
@@ -283,7 +286,7 @@ export function NewTabPage({
                     <X size={14} className={isDarkMode ? 'text-neutral-500' : 'text-stone-400'} />
                   </button>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         </div>

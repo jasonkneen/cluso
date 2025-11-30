@@ -22,6 +22,13 @@ import {
   Key,
   Sparkles,
   Zap,
+  Terminal,
+  Globe,
+  Wrench,
+  RefreshCw,
+  AlertCircle,
+  Play,
+  Square,
 } from 'lucide-react'
 
 type SettingsSection = 'general' | 'display' | 'providers' | 'models' | 'connections'
@@ -42,13 +49,47 @@ export interface SettingsModel {
   enabled: boolean
 }
 
-export interface Connection {
+export type MCPTransportType = 'stdio' | 'sse'
+
+export interface MCPStdioTransport {
+  type: 'stdio'
+  command: string
+  args?: string[]
+  env?: Record<string, string>
+  cwd?: string
+}
+
+export interface MCPSSETransport {
+  type: 'sse'
+  url: string
+  headers?: Record<string, string>
+}
+
+export type MCPTransport = MCPStdioTransport | MCPSSETransport
+
+export interface MCPServerConnection {
   id: string
   name: string
-  type: 'mcp' | 'api' | 'websocket'
+  type: 'mcp'
+  transport: MCPTransport
+  enabled: boolean
+  timeout?: number
+  // Runtime state (not persisted)
+  status?: 'disconnected' | 'connecting' | 'connected' | 'error'
+  error?: string
+  toolCount?: number
+}
+
+// Legacy connection type for backwards compatibility
+export interface LegacyConnection {
+  id: string
+  name: string
+  type: 'api' | 'websocket'
   url: string
   enabled: boolean
 }
+
+export type Connection = MCPServerConnection | LegacyConnection
 
 export type FontSize = 'small' | 'medium' | 'large'
 
@@ -98,7 +139,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
     { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex', provider: 'codex', enabled: false },
   ],
   connections: [
-    { id: '1', name: 'Local MCP Server', type: 'mcp', url: 'http://localhost:3001', enabled: false },
+    {
+      id: '1',
+      name: 'Example SSE Server',
+      type: 'mcp',
+      transport: { type: 'sse', url: 'http://localhost:3001' },
+      enabled: false,
+    },
   ],
 }
 
@@ -1189,90 +1236,439 @@ export function SettingsDialog({
       case 'connections':
         return (
           <div className="space-y-4">
+            {/* Header with Add button */}
             <div className="flex items-center justify-between">
-              <p className={`text-sm ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
-                Configure external connections like MCP servers and APIs.
-              </p>
+              <div>
+                <h3 className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                  MCP Servers
+                </h3>
+                <p className={`text-xs mt-0.5 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                  Connect to Model Context Protocol servers for extended AI capabilities
+                </p>
+              </div>
               <button
+                onClick={() => {
+                  const newId = `mcp_${Date.now()}`
+                  const newConnection: MCPServerConnection = {
+                    id: newId,
+                    name: 'New MCP Server',
+                    type: 'mcp',
+                    transport: { type: 'stdio', command: 'npx', args: ['-y', '@your/mcp-server'] },
+                    enabled: false,
+                    status: 'disconnected',
+                  }
+                  updateSettings({
+                    connections: [...settings.connections, newConnection],
+                  })
+                }}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                   isDarkMode
-                    ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20'
-                    : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                    ? 'bg-purple-500/10 text-purple-400 hover:bg-purple-500/20'
+                    : 'bg-purple-50 text-purple-600 hover:bg-purple-100'
                 }`}
               >
                 <Plus size={14} />
-                Add
+                Add Server
               </button>
             </div>
 
-            <div className="space-y-2">
-              {settings.connections.map((connection) => (
-                <div
-                  key={connection.id}
-                  className={`p-4 rounded-xl border ${
-                    isDarkMode ? 'border-neutral-700 bg-neutral-800/50' : 'border-stone-200 bg-stone-50'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                        connection.enabled
-                          ? 'bg-purple-500/10 text-purple-500'
-                          : isDarkMode ? 'bg-neutral-700 text-neutral-400' : 'bg-stone-200 text-stone-400'
-                      }`}>
-                        <Plug size={16} />
-                      </div>
-                      <div>
-                        <span className={`font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
-                          {connection.name}
-                        </span>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className={`text-xs px-1.5 py-0.5 rounded ${
-                            isDarkMode ? 'bg-neutral-700 text-neutral-400' : 'bg-stone-200 text-stone-500'
-                          }`}>
-                            {connection.type.toUpperCase()}
-                          </span>
-                          <span className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-                            {connection.url}
-                          </span>
+            {/* MCP Server List */}
+            <div className="space-y-3">
+              {settings.connections.filter(c => c.type === 'mcp').map((connection) => {
+                // Handle legacy connections that don't have transport property
+                const legacyConn = connection as LegacyConnection & { url?: string }
+                let mcpConn: MCPServerConnection
+                if (!('transport' in connection) && legacyConn.url) {
+                  // Migrate legacy connection to new format
+                  mcpConn = {
+                    ...connection,
+                    type: 'mcp',
+                    transport: { type: 'sse', url: legacyConn.url },
+                  } as MCPServerConnection
+                } else if (!('transport' in connection)) {
+                  // Skip invalid connections
+                  return null
+                } else {
+                  mcpConn = connection as MCPServerConnection
+                }
+                const isStdio = mcpConn.transport.type === 'stdio'
+                const statusColor = mcpConn.status === 'connected' ? 'green'
+                  : mcpConn.status === 'connecting' ? 'yellow'
+                  : mcpConn.status === 'error' ? 'red'
+                  : 'neutral'
+
+                return (
+                  <div
+                    key={mcpConn.id}
+                    className={`p-4 rounded-xl border ${
+                      isDarkMode ? 'border-neutral-700 bg-neutral-800/50' : 'border-stone-200 bg-stone-50'
+                    }`}
+                  >
+                    {/* Header Row */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                          mcpConn.status === 'connected'
+                            ? 'bg-green-500/10 text-green-500'
+                            : mcpConn.status === 'connecting'
+                            ? 'bg-yellow-500/10 text-yellow-500'
+                            : mcpConn.status === 'error'
+                            ? 'bg-red-500/10 text-red-500'
+                            : isDarkMode ? 'bg-neutral-700 text-neutral-400' : 'bg-stone-200 text-stone-400'
+                        }`}>
+                          {isStdio ? <Terminal size={16} /> : <Globe size={16} />}
+                        </div>
+                        <div>
+                          <input
+                            type="text"
+                            value={mcpConn.name}
+                            onChange={(e) => {
+                              updateSettings({
+                                connections: settings.connections.map(c =>
+                                  c.id === mcpConn.id ? { ...c, name: e.target.value } : c
+                                ),
+                              })
+                            }}
+                            className={`font-medium bg-transparent border-none outline-none ${
+                              isDarkMode ? 'text-neutral-200' : 'text-stone-800'
+                            }`}
+                          />
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${
+                              isStdio
+                                ? isDarkMode ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'
+                                : isDarkMode ? 'bg-orange-500/10 text-orange-400' : 'bg-orange-50 text-orange-600'
+                            }`}>
+                              {isStdio ? 'STDIO' : 'SSE'}
+                            </span>
+                            {mcpConn.status && mcpConn.status !== 'disconnected' && (
+                              <span className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 ${
+                                statusColor === 'green' ? isDarkMode ? 'bg-green-500/10 text-green-400' : 'bg-green-50 text-green-600'
+                                : statusColor === 'yellow' ? isDarkMode ? 'bg-yellow-500/10 text-yellow-400' : 'bg-yellow-50 text-yellow-600'
+                                : statusColor === 'red' ? isDarkMode ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-600'
+                                : ''
+                              }`}>
+                                {mcpConn.status === 'connecting' && <Loader2 size={10} className="animate-spin" />}
+                                {mcpConn.status === 'connected' && <CheckCircle size={10} />}
+                                {mcpConn.status === 'error' && <AlertCircle size={10} />}
+                                {mcpConn.status}
+                              </span>
+                            )}
+                            {mcpConn.toolCount !== undefined && mcpConn.status === 'connected' && (
+                              <span className={`text-xs flex items-center gap-1 ${
+                                isDarkMode ? 'text-neutral-500' : 'text-stone-400'
+                              }`}>
+                                <Wrench size={10} />
+                                {mcpConn.toolCount} tools
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => removeConnection(connection.id)}
-                        className={`p-1.5 rounded-lg transition-colors ${
-                          isDarkMode
-                            ? 'text-neutral-500 hover:bg-red-500/10 hover:text-red-400'
-                            : 'text-stone-400 hover:bg-red-50 hover:text-red-500'
-                        }`}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                      <button
-                        onClick={() => toggleConnectionEnabled(connection.id)}
-                        className={`w-10 h-6 rounded-full transition-colors relative ${
-                          connection.enabled
-                            ? 'bg-purple-500'
-                            : isDarkMode ? 'bg-neutral-600' : 'bg-stone-300'
-                        }`}
-                      >
-                        <span
-                          className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                            connection.enabled ? 'left-5' : 'left-1'
+                      <div className="flex items-center gap-2">
+                        {/* Connect/Disconnect/Cancel Button */}
+                        {window.electronAPI?.mcp && (
+                          <button
+                            onClick={async () => {
+                              if (mcpConn.status === 'connected' || mcpConn.status === 'connecting') {
+                                // Disconnect or Cancel
+                                await window.electronAPI!.mcp!.disconnect(mcpConn.id)
+                                updateSettings({
+                                  connections: settings.connections.map(c =>
+                                    c.id === mcpConn.id ? { ...c, status: 'disconnected', toolCount: undefined, error: undefined } : c
+                                  ) as Connection[],
+                                })
+                              } else {
+                                // Connect
+                                updateSettings({
+                                  connections: settings.connections.map(c =>
+                                    c.id === mcpConn.id ? { ...c, status: 'connecting', error: undefined } : c
+                                  ) as Connection[],
+                                })
+                                try {
+                                  const result = await window.electronAPI!.mcp!.connect({
+                                    id: mcpConn.id,
+                                    name: mcpConn.name,
+                                    transport: mcpConn.transport,
+                                    enabled: true,
+                                  })
+                                  if (result.success) {
+                                    const toolsResult = await window.electronAPI!.mcp!.listTools(mcpConn.id)
+                                    updateSettings({
+                                      connections: settings.connections.map(c =>
+                                        c.id === mcpConn.id
+                                          ? { ...c, status: 'connected', toolCount: toolsResult.tools?.length || 0, error: undefined }
+                                          : c
+                                      ) as Connection[],
+                                    })
+                                  } else {
+                                    updateSettings({
+                                      connections: settings.connections.map(c =>
+                                        c.id === mcpConn.id ? { ...c, status: 'error', error: result.error } : c
+                                      ) as Connection[],
+                                    })
+                                  }
+                                } catch (err) {
+                                  updateSettings({
+                                    connections: settings.connections.map(c =>
+                                      c.id === mcpConn.id ? { ...c, status: 'error', error: err instanceof Error ? err.message : 'Connection failed' } : c
+                                    ) as Connection[],
+                                  })
+                                }
+                              }
+                            }}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              mcpConn.status === 'connected' || mcpConn.status === 'connecting'
+                                ? isDarkMode
+                                  ? 'text-red-400 hover:bg-red-500/10'
+                                  : 'text-red-500 hover:bg-red-50'
+                                : isDarkMode
+                                  ? 'text-green-400 hover:bg-green-500/10'
+                                  : 'text-green-500 hover:bg-green-50'
+                            }`}
+                            title={mcpConn.status === 'connected' ? 'Disconnect' : mcpConn.status === 'connecting' ? 'Cancel' : 'Connect'}
+                          >
+                            {mcpConn.status === 'connecting' ? (
+                              <XCircle size={14} />
+                            ) : mcpConn.status === 'connected' ? (
+                              <Square size={14} />
+                            ) : (
+                              <Play size={14} />
+                            )}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => removeConnection(mcpConn.id)}
+                          className={`p-1.5 rounded-lg transition-colors ${
+                            isDarkMode
+                              ? 'text-neutral-500 hover:bg-red-500/10 hover:text-red-400'
+                              : 'text-stone-400 hover:bg-red-50 hover:text-red-500'
                           }`}
-                        />
-                      </button>
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                        <button
+                          onClick={() => toggleConnectionEnabled(mcpConn.id)}
+                          className={`w-10 h-6 rounded-full transition-colors relative ${
+                            mcpConn.enabled
+                              ? 'bg-purple-500'
+                              : isDarkMode ? 'bg-neutral-600' : 'bg-stone-300'
+                          }`}
+                        >
+                          <span
+                            className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                              mcpConn.enabled ? 'left-5' : 'left-1'
+                            }`}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Error Message */}
+                    {mcpConn.error && (
+                      <div className={`text-xs px-3 py-2 rounded-lg mb-3 ${
+                        isDarkMode ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-600'
+                      }`}>
+                        {mcpConn.error}
+                      </div>
+                    )}
+
+                    {/* Transport Config */}
+                    <div className={`space-y-2 p-3 rounded-lg ${
+                      isDarkMode ? 'bg-neutral-900/50' : 'bg-white'
+                    }`}>
+                      {/* Transport Type Selector */}
+                      <div className="flex gap-2 mb-3">
+                        <button
+                          onClick={() => {
+                            updateSettings({
+                              connections: settings.connections.map(c =>
+                                c.id === mcpConn.id
+                                  ? { ...c, transport: { type: 'stdio', command: 'npx', args: ['-y', '@your/mcp-server'] } }
+                                  : c
+                              ) as Connection[],
+                            })
+                          }}
+                          className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                            isStdio
+                              ? isDarkMode
+                                ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                                : 'bg-blue-100 text-blue-700 border border-blue-200'
+                              : isDarkMode
+                                ? 'bg-neutral-800 text-neutral-400 border border-neutral-700 hover:border-neutral-600'
+                                : 'bg-stone-100 text-stone-500 border border-stone-200 hover:border-stone-300'
+                          }`}
+                        >
+                          <Terminal size={14} />
+                          stdio
+                        </button>
+                        <button
+                          onClick={() => {
+                            updateSettings({
+                              connections: settings.connections.map(c =>
+                                c.id === mcpConn.id
+                                  ? { ...c, transport: { type: 'sse', url: 'http://localhost:3001' } }
+                                  : c
+                              ) as Connection[],
+                            })
+                          }}
+                          className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                            !isStdio
+                              ? isDarkMode
+                                ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
+                                : 'bg-orange-100 text-orange-700 border border-orange-200'
+                              : isDarkMode
+                                ? 'bg-neutral-800 text-neutral-400 border border-neutral-700 hover:border-neutral-600'
+                                : 'bg-stone-100 text-stone-500 border border-stone-200 hover:border-stone-300'
+                          }`}
+                        >
+                          <Globe size={14} />
+                          SSE/HTTP
+                        </button>
+                      </div>
+
+                      {/* Stdio Config */}
+                      {isStdio && (
+                        <>
+                          <div>
+                            <label className={`text-xs font-medium ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                              Command
+                            </label>
+                            <input
+                              type="text"
+                              value={(mcpConn.transport as MCPStdioTransport).command}
+                              onChange={(e) => {
+                                updateSettings({
+                                  connections: settings.connections.map(c =>
+                                    c.id === mcpConn.id
+                                      ? { ...c, transport: { ...mcpConn.transport, command: e.target.value } }
+                                      : c
+                                  ) as Connection[],
+                                })
+                              }}
+                              placeholder="npx, node, python, etc."
+                              className={`w-full mt-1 px-3 py-2 rounded-lg text-sm ${
+                                isDarkMode
+                                  ? 'bg-neutral-800 border-neutral-700 text-neutral-200 placeholder-neutral-500'
+                                  : 'bg-stone-50 border-stone-200 text-stone-800 placeholder-stone-400'
+                              } border focus:outline-none focus:ring-2 focus:ring-purple-500/50`}
+                            />
+                          </div>
+                          <div>
+                            <label className={`text-xs font-medium ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                              Arguments (one per line)
+                            </label>
+                            <textarea
+                              value={(mcpConn.transport as MCPStdioTransport).args?.join('\n') || ''}
+                              onChange={(e) => {
+                                const args = e.target.value.split('\n').filter(a => a.trim())
+                                updateSettings({
+                                  connections: settings.connections.map(c =>
+                                    c.id === mcpConn.id
+                                      ? { ...c, transport: { ...mcpConn.transport, args } }
+                                      : c
+                                  ) as Connection[],
+                                })
+                              }}
+                              placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/path/to/allowed"
+                              rows={3}
+                              className={`w-full mt-1 px-3 py-2 rounded-lg text-sm font-mono ${
+                                isDarkMode
+                                  ? 'bg-neutral-800 border-neutral-700 text-neutral-200 placeholder-neutral-500'
+                                  : 'bg-stone-50 border-stone-200 text-stone-800 placeholder-stone-400'
+                              } border focus:outline-none focus:ring-2 focus:ring-purple-500/50`}
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {/* SSE Config */}
+                      {!isStdio && (
+                        <>
+                          <div>
+                            <label className={`text-xs font-medium ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                              Server URL
+                            </label>
+                            <input
+                              type="text"
+                              value={(mcpConn.transport as MCPSSETransport).url}
+                              onChange={(e) => {
+                                updateSettings({
+                                  connections: settings.connections.map(c =>
+                                    c.id === mcpConn.id
+                                      ? { ...c, transport: { ...mcpConn.transport, url: e.target.value } }
+                                      : c
+                                  ) as Connection[],
+                                })
+                              }}
+                              placeholder="http://localhost:3001"
+                              className={`w-full mt-1 px-3 py-2 rounded-lg text-sm ${
+                                isDarkMode
+                                  ? 'bg-neutral-800 border-neutral-700 text-neutral-200 placeholder-neutral-500'
+                                  : 'bg-stone-50 border-stone-200 text-stone-800 placeholder-stone-400'
+                              } border focus:outline-none focus:ring-2 focus:ring-purple-500/50`}
+                            />
+                          </div>
+                          <div>
+                            <label className={`text-xs font-medium ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                              Headers (JSON)
+                            </label>
+                            <input
+                              type="text"
+                              value={JSON.stringify((mcpConn.transport as MCPSSETransport).headers || {})}
+                              onChange={(e) => {
+                                try {
+                                  const headers = JSON.parse(e.target.value || '{}')
+                                  updateSettings({
+                                    connections: settings.connections.map(c =>
+                                      c.id === mcpConn.id
+                                        ? { ...c, transport: { ...mcpConn.transport, headers } }
+                                        : c
+                                    ) as Connection[],
+                                  })
+                                } catch {
+                                  // Invalid JSON, ignore
+                                }
+                              }}
+                              placeholder='{"Authorization": "Bearer token"}'
+                              className={`w-full mt-1 px-3 py-2 rounded-lg text-sm font-mono ${
+                                isDarkMode
+                                  ? 'bg-neutral-800 border-neutral-700 text-neutral-200 placeholder-neutral-500'
+                                  : 'bg-stone-50 border-stone-200 text-stone-800 placeholder-stone-400'
+                              } border focus:outline-none focus:ring-2 focus:ring-purple-500/50`}
+                            />
+                            <p className={`text-xs mt-1 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                              Optional auth headers for remote servers
+                            </p>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
 
-              {settings.connections.length === 0 && (
-                <div className={`text-center py-8 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-                  No connections configured
+              {settings.connections.filter(c => c.type === 'mcp').length === 0 && (
+                <div className={`text-center py-8 rounded-xl border-2 border-dashed ${
+                  isDarkMode ? 'border-neutral-700 text-neutral-500' : 'border-stone-200 text-stone-400'
+                }`}>
+                  <Plug size={32} className="mx-auto mb-2 opacity-50" />
+                  <p>No MCP servers configured</p>
+                  <p className={`text-xs mt-1 ${isDarkMode ? 'text-neutral-600' : 'text-stone-300'}`}>
+                    Add a server to extend AI capabilities with custom tools
+                  </p>
                 </div>
               )}
+            </div>
+
+            {/* Info Box */}
+            <div className={`p-3 rounded-lg ${
+              isDarkMode ? 'bg-blue-500/10 border border-blue-500/20' : 'bg-blue-50 border border-blue-100'
+            }`}>
+              <p className={`text-xs ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
+                <strong>MCP (Model Context Protocol)</strong> servers extend AI capabilities with custom tools.
+                Use <strong>stdio</strong> for local servers (npx, node, python) or <strong>SSE</strong> for remote HTTP servers.
+              </p>
             </div>
           </div>
         )

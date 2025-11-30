@@ -25,6 +25,7 @@ export interface Message {
   model?: string;
   intent?: string;
   toolUsage?: ToolUsage[];
+  reasoning?: string; // AI's reasoning/thinking content
 }
 
 export interface ComponentSource {

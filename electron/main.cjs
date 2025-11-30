@@ -5,6 +5,8 @@ const fs = require('fs').promises
 const oauth = require('./oauth.cjs')
 const codex = require('./codex-oauth.cjs')
 const claudeSession = require('./claude-session.cjs')
+const mcp = require('./mcp.cjs')
+const aiSdkWrapper = require('./ai-sdk-wrapper.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -766,6 +768,209 @@ function registerGitHandlers() {
     }
   })
 
+  // Copy file
+  ipcMain.handle('files:copyFile', async (event, srcPath, destPath) => {
+    try {
+      await fs.copyFile(srcPath, destPath)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Search in files (grep-like)
+  ipcMain.handle('files:searchInFiles', async (event, searchPattern, dirPath, options = {}) => {
+    try {
+      const { filePattern = '*', maxResults = 100, caseSensitive = false } = options
+      const results = []
+      const searchDir = dirPath || process.cwd()
+      const regex = new RegExp(searchPattern, caseSensitive ? 'g' : 'gi')
+
+      // Recursive search function
+      async function searchDirectory(dir, depth = 0) {
+        if (depth > 10 || results.length >= maxResults) return
+
+        const entries = await fs.readdir(dir, { withFileTypes: true })
+        for (const entry of entries) {
+          if (results.length >= maxResults) break
+
+          const fullPath = path.join(dir, entry.name)
+
+          // Skip node_modules, .git, etc.
+          if (entry.name === 'node_modules' || entry.name === '.git' || entry.name.startsWith('.')) {
+            continue
+          }
+
+          if (entry.isDirectory()) {
+            await searchDirectory(fullPath, depth + 1)
+          } else if (entry.isFile()) {
+            // Check file pattern match
+            if (filePattern !== '*') {
+              const patterns = filePattern.split(',').map(p => p.trim())
+              const matches = patterns.some(p => {
+                if (p.startsWith('*.')) {
+                  return entry.name.endsWith(p.slice(1))
+                }
+                return entry.name.includes(p)
+              })
+              if (!matches) continue
+            }
+
+            try {
+              const content = await fs.readFile(fullPath, 'utf-8')
+              const lines = content.split('\n')
+              for (let i = 0; i < lines.length; i++) {
+                if (regex.test(lines[i])) {
+                  results.push({
+                    file: fullPath,
+                    line: i + 1,
+                    content: lines[i].trim().substring(0, 200),
+                  })
+                  if (results.length >= maxResults) break
+                }
+              }
+            } catch {
+              // Skip files that can't be read as text
+            }
+          }
+        }
+      }
+
+      await searchDirectory(searchDir)
+      return { success: true, data: results }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Glob pattern matching for finding files
+  ipcMain.handle('files:glob', async (event, pattern, dirPath) => {
+    try {
+      const searchDir = dirPath || process.cwd()
+      const results = []
+
+      // Simple glob matching (supports *, **, and ?)
+      function matchGlob(filename, pattern) {
+        const regexPattern = pattern
+          .replace(/\*\*/g, '<<<DOUBLESTAR>>>')
+          .replace(/\*/g, '[^/]*')
+          .replace(/<<<DOUBLESTAR>>>/g, '.*')
+          .replace(/\?/g, '.')
+        return new RegExp(`^${regexPattern}$`).test(filename)
+      }
+
+      async function searchDirectory(dir, relativePath = '') {
+        if (results.length >= 1000) return
+
+        const entries = await fs.readdir(dir, { withFileTypes: true })
+        for (const entry of entries) {
+          if (results.length >= 1000) break
+
+          const fullPath = path.join(dir, entry.name)
+          const relPath = relativePath ? `${relativePath}/${entry.name}` : entry.name
+
+          // Skip node_modules, .git
+          if (entry.name === 'node_modules' || entry.name === '.git') {
+            continue
+          }
+
+          if (entry.isDirectory()) {
+            // Check if pattern includes **
+            if (pattern.includes('**')) {
+              await searchDirectory(fullPath, relPath)
+            }
+          }
+
+          if (matchGlob(relPath, pattern) || matchGlob(entry.name, pattern)) {
+            results.push({
+              path: fullPath,
+              relativePath: relPath,
+              isDirectory: entry.isDirectory(),
+            })
+          }
+
+          if (entry.isDirectory() && !pattern.includes('**')) {
+            // Only recurse one level for simple patterns
+            if (pattern.includes('/')) {
+              await searchDirectory(fullPath, relPath)
+            }
+          }
+        }
+      }
+
+      await searchDirectory(searchDir)
+      return { success: true, data: results }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Read multiple files at once
+  ipcMain.handle('files:readMultiple', async (event, filePaths) => {
+    try {
+      const results = await Promise.all(
+        filePaths.map(async (filePath) => {
+          try {
+            const content = await fs.readFile(filePath, 'utf-8')
+            return { path: filePath, success: true, content }
+          } catch (err) {
+            return { path: filePath, success: false, error: err.message }
+          }
+        })
+      )
+      return { success: true, data: results }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Get file tree (recursive directory listing)
+  ipcMain.handle('files:getTree', async (event, dirPath, options = {}) => {
+    try {
+      const { maxDepth = 5, includeHidden = false } = options
+      const searchDir = dirPath || process.cwd()
+
+      async function buildTree(dir, depth = 0) {
+        if (depth >= maxDepth) return null
+
+        const entries = await fs.readdir(dir, { withFileTypes: true })
+        const children = []
+
+        for (const entry of entries) {
+          if (!includeHidden && entry.name.startsWith('.')) continue
+          if (entry.name === 'node_modules') continue
+
+          const fullPath = path.join(dir, entry.name)
+          const node = {
+            name: entry.name,
+            path: fullPath,
+            type: entry.isDirectory() ? 'directory' : 'file',
+          }
+
+          if (entry.isDirectory()) {
+            const subTree = await buildTree(fullPath, depth + 1)
+            if (subTree) {
+              node.children = subTree
+            }
+          }
+
+          children.push(node)
+        }
+
+        return children.sort((a, b) => {
+          // Directories first, then alphabetical
+          if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
+          return a.name.localeCompare(b.name)
+        })
+      }
+
+      const tree = await buildTree(searchDir)
+      return { success: true, data: tree }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
   // Folder picker dialog
   ipcMain.handle('dialog:openFolder', async () => {
     const result = await dialog.showOpenDialog({
@@ -885,6 +1090,106 @@ function registerClaudeCodeHandlers() {
   })
 }
 
+// Register MCP IPC handlers
+function registerMCPHandlers() {
+  // Connect to an MCP server
+  ipcMain.handle('mcp:connect', async (_event, config) => {
+    try {
+      console.log('[MCP] Connecting to server:', config.id, config.name)
+      const result = await mcp.connect(config)
+      return result
+    } catch (error) {
+      console.error('[MCP] Connection error:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // Disconnect from an MCP server
+  ipcMain.handle('mcp:disconnect', async (_event, serverId) => {
+    try {
+      console.log('[MCP] Disconnecting from server:', serverId)
+      return await mcp.disconnect(serverId)
+    } catch (error) {
+      console.error('[MCP] Disconnect error:', error)
+      return { success: false }
+    }
+  })
+
+  // List tools from a connected server
+  ipcMain.handle('mcp:list-tools', async (_event, serverId) => {
+    try {
+      return await mcp.listTools(serverId)
+    } catch (error) {
+      console.error('[MCP] List tools error:', error)
+      return { tools: [], error: error.message }
+    }
+  })
+
+  // List resources from a connected server
+  ipcMain.handle('mcp:list-resources', async (_event, serverId) => {
+    try {
+      return await mcp.listResources(serverId)
+    } catch (error) {
+      console.error('[MCP] List resources error:', error)
+      return { resources: [], error: error.message }
+    }
+  })
+
+  // List prompts from a connected server
+  ipcMain.handle('mcp:list-prompts', async (_event, serverId) => {
+    try {
+      return await mcp.listPrompts(serverId)
+    } catch (error) {
+      console.error('[MCP] List prompts error:', error)
+      return { prompts: [], error: error.message }
+    }
+  })
+
+  // Call a tool on a connected server
+  ipcMain.handle('mcp:call-tool', async (_event, { serverId, toolName, arguments: args }) => {
+    try {
+      console.log('[MCP] Calling tool:', toolName, 'on server:', serverId)
+      return await mcp.callTool({ serverId, toolName, arguments: args })
+    } catch (error) {
+      console.error('[MCP] Call tool error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Read a resource from a connected server
+  ipcMain.handle('mcp:read-resource', async (_event, { serverId, uri }) => {
+    try {
+      return await mcp.readResource(serverId, uri)
+    } catch (error) {
+      console.error('[MCP] Read resource error:', error)
+      return { error: error.message }
+    }
+  })
+
+  // Get a prompt from a connected server
+  ipcMain.handle('mcp:get-prompt', async (_event, { serverId, name, arguments: args }) => {
+    try {
+      return await mcp.getPrompt(serverId, name, args)
+    } catch (error) {
+      console.error('[MCP] Get prompt error:', error)
+      return { error: error.message }
+    }
+  })
+
+  // Get status of all connections
+  ipcMain.handle('mcp:get-status', async () => {
+    try {
+      return mcp.getStatus()
+    } catch (error) {
+      console.error('[MCP] Get status error:', error)
+      return {}
+    }
+  })
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -933,13 +1238,28 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   registerHandlers()
   registerGitHandlers()
   registerOAuthHandlers()
   registerCodexHandlers()
   registerClaudeCodeHandlers()
+  registerMCPHandlers()
+
+  // Register AI SDK handlers and initialize
+  aiSdkWrapper.registerHandlers()
+  try {
+    await aiSdkWrapper.initialize()
+    console.log('[Main] AI SDK wrapper initialized')
+  } catch (e) {
+    console.warn('[Main] AI SDK wrapper initialization deferred:', e.message)
+  }
+
   createWindow()
+
+  // Set main window reference for MCP events and AI SDK events
+  mcp.setMainWindow(mainWindow)
+  aiSdkWrapper.setMainWindow(mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
