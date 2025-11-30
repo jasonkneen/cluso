@@ -42,6 +42,43 @@ interface FileExistsResult {
   exists: boolean
 }
 
+interface SearchMatch {
+  file: string
+  line: number
+  content: string
+}
+
+interface GlobMatch {
+  path: string
+  relativePath: string
+  isDirectory: boolean
+}
+
+interface FileReadResult {
+  path: string
+  success: boolean
+  content?: string
+  error?: string
+}
+
+interface FileTreeNode {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  children?: FileTreeNode[]
+}
+
+interface SearchOptions {
+  filePattern?: string
+  maxResults?: number
+  caseSensitive?: boolean
+}
+
+interface TreeOptions {
+  maxDepth?: number
+  includeHidden?: boolean
+}
+
 interface ElectronFilesAPI {
   // Read operations
   readFile: (path: string) => Promise<GitResult>
@@ -49,14 +86,20 @@ interface ElectronFilesAPI {
   listDirectory: (path?: string) => Promise<GitResult<DirectoryEntry[]>>
   listPrompts: () => Promise<GitResult<string[]>>
   readPrompt: (name: string) => Promise<GitResult>
+  readMultiple: (paths: string[]) => Promise<GitResult<FileReadResult[]>>
   // Write operations
   writeFile: (path: string, content: string) => Promise<GitResult>
   createFile: (path: string, content?: string) => Promise<GitResult>
   deleteFile: (path: string) => Promise<GitResult>
   renameFile: (oldPath: string, newPath: string) => Promise<GitResult>
+  copyFile: (srcPath: string, destPath: string) => Promise<GitResult>
   // Directory operations
   createDirectory: (path: string) => Promise<GitResult>
   deleteDirectory: (path: string) => Promise<GitResult>
+  getTree: (path?: string, options?: TreeOptions) => Promise<GitResult<FileTreeNode[]>>
+  // Search operations
+  searchInFiles: (pattern: string, dirPath?: string, options?: SearchOptions) => Promise<GitResult<SearchMatch[]>>
+  glob: (pattern: string, dirPath?: string) => Promise<GitResult<GlobMatch[]>>
   // Utility operations
   exists: (path: string) => Promise<FileExistsResult>
   stat: (path: string) => Promise<GitResult<FileStat>>
@@ -241,6 +284,88 @@ interface ElectronApiAPI {
   proxy: (request: ApiProxyRequest) => Promise<ApiProxyResponse>
 }
 
+// MCP (Model Context Protocol) types
+interface MCPServerConfig {
+  id: string
+  name: string
+  transport: MCPStdioTransport | MCPSSETransport
+  enabled: boolean
+  timeout?: number
+}
+
+interface MCPStdioTransport {
+  type: 'stdio'
+  command: string
+  args?: string[]
+  env?: Record<string, string>
+  cwd?: string
+}
+
+interface MCPSSETransport {
+  type: 'sse'
+  url: string
+  headers?: Record<string, string>
+}
+
+interface MCPTool {
+  name: string
+  description?: string
+  inputSchema: {
+    type: 'object'
+    properties?: Record<string, unknown>
+    required?: string[]
+  }
+}
+
+interface MCPToolCall {
+  serverId: string
+  toolName: string
+  arguments: Record<string, unknown>
+}
+
+interface MCPToolResult {
+  success: boolean
+  content?: Array<{
+    type: 'text' | 'image' | 'resource'
+    text?: string
+    data?: string
+    mimeType?: string
+    uri?: string
+  }>
+  error?: string
+  isError?: boolean
+}
+
+interface MCPEvent {
+  type: string
+  serverId: string
+  timestamp: number
+  data?: unknown
+}
+
+interface MCPServerState {
+  config: MCPServerConfig
+  status: 'disconnected' | 'connecting' | 'connected' | 'error'
+  error?: string
+  capabilities?: unknown
+  tools: MCPTool[]
+  resources: unknown[]
+  prompts: unknown[]
+}
+
+interface ElectronMCPAPI {
+  connect: (config: MCPServerConfig) => Promise<{ success: boolean; error?: string; capabilities?: unknown }>
+  disconnect: (serverId: string) => Promise<{ success: boolean }>
+  listTools: (serverId: string) => Promise<{ tools: MCPTool[]; error?: string }>
+  listResources: (serverId: string) => Promise<{ resources: unknown[]; error?: string }>
+  listPrompts: (serverId: string) => Promise<{ prompts: unknown[]; error?: string }>
+  callTool: (call: MCPToolCall) => Promise<MCPToolResult>
+  readResource: (serverId: string, uri: string) => Promise<{ content?: unknown; error?: string }>
+  getPrompt: (serverId: string, name: string, args?: Record<string, string>) => Promise<{ messages?: unknown[]; error?: string }>
+  getStatus: () => Promise<Record<string, MCPServerState>>
+  onEvent: (callback: (event: MCPEvent) => void) => () => void
+}
+
 interface ElectronAPI {
   git: ElectronGitAPI
   files: ElectronFilesAPI
@@ -248,6 +373,7 @@ interface ElectronAPI {
   codex: ElectronCodexAPI
   api: ElectronApiAPI
   claudeCode: ElectronClaudeCodeAPI
+  mcp?: ElectronMCPAPI
   getWebviewPreloadPath: () => Promise<string>
   isElectron: boolean
 }

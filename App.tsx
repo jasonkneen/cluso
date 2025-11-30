@@ -12,8 +12,11 @@ import { SettingsDialog, AppSettings, DEFAULT_SETTINGS, getFontSizeValue } from 
 import { CodeBlock, CodeBlockCopyButton } from '@/components/ai-elements/code-block';
 import { Tool, ToolContent, ToolHeader, ToolOutput } from '@/components/ai-elements/tool';
 import { MessageResponse } from '@/components/ai-elements/message';
-import { useAIChat, getProviderForModel, ProviderConfig } from './hooks/useAIChat';
+import { useAIChat, getProviderForModel, ProviderConfig, MCPToolDefinition, toCoreMessages } from './hooks/useAIChat';
+import type { CoreMessage } from './hooks/useAIChat';
 import { useCodingAgent, CodingContext } from './hooks/useCodingAgent';
+import { useMCP } from './hooks/useMCP';
+import type { MCPServerConfig } from './types/mcp';
 import { GoogleGenAI } from '@google/genai'; // Keep for voice streaming
 import {
   ChevronLeft,
@@ -50,9 +53,313 @@ import {
   Smartphone,
   Tablet,
   Settings,
+  Brain,
+  Flame,
+  Lightbulb,
+  Eye,
+  EyeOff,
+  Pencil,
+  FilePlus,
+  Trash2,
+  HelpCircle,
+  Search,
+  Palette,
+  Bug,
 } from 'lucide-react';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { generateText } from 'ai';
 
 // --- Helper Functions ---
+
+// Instant UI Update - uses Gemini Flash for fast DOM modifications
+interface UIUpdateResult {
+  cssChanges: Record<string, string>;
+  textChange?: string;  // For changing element text content
+  description: string;
+  success: boolean;
+}
+
+async function generateUIUpdate(
+  element: SelectedElement,
+  userRequest: string,
+  apiKey: string
+): Promise<UIUpdateResult> {
+  const google = createGoogleGenerativeAI({ apiKey });
+
+  const prompt = `You are a UI modification assistant. Given an HTML element and a user request, output ONLY a JSON object with changes.
+
+Element:
+- Tag: ${element.tagName}
+- Classes: ${element.className || 'none'}
+- ID: ${element.id || 'none'}
+- Current text: ${element.text?.substring(0, 100) || 'none'}
+- Current styles: ${JSON.stringify(element.computedStyle || {})}
+- HTML: ${element.outerHTML?.substring(0, 500) || 'N/A'}
+
+User request: "${userRequest}"
+
+Respond with ONLY valid JSON. Use "textChange" for text modifications, "cssChanges" for style changes:
+{
+  "cssChanges": { "property": "value", ... },
+  "textChange": "new text content if changing text",
+  "description": "Brief description of changes"
+}
+
+IMPORTANT:
+- For TEXT changes (changing what the element says): use "textChange" with the new text
+- For STYLE changes (colors, sizes, spacing): use "cssChanges" with CSS properties
+- Do NOT use cssChanges.content for text - that only works for ::before/::after pseudo-elements
+
+Examples:
+- "make it red" → {"cssChanges": {"color": "red"}, "description": "Changed text color to red"}
+- "change to Download" → {"textChange": "Download", "description": "Changed text to Download"}
+- "Download Now" → {"textChange": "Download Now", "description": "Changed text to Download Now"}
+- "bigger font" → {"cssChanges": {"fontSize": "1.5em"}, "description": "Increased font size"}
+- "make it say Hello" → {"textChange": "Hello", "description": "Changed text to Hello"}
+- "red and say Click Me" → {"cssChanges": {"color": "red"}, "textChange": "Click Me", "description": "Changed color to red and text to Click Me"}`;
+
+  try {
+    console.log('[UI Update] Calling Gemini 2.0 Flash for UI changes...');
+    console.log('[UI Update] API Key present:', !!apiKey, 'length:', apiKey?.length);
+    const result = await generateText({
+      model: google('gemini-2.0-flash-001'),
+      prompt,
+      maxTokens: 200,
+    });
+
+    // Parse the JSON response
+    const text = result.text.trim();
+    console.log('[UI Update] Gemini response:', text);
+
+    // Handle markdown code blocks
+    const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, text];
+    const jsonStr = jsonMatch[1] || text;
+    console.log('[UI Update] Parsing JSON:', jsonStr);
+    const parsed = JSON.parse(jsonStr);
+
+    console.log('[UI Update] Parsed result:', parsed);
+    return {
+      cssChanges: parsed.cssChanges || {},
+      textChange: parsed.textChange,
+      description: parsed.description || 'UI updated',
+      success: true,
+    };
+  } catch (error) {
+    console.error('[UI Update] Failed to generate:', error);
+    return {
+      cssChanges: {},
+      description: 'Failed to generate UI changes',
+      success: false,
+    };
+  }
+}
+
+// Generate source code patch for a UI change
+interface SourcePatch {
+  filePath: string;
+  originalContent: string;
+  patchedContent: string;
+  lineNumber: number;
+}
+
+async function generateSourcePatch(
+  element: SelectedElement,
+  cssChanges: Record<string, string>,
+  apiKey: string,
+  projectPath?: string,
+  userRequest?: string
+): Promise<SourcePatch | null> {
+  console.log('[Source Patch] Starting patch generation...');
+  console.log('[Source Patch] Element sourceLocation:', element.sourceLocation);
+  console.log('[Source Patch] Project path:', projectPath);
+
+  if (!element.sourceLocation?.sources?.[0]) {
+    console.log('[Source Patch] No source location available');
+    return null;
+  }
+
+  const source = element.sourceLocation.sources[0];
+  let filePath = source.file;
+  console.log('[Source Patch] Original source file:', filePath, 'line:', source.line);
+
+  // Convert URL-style or relative paths to actual file system paths
+  // Source maps can return:
+  // - "//localhost:3000/src/App.tsx" (protocol-relative URL)
+  // - "/src/App.tsx" (absolute path from server root)
+  // - "localhost:3000/src/App.tsx" (URL without protocol)
+  // - "/Users/.../src/App.tsx" (already absolute filesystem path)
+
+  // Path needs resolution if it's not already an absolute filesystem path
+  const isAbsoluteFilesystemPath = filePath.startsWith('/Users/') ||
+                                    filePath.startsWith('/home/') ||
+                                    filePath.startsWith('/var/') ||
+                                    /^[A-Z]:\\/.test(filePath); // Windows paths like C:\
+
+  if (!isAbsoluteFilesystemPath && projectPath) {
+    // Extract just the relative path portion
+    let relativePath = filePath;
+
+    // Remove localhost URL prefix if present
+    const urlMatch = relativePath.match(/localhost:\d+\/(.+)$/);
+    if (urlMatch) {
+      relativePath = urlMatch[1];
+    }
+
+    // Remove leading slashes to get relative path
+    relativePath = relativePath.replace(/^\/+/, '');
+
+    // Remove query strings (Vite cache busting like ?t=1234567890)
+    relativePath = relativePath.split('?')[0];
+
+    console.log('[Source Patch] Extracted relative path:', relativePath);
+
+    // Combine with project path
+    filePath = `${projectPath}/${relativePath}`;
+    console.log('[Source Patch] Full path with project:', filePath);
+  }
+
+  // SAFETY: Prevent patching the app's own source files (ai-cluso directory)
+  // This prevents corrupting the running application
+  if (filePath.includes('/ai-cluso/') && !filePath.includes('/ai-cluso/website/')) {
+    console.log('[Source Patch] BLOCKED: Cannot patch app source files:', filePath);
+    return null;
+  }
+
+  // Read the source file
+  if (!window.electronAPI?.files?.readFile) {
+    console.log('[Source Patch] File API not available');
+    return null;
+  }
+
+  console.log('[Source Patch] Reading source file:', filePath);
+  const fileResult = await window.electronAPI.files.readFile(filePath);
+  if (!fileResult.success || !fileResult.data) {
+    console.log('[Source Patch] Failed to read source file:', fileResult.error);
+    return null;
+  }
+
+  console.log('[Source Patch] File read successfully, length:', fileResult.data.length);
+  const originalContent = fileResult.data;
+  const google = createGoogleGenerativeAI({ apiKey });
+
+  // Convert CSS changes to inline style or className changes
+  const hasCssChanges = Object.keys(cssChanges).length > 0;
+  const cssString = hasCssChanges
+    ? Object.entries(cssChanges)
+        .map(([prop, val]) => {
+          // Convert camelCase to kebab-case for style prop
+          const kebabProp = prop.replace(/([A-Z])/g, '-$1').toLowerCase();
+          return `${kebabProp}: ${val}`;
+        })
+        .join('; ')
+    : '';
+
+  // Extract only a relevant portion of the file around the target line
+  // This prevents exceeding Gemini's context limits for large files
+  const lines = originalContent.split('\n');
+  const targetLine = source.line;
+  const contextLines = 100; // Lines before and after target
+  const startLine = Math.max(0, targetLine - contextLines);
+  const endLine = Math.min(lines.length, targetLine + contextLines);
+  const codeSnippet = lines.slice(startLine, endLine).join('\n');
+
+  console.log('[Source Patch] Extracting lines', startLine + 1, 'to', endLine, 'of', lines.length, 'total');
+  console.log('[Source Patch] Has CSS changes:', hasCssChanges, 'User request:', userRequest);
+
+  // Build change description based on what we're modifying
+  let changeDescription = '';
+  if (hasCssChanges && userRequest) {
+    changeDescription = `CSS changes to apply: ${cssString}\n\nUser's request: "${userRequest}"`;
+  } else if (hasCssChanges) {
+    changeDescription = `CSS changes to apply: ${cssString}`;
+  } else if (userRequest) {
+    changeDescription = `User's request: "${userRequest}"`;
+  } else {
+    console.log('[Source Patch] No changes specified, skipping');
+    return null;
+  }
+
+  // Build instructions based on the type of change
+  let instructions = `1. Find the JSX element near line ${targetLine} (should be near the middle of the snippet)`;
+  if (hasCssChanges) {
+    instructions += `
+2. Add or modify the style prop to include the CSS changes
+3. If using Tailwind, convert to Tailwind classes where appropriate`;
+  }
+  if (userRequest) {
+    // Check if this looks like a text change (quoted text or explicit text change)
+    const isTextChange = /^["'][^"']+["']$/.test(userRequest.trim()) ||
+                         /(?:change|set|update)\s+(?:text|label|content|title)/i.test(userRequest) ||
+                         /text\s*(?:to|:|=)/i.test(userRequest);
+    if (isTextChange || !hasCssChanges) {
+      instructions += `
+2. Update the text content of the element based on the user's request
+3. If the request is quoted text like "New Text", use that as the new content`;
+    }
+  }
+  instructions += `
+${hasCssChanges ? '4' : '3'}. Output ONLY the modified snippet (lines ${startLine + 1} to ${endLine}), no explanations
+${hasCssChanges ? '5' : '4'}. Preserve exact indentation and formatting`;
+
+  const prompt = `You are a React/TypeScript code modifier. Given a code snippet and requested changes, output ONLY the modified snippet.
+
+Source file: ${source.file}
+Target line in original file: ${targetLine}
+Snippet shows lines ${startLine + 1} to ${endLine}
+
+Code snippet:
+\`\`\`
+${codeSnippet}
+\`\`\`
+
+Element being modified:
+- Tag: ${element.tagName}
+- Classes: ${element.className || 'none'}
+- ID: ${element.id || 'none'}
+- Current text content: ${element.text?.substring(0, 100) || 'none'}
+
+${changeDescription}
+
+Instructions:
+${instructions}
+
+Output the modified code snippet:`;
+
+  try {
+    console.log('[Source Patch] Calling Gemini for code modification...');
+    const result = await generateText({
+      model: google('gemini-2.0-flash-001'),
+      prompt,
+      maxTokens: 8000,
+    });
+
+    console.log('[Source Patch] Gemini response received, length:', result.text.length);
+    let patchedSnippet = result.text.trim();
+    // Remove markdown code blocks if present
+    const codeMatch = patchedSnippet.match(/```(?:tsx?|jsx?|typescript|javascript)?\s*([\s\S]*?)```/);
+    if (codeMatch) {
+      patchedSnippet = codeMatch[1].trim();
+      console.log('[Source Patch] Extracted code from markdown block');
+    }
+
+    // Reconstruct the full file with the patched snippet
+    const patchedLines = patchedSnippet.split('\n');
+    const beforeLines = lines.slice(0, startLine);
+    const afterLines = lines.slice(endLine);
+    const fullPatchedContent = [...beforeLines, ...patchedLines, ...afterLines].join('\n');
+
+    console.log('[Source Patch] Patch generated successfully, reconstructed file length:', fullPatchedContent.length);
+    return {
+      filePath,  // Use resolved filesystem path, not the source map URL
+      originalContent,
+      patchedContent: fullPatchedContent,
+      lineNumber: source.line,
+    };
+  } catch (error) {
+    console.error('[Source Patch] Failed to generate:', error);
+    return null;
+  }
+}
 
 // Format relative time (e.g., "2m ago", "1h ago", "just now")
 function formatRelativeTime(date: Date): string {
@@ -235,6 +542,10 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(420);
   const [isResizing, setIsResizing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const isUserScrollingRef = useRef(false);
 
   // Inspector & Context State
   const [isInspectorActive, setIsInspectorActive] = useState(false);
@@ -243,6 +554,12 @@ export default function App() {
   // Refs to track current state values for closures (webview event handlers)
   const isInspectorActiveRef = useRef(false);
   const isScreenshotActiveRef = useRef(false);
+
+  // Store previous model/thinking settings when inspector is activated
+  const preInspectorSettingsRef = useRef<{
+    model: typeof MODELS[0];
+    thinkingLevel: 'off' | 'low' | 'med' | 'high' | 'ultrathink';
+  } | null>(null);
 
   const [logs, setLogs] = useState<string[]>([]);
   const [attachLogs, setAttachLogs] = useState(false);
@@ -271,6 +588,11 @@ export default function App() {
   const [availableCommands, setAvailableCommands] = useState<Array<{name: string; prompt: string}>>([]);
   const [commandSearchQuery, setCommandSearchQuery] = useState('');
   const [showCommandAutocomplete, setShowCommandAutocomplete] = useState(false);
+
+  // Thinking/Reasoning Mode State
+  type ThinkingLevel = 'off' | 'low' | 'med' | 'high' | 'ultrathink';
+  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('off');
+  const [showThinkingPopover, setShowThinkingPopover] = useState(false);
 
   // Git State
   const git = useGit();
@@ -313,11 +635,24 @@ export default function App() {
         const newProviders = DEFAULT_SETTINGS.providers.filter(p => !storedProviderIds.has(p.id));
         const mergedProviders = [...(parsed.providers || []), ...newProviders];
 
+        // Migrate old connection format to new MCP transport format
+        const migratedConnections = (parsed.connections || []).map((conn: Record<string, unknown>) => {
+          // If connection has 'url' but no 'transport', migrate to new format
+          if (conn.type === 'mcp' && conn.url && !conn.transport) {
+            return {
+              ...conn,
+              transport: { type: 'sse', url: conn.url },
+            };
+          }
+          return conn;
+        });
+
         return {
           ...DEFAULT_SETTINGS,
           ...parsed,
           models: mergedModels,
           providers: mergedProviders,
+          connections: migratedConnections,
         };
       }
     } catch (e) {
@@ -377,12 +712,116 @@ export default function App() {
       }));
   }, [appSettings.providers]);
 
-  // Initialize AI Chat hook
-  const { generate: generateAI, isLoading: isAILoading } = useAIChat({
+  // Streaming message state
+  const [streamingMessage, setStreamingMessage] = useState<{
+    id: string
+    content: string
+    reasoning: string
+    toolCalls: Array<{ id: string; name: string; args: unknown; status: 'pending' | 'running' | 'complete' | 'error'; result?: unknown }>
+  } | null>(null)
+  const [isStreaming, setIsStreaming] = useState(false)
+
+  // Pending UI Patch State - stores patches that need user confirmation
+  interface PendingPatch {
+    id: string
+    filePath: string
+    originalContent: string
+    patchedContent: string
+    description: string
+    elementSelector?: string  // CSS selector for the modified element
+    cssChanges?: Record<string, string>  // CSS property changes made
+    undoCode?: string  // JavaScript to revert DOM changes
+    applyCode?: string  // JavaScript to re-apply DOM changes
+  }
+  const [pendingPatch, setPendingPatch] = useState<PendingPatch | null>(null)
+  const [isPreviewingPatchOriginal, setIsPreviewingPatchOriginal] = useState(false)
+
+  // Pending DOM Approval State - stores DOM changes that need user approval before source patch
+  interface PendingDOMApproval {
+    element: SelectedElement
+    cssChanges: Record<string, string>
+    textChange?: string
+    description: string
+    undoCode: string
+    applyCode: string
+    userRequest: string
+  }
+  const [pendingDOMApproval, setPendingDOMApproval] = useState<PendingDOMApproval | null>(null)
+  const [isGeneratingSourcePatch, setIsGeneratingSourcePatch] = useState(false)
+
+  // Initialize AI Chat hook with streaming support
+  const { generate: generateAI, stream: streamAI, isLoading: isAILoading } = useAIChat({
     onError: (err) => console.error('[AI SDK] Error:', err),
+    onTextDelta: (delta) => {
+      // Update streaming message content as chunks arrive
+      setStreamingMessage(prev => prev ? { ...prev, content: prev.content + delta } : null)
+    },
+    onReasoningDelta: (delta) => {
+      // Update reasoning content as it arrives
+      setStreamingMessage(prev => prev ? { ...prev, reasoning: prev.reasoning + delta } : null)
+    },
+    onToolCall: (toolCall) => {
+      // Add tool call to streaming message
+      setStreamingMessage(prev => prev ? {
+        ...prev,
+        toolCalls: [...prev.toolCalls, {
+          id: toolCall.toolCallId,
+          name: toolCall.toolName,
+          args: toolCall.args,
+          status: 'running' as const,
+        }]
+      } : null)
+    },
+    onToolResult: (toolResult) => {
+      // Update tool call status when result arrives
+      setStreamingMessage(prev => prev ? {
+        ...prev,
+        toolCalls: prev.toolCalls.map(tc =>
+          tc.id === toolResult.toolCallId
+            ? { ...tc, status: 'complete' as const, result: toolResult.result }
+            : tc
+        )
+      } : null)
+    },
   });
 
-  // Initialize Coding Agent hook
+  // Initialize MCP hook for Model Context Protocol server connections
+  // Extract MCP server configs from settings connections
+  const mcpServerConfigs = useMemo(() => {
+    return (appSettings.connections || [])
+      .filter((conn): conn is MCPServerConfig => conn.type === 'mcp' && 'transport' in conn)
+      .filter(conn => conn.enabled)
+  }, [appSettings.connections])
+
+  const {
+    allTools: mcpTools,
+    callTool: callMCPTool,
+    servers: mcpServers,
+    isAvailable: mcpAvailable,
+  } = useMCP({
+    initialServers: mcpServerConfigs,
+    autoConnect: true,
+    onError: (err, serverId) => {
+      console.error(`[MCP] Error${serverId ? ` on server ${serverId}` : ''}:`, err.message)
+    },
+  })
+
+  // Convert MCP tools to the format expected by useCodingAgent
+  // Ensure inputSchema has required 'type: object' field for Anthropic API compatibility
+  const mcpToolDefinitions: MCPToolDefinition[] = useMemo(() => {
+    return mcpTools.map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: {
+        type: 'object' as const,
+        properties: tool.inputSchema?.properties || {},
+        required: tool.inputSchema?.required || [],
+      },
+      serverId: tool.serverId,
+    }))
+  }, [mcpTools])
+
+  // Initialize Coding Agent hook with MCP tools
   const {
     context: codingContext,
     lastIntent,
@@ -391,7 +830,10 @@ export default function App() {
     processMessage: processCodingMessage,
     setProcessing: setAgentProcessing,
     tools: codingTools,
-  } = useCodingAgent();
+  } = useCodingAgent({
+    mcpTools: mcpToolDefinitions,
+    callMCPTool,
+  });
 
   // Stash Confirmation Dialog State
   const [isStashDialogOpen, setIsStashDialogOpen] = useState(false);
@@ -555,6 +997,46 @@ export default function App() {
   useEffect(() => {
     isScreenshotActiveRef.current = isScreenshotActive;
   }, [isScreenshotActive]);
+
+  // Auto-switch to Gemini 2.5 Flash and disable thinking when inspector is active
+  useEffect(() => {
+    if (isInspectorActive) {
+      // Save current settings before switching
+      preInspectorSettingsRef.current = {
+        model: selectedModel,
+        thinkingLevel: thinkingLevel,
+      };
+
+      // Find Gemini 2.5 Flash model
+      const geminiFlashModel = displayModels.find(m =>
+        m.id.includes('gemini-2') && m.id.includes('flash') && m.isAvailable
+      ) || displayModels.find(m =>
+        m.id.includes('gemini') && m.id.includes('flash') && m.isAvailable
+      );
+
+      if (geminiFlashModel) {
+        console.log('[Inspector] Switching to fast model:', geminiFlashModel.id);
+        setSelectedModel({
+          id: geminiFlashModel.id,
+          name: geminiFlashModel.name,
+          provider: geminiFlashModel.provider,
+          Icon: geminiFlashModel.Icon,
+        });
+      }
+
+      // Disable thinking for faster responses
+      if (thinkingLevel !== 'off') {
+        console.log('[Inspector] Disabling thinking mode');
+        setThinkingLevel('off');
+      }
+    } else if (preInspectorSettingsRef.current) {
+      // Restore previous settings when inspector is deactivated
+      console.log('[Inspector] Restoring previous model:', preInspectorSettingsRef.current.model.id);
+      setSelectedModel(preInspectorSettingsRef.current.model);
+      setThinkingLevel(preInspectorSettingsRef.current.thinkingLevel);
+      preInspectorSettingsRef.current = null;
+    }
+  }, [isInspectorActive]); // Only trigger on inspector state change
 
   const toggleDarkMode = useCallback(() => {
     setIsDarkMode(prev => !prev);
@@ -864,10 +1346,21 @@ export default function App() {
     f.name.toLowerCase().includes(fileSearchQuery.toLowerCase())
   );
 
-  // Get filtered commands based on search query
-  const filteredCommands = availableCommands.filter(cmd =>
-    cmd.name.toLowerCase().includes(commandSearchQuery.toLowerCase())
-  );
+  // Built-in commands for autocomplete (defined as useMemo to avoid re-creation)
+  const builtInCommandsForAutocomplete = useMemo(() => [
+    { name: 'new', prompt: 'Clear the conversation' },
+    { name: 'clear', prompt: 'Clear the conversation' },
+    { name: 'compact', prompt: 'Compact context with optional guidance' },
+    { name: 'thinking', prompt: 'Set reasoning level: off, low, med, high, ultrathink' },
+  ], []);
+
+  // Get filtered commands based on search query (combines built-in + user commands)
+  const filteredCommands = useMemo(() => {
+    const allCommands = [...builtInCommandsForAutocomplete, ...availableCommands];
+    return allCommands.filter(cmd =>
+      cmd.name.toLowerCase().includes(commandSearchQuery.toLowerCase())
+    );
+  }, [builtInCommandsForAutocomplete, availableCommands, commandSearchQuery]);
 
   // Detect @ and / commands in input
   const handleInputChange = useCallback((value: string) => {
@@ -906,16 +1399,16 @@ export default function App() {
     if (value.trim().length >= 3 && !value.startsWith('@') && !value.startsWith('/')) {
       const { intent } = processCodingMessage(value);
       const intentLabels: Record<string, string> = {
-        code_edit: '✏️ Edit Code',
-        code_create: '➕ Create File',
-        code_delete: '🗑️ Delete',
-        code_explain: '💡 Explain',
-        code_refactor: '🔄 Refactor',
-        file_operation: '📁 File Op',
-        question: '❓ Question',
-        ui_inspect: '🔍 Inspect UI',
-        ui_modify: '🎨 Modify UI',
-        debug: '🐛 Debug',
+        code_edit: 'Edit Code',
+        code_create: 'Create File',
+        code_delete: 'Delete',
+        code_explain: 'Explain',
+        code_refactor: 'Refactor',
+        file_operation: 'File Op',
+        question: 'Question',
+        ui_inspect: 'Inspect UI',
+        ui_modify: 'Modify UI',
+        debug: 'Debug',
         unknown: '',
       };
       if (intent.type !== 'unknown' && intent.confidence > 0.2) {
@@ -1259,6 +1752,21 @@ export default function App() {
     return consoleLogs.filter(log => consoleFilters.has(log.type));
   }, [consoleLogs, consoleFilters]);
 
+  // Click-outside handler for thinking popover
+  useEffect(() => {
+    if (!showThinkingPopover) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-thinking-popover]')) {
+        setShowThinkingPopover(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showThinkingPopover]);
+
   // Edited files management
   const addEditedFile = useCallback((file: { path: string; additions?: number; deletions?: number; undoCode?: string }) => {
     const fileName = file.path.split('/').pop() || file.path;
@@ -1382,10 +1890,62 @@ export default function App() {
     }
   }, [isSidebarOpen]);
 
-  // Scroll to bottom of chat
+  // Scroll to bottom of chat (respects auto-scroll setting)
+  // Also scrolls during streaming content updates
+  const streamingContent = streamingMessage?.content ?? ''
   useEffect(() => {
+    if (isAutoScrollEnabled && !isUserScrollingRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    } else if (!isAutoScrollEnabled && (messages.length > 0 || isStreaming)) {
+      // Show scroll-to-bottom button when new messages arrive and auto-scroll is off
+      setShowScrollToBottom(true);
+    }
+  }, [messages, isAutoScrollEnabled, streamingContent, isStreaming]);
+
+  // Handle scroll events to detect manual scrolling
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    let scrollTimeout: ReturnType<typeof setTimeout>;
+
+    const handleScroll = () => {
+      // Mark that user is scrolling
+      isUserScrollingRef.current = true;
+      clearTimeout(scrollTimeout);
+
+      // Check if user is near the bottom (within 100px)
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+
+      if (isNearBottom) {
+        // User scrolled to bottom, re-enable auto-scroll
+        setIsAutoScrollEnabled(true);
+        setShowScrollToBottom(false);
+      } else {
+        // User scrolled up, disable auto-scroll and show button
+        setIsAutoScrollEnabled(false);
+        setShowScrollToBottom(true);
+      }
+
+      // Reset user scrolling flag after scroll stops
+      scrollTimeout = setTimeout(() => {
+        isUserScrollingRef.current = false;
+      }, 150);
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      clearTimeout(scrollTimeout);
+    };
+  }, []);
+
+  // Scroll to bottom handler (for the button)
+  const scrollToBottom = useCallback(() => {
+    setIsAutoScrollEnabled(true);
+    setShowScrollToBottom(false);
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, []);
 
   // Handle Image Upload
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1400,8 +1960,116 @@ export default function App() {
       }
   };
 
+  // Built-in slash command definitions
+  const BUILT_IN_COMMANDS = [
+    { name: 'new', aliases: ['clear'], description: 'Clear the conversation' },
+    { name: 'compact', description: 'Compact context with optional guidance' },
+    { name: 'thinking', description: 'Set reasoning level: off, low, med, high, ultrathink' },
+  ];
+
+  // Handle built-in slash commands
+  const handleBuiltInCommand = useCallback((commandText: string): boolean => {
+    const trimmed = commandText.trim();
+    if (!trimmed.startsWith('/')) return false;
+
+    const parts = trimmed.slice(1).split(/\s+/);
+    const command = parts[0].toLowerCase();
+    const args = parts.slice(1).join(' ');
+
+    // /new or /clear - Clear the conversation
+    if (command === 'new' || command === 'clear') {
+      setMessages([]);
+      setInput('');
+      // Add system message
+      setMessages([{
+        id: Date.now().toString(),
+        role: 'system',
+        content: '🗑️ Conversation cleared.',
+        timestamp: new Date(),
+      }]);
+      // Clear after a short delay
+      setTimeout(() => setMessages([]), 1500);
+      return true;
+    }
+
+    // /compact [prompt] - Compact the context
+    if (command === 'compact') {
+      const guidance = args || 'Summarize the key points and decisions from this conversation';
+      // Create a summary request
+      const summaryPrompt = `Please provide a concise summary of our conversation so far. Focus on:
+1. Key topics discussed
+2. Decisions made
+3. Important code changes or files mentioned
+4. Outstanding tasks or questions
+
+${args ? `Additional guidance: ${guidance}` : ''}
+
+Keep the summary brief but comprehensive enough to continue the conversation effectively.`;
+
+      // Add system message showing compact in progress
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        role: 'system',
+        content: `📦 Compacting context${args ? ` with guidance: "${args}"` : ''}...`,
+        timestamp: new Date(),
+      }]);
+
+      // Process the summary request (don't add to messages, let it flow through normally)
+      setTimeout(() => {
+        setInput(summaryPrompt);
+        // Trigger send
+        const form = document.querySelector('form[data-chat-form]') as HTMLFormElement;
+        if (form) form.requestSubmit();
+      }, 100);
+      return true;
+    }
+
+    // /thinking [level] - Set reasoning mode
+    if (command === 'thinking') {
+      const level = args.toLowerCase() as ThinkingLevel;
+      const validLevels: ThinkingLevel[] = ['off', 'low', 'med', 'high', 'ultrathink'];
+
+      // Handle 'on' as alias for 'med'
+      let actualLevel: ThinkingLevel = 'med';
+      if (level === 'on' || level === '') {
+        // Toggle: if currently off, turn on (med); if on, turn off
+        actualLevel = thinkingLevel === 'off' ? 'med' : 'off';
+      } else if (validLevels.includes(level)) {
+        actualLevel = level;
+      } else {
+        // Invalid level
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          role: 'system',
+          content: `❌ Invalid thinking level: "${args}". Valid options: off, low, med, high, ultrathink`,
+          timestamp: new Date(),
+        }]);
+        setInput('');
+        return true;
+      }
+
+      setThinkingLevel(actualLevel);
+
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        role: 'system',
+        content: `Thinking mode: ${actualLevel.toUpperCase()}`,
+        timestamp: new Date(),
+      }]);
+      setInput('');
+      return true;
+    }
+
+    return false; // Not a built-in command
+  }, [thinkingLevel]);
+
   // Handle Text Submission
   const processPrompt = async (promptText: string) => {
+    // Check for built-in commands first
+    if (handleBuiltInCommand(promptText)) {
+      return;
+    }
+
     if (!promptText.trim() && !selectedElement && !attachedImage && !screenshotElement) return;
 
     const userMessage: ChatMessage = {
@@ -1414,8 +2082,6 @@ export default function App() {
 
     setMessages(prev => [...prev, userMessage]);
     setInput('');
-
-    const contents: unknown[] = [];
 
     // Build element context in react-grab style format
     let elementContext = '';
@@ -1446,6 +2112,10 @@ ${f.content}
 \`\`\`
 `).join('\n')}`;
     }
+
+    type UserContentPart =
+      | { type: 'text'; text: string }
+      | { type: 'image'; image: { base64Data: string; mimeType?: string } };
 
     let fullPromptText = `
 Current Page: ${urlInput}
@@ -1507,18 +2177,21 @@ If you're not sure what the user wants, ask for clarification.
       `;
     }
 
-    if (attachedImage) {
-        const base64Data = attachedImage.split(',')[1];
-        const mimeType = attachedImage.split(';')[0].split(':')[1];
-        contents.push({
-            inlineData: {
-                mimeType: mimeType,
-                data: base64Data
-            }
-        });
-    }
+    const userContentParts: UserContentPart[] = [
+      { type: 'text', text: fullPromptText },
+    ];
 
-    contents.push({ text: fullPromptText });
+    if (attachedImage) {
+      const base64Data = attachedImage.split(',')[1];
+      const mimeType = attachedImage.split(';')[0].split(':')[1];
+      userContentParts.push({
+        type: 'image',
+        image: {
+          base64Data,
+          mimeType,
+        },
+      });
+    }
 
     setAttachLogs(false);
     setAttachedImage(null);
@@ -1535,39 +2208,332 @@ If you're not sure what the user wants, ask for clarification.
       const { intent, systemPrompt: agentSystemPrompt, tools } = processCodingMessage(userMessage.content);
       console.log(`[Coding Agent] Intent: ${intent.type} (${Math.round(intent.confidence * 100)}%)`);
 
-      // Determine if we should use coding agent tools
-      // Use tools for file operations and code-related intents
-      const shouldUseTools = ['code_edit', 'code_create', 'code_delete', 'code_refactor', 'file_operation', 'debug']
-        .includes(intent.type);
+      // INSTANT UI UPDATE: For ui_modify with a selected element that has source mapping
+      // Use Gemini Flash for instant DOM update + prepare source patch for confirmation
+      const googleProvider = appSettings.providers.find(p => p.id === 'google' && p.enabled && p.apiKey);
+      console.log('[Instant UI] Check conditions:', {
+        intentType: intent.type,
+        hasSelectedElement: !!selectedElement,
+        hasGoogleProvider: !!googleProvider?.apiKey,
+        hasSourceLocation: !!selectedElement?.sourceLocation?.sources?.[0],
+      });
 
-      // Use AI SDK for OpenAI, Anthropic, and Google text models
-      if (providerType && providerConfigs.length > 0) {
+      if (intent.type === 'ui_modify' && selectedElement && googleProvider?.apiKey) {
+        console.log('[Instant UI] Triggering instant UI update with source patch...');
+        console.log('[Instant UI] Selected element:', {
+          tagName: selectedElement.tagName,
+          xpath: selectedElement.xpath,
+          sourceLocation: selectedElement.sourceLocation,
+        });
+        // Debug: Log full source location details
+        if (selectedElement.sourceLocation) {
+          console.log('[Instant UI] sourceLocation.sources:', selectedElement.sourceLocation.sources);
+          console.log('[Instant UI] sourceLocation.summary:', selectedElement.sourceLocation.summary);
+          if (selectedElement.sourceLocation.sources?.[0]) {
+            const src = selectedElement.sourceLocation.sources[0];
+            console.log('[Instant UI] Source file:', src.file, 'line:', src.line, 'name:', src.name);
+          }
+        } else {
+          console.log('[Instant UI] NO sourceLocation on selectedElement!');
+        }
+
+        // Phase 1: Instant DOM update with Gemini Flash
+        const uiResult = await generateUIUpdate(selectedElement, userMessage.content, googleProvider.apiKey);
+        const hasCssChanges = Object.keys(uiResult.cssChanges).length > 0;
+        const hasTextChange = !!uiResult.textChange;
+        const hasAnyChange = hasCssChanges || hasTextChange;
+
+        console.log('[Instant UI] Result:', { hasCssChanges, hasTextChange, textChange: uiResult.textChange, cssChanges: uiResult.cssChanges });
+
+        // Apply changes to the live DOM if present
+        const webview = webviewRefs.current.get(activeTabId);
+        let storedUndoCode = '';
+        let storedApplyCode = '';
+
+        if (uiResult.success && hasAnyChange && webview) {
+          // Build capture script for original values
+          const captureOriginalScript = `
+            (function() {
+              const element = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+              if (element) {
+                const original = {
+                  textContent: element.textContent || '',
+                  styles: {}
+                };
+                ${hasCssChanges ? Object.keys(uiResult.cssChanges).map(prop => `original.styles['${prop}'] = element.style.${prop} || '';`).join('\n') : ''}
+                return JSON.stringify(original);
+              }
+              return null;
+            })();
+          `;
+
+          try {
+            const originalJson = await (webview as Electron.WebviewTag).executeJavaScript(captureOriginalScript);
+            const original = originalJson ? JSON.parse(originalJson) : { textContent: '', styles: {} };
+            console.log('[Instant UI] Original captured:', original);
+
+            // Build undo code
+            let undoChanges = '';
+            if (hasTextChange) {
+              undoChanges += `element.textContent = ${JSON.stringify(original.textContent)};\n`;
+            }
+            if (hasCssChanges) {
+              undoChanges += Object.entries(original.styles)
+                .map(([prop, val]) => `element.style.${prop} = '${val}';`)
+                .join('\n');
+            }
+
+            storedUndoCode = `
+              (function() {
+                const element = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                if (element) {
+                  ${undoChanges}
+                  return 'Reverted';
+                }
+                return 'Element not found';
+              })();
+            `;
+
+            // Build apply code
+            let applyChanges = '';
+            if (hasTextChange) {
+              applyChanges += `element.textContent = ${JSON.stringify(uiResult.textChange)};\n`;
+            }
+            if (hasCssChanges) {
+              applyChanges += Object.entries(uiResult.cssChanges)
+                .map(([prop, val]) => `element.style.${prop} = '${val}';`)
+                .join('\n');
+            }
+
+            storedApplyCode = `
+              (function() {
+                const element = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                if (element) {
+                  ${applyChanges}
+                  return 'Applied';
+                }
+                return 'Element not found';
+              })();
+            `;
+
+            // Now apply the changes
+            const result = await (webview as Electron.WebviewTag).executeJavaScript(storedApplyCode);
+            console.log('[Instant UI] DOM update result:', result);
+
+            // Add immediate feedback message
+            const feedbackMessage: ChatMessage = {
+              id: `msg-ui-${Date.now()}`,
+              role: 'assistant',
+              content: `Preview: ${uiResult.description}`,
+              timestamp: new Date(),
+              model: 'gemini-2.0-flash',
+              intent: 'ui_modify',
+            };
+            setMessages(prev => [...prev, feedbackMessage]);
+
+            // Set BOTH approval states:
+            // 1. pendingChange - for the pill toolbar in main view
+            // 2. pendingDOMApproval - for the new floating/chat approval UI
+            const hasCssChangesCount = Object.keys(uiResult.cssChanges).length;
+            const hasTextChangeCount = hasTextChange ? 1 : 0;
+
+            setPendingChange({
+              code: storedApplyCode,
+              undoCode: storedUndoCode,
+              description: uiResult.description,
+              additions: hasCssChangesCount + hasTextChangeCount,
+              deletions: hasCssChangesCount + hasTextChangeCount,
+            });
+
+            if (selectedElement.sourceLocation?.sources?.[0]) {
+              setPendingDOMApproval({
+                element: selectedElement,
+                cssChanges: uiResult.cssChanges,
+                textChange: uiResult.textChange,
+                description: uiResult.description,
+                undoCode: storedUndoCode,
+                applyCode: storedApplyCode,
+                userRequest: userMessage.content,
+              });
+            }
+
+            // Return early - wait for user to approve
+            return;
+          } catch (e) {
+            console.error('[Instant UI] Failed to apply DOM changes:', e);
+            // Add error message
+            const errorMessage: ChatMessage = {
+              id: `msg-error-${Date.now()}`,
+              role: 'assistant',
+              content: `Failed to apply preview: ${e instanceof Error ? e.message : 'Unknown error'}`,
+              timestamp: new Date(),
+              model: 'gemini-2.0-flash',
+              intent: 'ui_modify',
+            };
+            setMessages(prev => [...prev, errorMessage]);
+            return;
+          }
+        } else if (!hasAnyChange) {
+          // No changes detected
+          const noChangeMessage: ChatMessage = {
+            id: `msg-nochange-${Date.now()}`,
+            role: 'assistant',
+            content: `No changes to apply for: "${userMessage.content}"`,
+            timestamp: new Date(),
+            model: 'gemini-2.0-flash',
+            intent: 'ui_modify',
+          };
+          setMessages(prev => [...prev, noChangeMessage]);
+          return;
+        }
+
+        // NOTE: Source patch generation is now triggered by user approval, not automatically
+        // This ensures DOM changes are previewed and approved before source is modified
+        // See handleAcceptDOMApproval below
+
+        // Legacy path - this should not be reached now
+        if (false && selectedElement.sourceLocation?.sources?.[0]) {
+          const projectPath = activeTab?.projectPath;
+          const capturedUndoCode = storedUndoCode;
+          const capturedApplyCode = storedApplyCode;
+
+          console.log('[Source Patch] Triggering source patch generation...');
+          console.log('[Source Patch] User message:', userMessage.content);
+
+          generateSourcePatch(selectedElement, uiResult.cssChanges, googleProvider.apiKey, projectPath || undefined, userMessage.content)
+            .then(patch => {
+              if (patch) {
+                console.log('[Source Patch] Generated patch for:', patch.filePath);
+                setPendingPatch({
+                  id: `patch-${Date.now()}`,
+                  filePath: patch.filePath,
+                  originalContent: patch.originalContent,
+                  patchedContent: patch.patchedContent,
+                  description: uiResult.description || userMessage.content,
+                  elementSelector: selectedElement.xpath || undefined,
+                  cssChanges: uiResult.cssChanges,
+                  undoCode: capturedUndoCode,
+                  applyCode: capturedApplyCode,
+                });
+              } else {
+                console.log('[Source Patch] No patch returned');
+              }
+            })
+            .catch(e => console.error('[Source Patch] Failed:', e));
+
+          // Return early - we've handled the UI modification
+          return;
+        }
+      }
+
+      // Determine if we should use coding agent tools
+      // Use tools for file operations, code-related intents, UI operations, or when MCP tools are available
+      const hasMCPTools = mcpToolDefinitions.length > 0
+      const intentNeedsTools = ['code_edit', 'code_create', 'code_delete', 'code_refactor', 'file_operation', 'debug', 'ui_inspect', 'ui_modify']
+        .includes(intent.type)
+      // Always enable tools when MCP tools are connected so the AI can use them
+      const shouldUseTools = intentNeedsTools || hasMCPTools
+      console.log(`[AI SDK] MCP tools available: ${mcpToolDefinitions.length}, intent needs tools: ${intentNeedsTools}`);
+
+      // Use AI SDK for OpenAI, Anthropic, Google text models, and OAuth providers
+      // Google uses process.env.API_KEY directly, so bypass provider configs check for google too
+      if (providerType && (providerConfigs.length > 0 || providerType === 'claude-code' || providerType === 'codex' || providerType === 'google')) {
         console.log(`[AI SDK] Using provider: ${providerType} for model: ${selectedModel.id}`);
         console.log(`[AI SDK] Using tools: ${shouldUseTools}`);
 
         // Build conversation history for context (last 10 messages)
-        const conversationHistory = messages.slice(-10).map(msg => ({
-          role: msg.role as 'user' | 'assistant',
-          content: msg.content,
-        }));
+        // Filter out system messages since AI providers require system content via 'system' param
+        const conversationHistory: CoreMessage[] = toCoreMessages(
+          messages
+            .filter(msg => msg.role !== 'system')
+            .slice(-10)
+        );
+
+        const userCoreMessage: CoreMessage = {
+          role: 'user',
+          content: userContentParts as CoreMessage['content'],
+        };
 
         // Add current message with full context
-        const allMessages = [
+        const allMessages: CoreMessage[] = [
           ...conversationHistory,
-          { role: 'user' as const, content: fullPromptText }
+          userCoreMessage,
         ];
 
         setAgentProcessing(true);
-        const result = await generateAI({
+        setIsStreaming(true);
+
+        // Create streaming message placeholder
+        const streamingId = `streaming-${Date.now()}`;
+        setStreamingMessage({
+          id: streamingId,
+          content: '',
+          reasoning: '',
+          toolCalls: [],
+        });
+
+        // Use streaming API for real-time response
+        console.log('[AI SDK] Starting stream...');
+        let streamedTextBuffer = '';
+
+        const result = await streamAI({
           modelId: selectedModel.id,
           messages: allMessages,
           providers: providerConfigs,
           system: shouldUseTools ? agentSystemPrompt : undefined,
           tools: shouldUseTools ? tools : undefined,
           maxSteps: 15, // Allow more steps for complex operations
+          enableReasoning: thinkingLevel !== 'off',
+          onChunk: (chunk) => {
+            // Update streaming message as chunks arrive (handled by hook callbacks)
+            const chunkStr = typeof chunk === 'string' ? chunk : String(chunk ?? '');
+            streamedTextBuffer += chunkStr;
+            console.log('[AI SDK] Stream chunk:', chunkStr.substring(0, 50));
+          },
+          onStepFinish: (step) => {
+            console.log('[AI SDK] Step finished:', {
+              textLength: step?.text?.length,
+              toolCalls: step?.toolCalls?.length,
+              toolResults: step?.toolResults?.length,
+            });
+          },
+          onReasoningChunk: (chunk) => {
+            // Reasoning chunk may be a string or an object with content
+            const reasoningStr = typeof chunk === 'string' ? chunk : (chunk?.content ?? String(chunk ?? ''));
+            console.log('[AI SDK] Reasoning chunk:', reasoningStr.substring(0, 100));
+          },
         });
+
+        // Stream complete - finalize the message
+        setIsStreaming(false);
         setAgentProcessing(false);
-        text = result.text;
+
+        let resolvedText = (result.text || streamedTextBuffer || '').trim();
+        if (!resolvedText && result.toolResults && result.toolResults.length > 0) {
+          const summaries = result.toolResults
+            .map(tr => {
+              const resultStr = typeof tr.result === 'string'
+                ? tr.result
+                : JSON.stringify(tr.result, null, 2);
+              return `${tr.toolName}: ${resultStr}`;
+            })
+            .join('\n\n');
+          resolvedText = `Tool output:\n${summaries}`;
+        }
+        if (!resolvedText) {
+          resolvedText = 'No response generated.';
+        }
+        text = resolvedText;
+
+        // Get the final streaming message state for tool usage
+        const finalStreamingMessage = streamingMessage;
+        setStreamingMessage(null);
+
+        // If we got reasoning, log it
+        if (result.reasoning) {
+          const reasoningStr = typeof result.reasoning === 'string' ? result.reasoning : String(result.reasoning);
+          console.log('[AI SDK] Reasoning received:', reasoningStr.substring(0, 200));
+        }
 
         // Collect tool usage for the message
         const toolUsage: ToolUsage[] = [];
@@ -1589,6 +2555,15 @@ If you're not sure what the user wants, ask for clarification.
         // Store tool usage and intent for the response message
         (window as any).__pendingToolUsage = toolUsage.length > 0 ? toolUsage : undefined;
         (window as any).__pendingIntent = intent.type !== 'unknown' ? intent.type : undefined;
+        // Ensure reasoning is a resolved string, not a Promise
+        console.log('[AI SDK] Result reasoning:', {
+          hasReasoning: !!result.reasoning,
+          type: typeof result.reasoning,
+          length: typeof result.reasoning === 'string' ? result.reasoning.length : 'N/A',
+        });
+        const resolvedReasoning = result.reasoning && typeof result.reasoning === 'string' ? result.reasoning : undefined;
+        (window as any).__pendingReasoning = resolvedReasoning;
+        console.log('[AI SDK] Stored pending reasoning:', resolvedReasoning ? `${resolvedReasoning.substring(0, 100)}...` : 'none');
       } else {
         // Fallback to GoogleGenAI for backwards compatibility or if no provider configured
         console.log('[AI SDK] Falling back to GoogleGenAI');
@@ -1596,9 +2571,20 @@ If you're not sure what the user wants, ask for clarification.
         if (!apiKey) throw new Error("No API Key configured. Please add your API key in Settings.");
         const ai = new GoogleGenAI({ apiKey });
 
+        const geminiContents = [
+          {
+            role: 'user',
+            parts: userContentParts.map(part =>
+              part.type === 'text'
+                ? { text: part.text }
+                : { inlineData: { data: part.image.base64Data, mimeType: part.image.mimeType || 'image/png' } }
+            ),
+          },
+        ];
+
         const response = await ai.models.generateContent({
           model: selectedModel.id,
-          contents: contents
+          contents: geminiContents
         });
 
         text = response.text;
@@ -1627,11 +2613,13 @@ If you're not sure what the user wants, ask for clarification.
         // Clean up the response for display
         const cleanedText = text.replace(/```json-exec\s*\{[\s\S]*?\}\s*```/g, '').trim();
 
-        // Get stored tool usage and intent from the request
+        // Get stored tool usage, intent, and reasoning from the request
         const pendingToolUsage = (window as any).__pendingToolUsage as ToolUsage[] | undefined;
         const pendingIntent = (window as any).__pendingIntent as string | undefined;
+        const pendingReasoning = (window as any).__pendingReasoning as string | undefined;
         delete (window as any).__pendingToolUsage;
         delete (window as any).__pendingIntent;
+        delete (window as any).__pendingReasoning;
 
         setMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
@@ -1641,6 +2629,7 @@ If you're not sure what the user wants, ask for clarification.
           model: selectedModel.name,
           intent: pendingIntent,
           toolUsage: pendingToolUsage,
+          reasoning: pendingReasoning,
         }]);
 
         // If we have code to execute, execute immediately and show toolbar
@@ -1778,6 +2767,108 @@ If you're not sure what the user wants, ask for clarification.
       console.error('Failed to read source file:', error);
     }
   }, [selectedElement, isElectron, activeTab.projectPath]);
+
+  // Handle accepting DOM preview - generates source patch and auto-approves
+  const handleAcceptDOMApproval = useCallback(async () => {
+    if (!pendingDOMApproval) return;
+
+    const { element, cssChanges, textChange, description, undoCode, applyCode, userRequest } = pendingDOMApproval;
+    const projectPath = activeTab?.projectPath;
+    const googleProvider = appSettings.providers.find(p => p.id === 'google' && p.enabled && p.apiKey);
+
+    if (!googleProvider?.apiKey) {
+      console.error('[DOM Approval] No Google API key found');
+      setMessages(prev => [...prev, {
+        id: `msg-error-${Date.now()}`,
+        role: 'assistant',
+        content: 'Error: No Google API key configured',
+        timestamp: new Date(),
+      }]);
+      setPendingDOMApproval(null);
+      return;
+    }
+
+    setIsGeneratingSourcePatch(true);
+    console.log('[DOM Approval] User approved, generating source patch...');
+
+    // Add feedback message
+    setMessages(prev => [...prev, {
+      id: `msg-approved-${Date.now()}`,
+      role: 'assistant',
+      content: `Approved: ${description}. Updating source code...`,
+      timestamp: new Date(),
+      model: 'gemini-2.0-flash',
+      intent: 'ui_modify',
+    }]);
+
+    try {
+      const patch = await generateSourcePatch(element, cssChanges, googleProvider.apiKey, projectPath || undefined, userRequest);
+      if (patch) {
+        console.log('[Source Patch] Generated patch for:', patch.filePath);
+
+        // Auto-approve: write the file directly
+        if (window.electronAPI?.files?.writeFile) {
+          const result = await window.electronAPI.files.writeFile(patch.filePath, patch.patchedContent);
+          if (result.success) {
+            console.log('[Source Patch] Applied successfully');
+            setMessages(prev => [...prev, {
+              id: `msg-patch-${Date.now()}`,
+              role: 'assistant',
+              content: `Source code updated: ${patch.filePath.split('/').pop()}`,
+              timestamp: new Date(),
+            }]);
+            // Track edited file
+            addEditedFile({
+              path: patch.filePath,
+              additions: 1,
+              deletions: 1,
+              undoCode: undoCode,
+            });
+          } else {
+            console.error('[Source Patch] Failed to apply:', result.error);
+            setMessages(prev => [...prev, {
+              id: `msg-error-${Date.now()}`,
+              role: 'assistant',
+              content: `Failed to save: ${result.error}`,
+              timestamp: new Date(),
+            }]);
+          }
+        }
+      } else {
+        console.log('[Source Patch] No patch returned');
+        setMessages(prev => [...prev, {
+          id: `msg-nopatch-${Date.now()}`,
+          role: 'assistant',
+          content: 'Could not generate source patch. DOM changes kept.',
+          timestamp: new Date(),
+        }]);
+      }
+    } catch (e) {
+      console.error('[Source Patch] Failed:', e);
+      setMessages(prev => [...prev, {
+        id: `msg-error-${Date.now()}`,
+        role: 'assistant',
+        content: `Error: ${e instanceof Error ? e.message : 'Unknown error'}`,
+        timestamp: new Date(),
+      }]);
+    }
+
+    setIsGeneratingSourcePatch(false);
+    setPendingDOMApproval(null);
+    setPendingChange(null); // Clear pill toolbar too
+  }, [pendingDOMApproval, activeTab?.projectPath, appSettings.providers, addEditedFile]);
+
+  // Handle rejecting DOM preview - reverts changes
+  const handleRejectDOMApproval = useCallback(() => {
+    if (!pendingDOMApproval) return;
+
+    const webview = webviewRefs.current.get(activeTabId);
+    if (pendingDOMApproval.undoCode && webview) {
+      (webview as Electron.WebviewTag).executeJavaScript(pendingDOMApproval.undoCode);
+    }
+    setPendingDOMApproval(null);
+    setPendingChange(null); // Clear pill toolbar too
+  }, [pendingDOMApproval, activeTabId]);
 
   // Handle opening a project from new tab page - triggers setup flow
   const handleOpenProject = useCallback((projectPath: string, projectName: string) => {
@@ -2625,7 +3716,11 @@ If you're not sure what the user wants, ask for clarification.
           </div>
 
           {/* Message List */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="relative flex-1">
+            <div
+              ref={messagesContainerRef}
+              className="absolute inset-0 overflow-y-auto p-4 space-y-4"
+            >
               {messages.length === 0 && (
                   <div className={`h-full flex items-center justify-center text-sm ${isDarkMode ? 'text-neutral-500' : 'text-stone-300'}`}>
                       Start a conversation...
@@ -2633,6 +3728,25 @@ If you're not sure what the user wants, ask for clarification.
               )}
               {messages.map((msg) => (
                   <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                      {/* Reasoning Display for Assistant Messages */}
+                      {msg.role === 'assistant' && msg.reasoning && (
+                        <details className={`mb-2 w-full rounded-lg overflow-hidden ${
+                          isDarkMode ? 'bg-purple-500/10 border border-purple-500/20' : 'bg-purple-50 border border-purple-200'
+                        }`}>
+                          <summary className={`px-3 py-2 text-xs cursor-pointer flex items-center gap-2 ${
+                            isDarkMode ? 'text-purple-300 hover:bg-purple-500/20' : 'text-purple-700 hover:bg-purple-100'
+                          }`}>
+                            <Brain size={14} />
+                            <span>View Reasoning</span>
+                          </summary>
+                          <div className={`px-3 py-2 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-y-auto ${
+                            isDarkMode ? 'text-purple-200/80 border-t border-purple-500/20' : 'text-purple-600 border-t border-purple-200'
+                          }`}>
+                            {msg.reasoning}
+                          </div>
+                        </details>
+                      )}
+
                       {/* Tool Usage Display for Assistant Messages */}
                       {msg.role === 'assistant' && msg.toolUsage && msg.toolUsage.length > 0 && (
                         <div className={`mb-2 w-full space-y-1`}>
@@ -2677,7 +3791,275 @@ If you're not sure what the user wants, ask for clarification.
                       </div>
                   </div>
               ))}
+
+              {/* Streaming Message Display */}
+              {isStreaming && streamingMessage && (
+                <div className="flex flex-col items-start">
+                  {/* Streaming Tool Calls */}
+                  {streamingMessage.toolCalls.length > 0 && (
+                    <div className="mb-2 w-full space-y-1">
+                      {streamingMessage.toolCalls.map((tool, idx) => (
+                        <div
+                          key={tool.id || idx}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-all ${
+                            tool.status === 'running'
+                              ? isDarkMode ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-blue-50 text-blue-700 border border-blue-200'
+                              : tool.status === 'error'
+                              ? isDarkMode ? 'bg-red-500/20 text-red-300 border border-red-500/30' : 'bg-red-50 text-red-700 border border-red-200'
+                              : isDarkMode ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          }`}
+                        >
+                          {tool.status === 'running' && (
+                            <Loader2 size={12} className="animate-spin" />
+                          )}
+                          <span className="font-mono font-medium">{tool.name}</span>
+                          {tool.args && Object.keys(tool.args as object).length > 0 && (
+                            <span className="opacity-70 truncate max-w-[200px]">
+                              ({Object.entries(tool.args as object).map(([k, v]) =>
+                                `${k}: ${typeof v === 'string' ? (v.length > 20 ? v.slice(0, 20) + '...' : v) : JSON.stringify(v)}`
+                              ).join(', ')})
+                            </span>
+                          )}
+                          <span className="ml-auto">
+                            {tool.status === 'running' ? '⏳' : tool.status === 'error' ? '❌' : '✓'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Streaming Reasoning/Thinking */}
+                  {streamingMessage.reasoning && (
+                    <div className={`mb-2 w-full px-3 py-2 rounded-lg text-xs ${
+                      isDarkMode ? 'bg-purple-500/10 text-purple-300 border border-purple-500/20' : 'bg-purple-50 text-purple-700 border border-purple-200'
+                    }`}>
+                      <div className="flex items-center gap-2 mb-1 font-medium">
+                        <Brain size={14} />
+                        <span>Thinking...</span>
+                      </div>
+                      <div className="font-mono text-xs opacity-80 max-h-32 overflow-y-auto whitespace-pre-wrap">
+                        {streamingMessage.reasoning}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Streaming Text Content */}
+                  <div
+                    className={`w-full ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`}
+                    style={{ fontSize: getFontSizeValue(appSettings.fontSize) }}
+                  >
+                    {streamingMessage.content ? (
+                      <MessageResponse>{streamingMessage.content}</MessageResponse>
+                    ) : (
+                      <div className="flex items-center gap-2 text-sm opacity-60">
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>Generating response...</span>
+                      </div>
+                    )}
+                    {/* Blinking cursor at the end */}
+                    <span className="inline-block w-2 h-4 ml-0.5 bg-current animate-pulse" style={{ verticalAlign: 'text-bottom' }} />
+                  </div>
+                </div>
+              )}
+
+              {/* Loading indicator when processing but no streaming content yet */}
+              {isAgentProcessing && !isStreaming && (
+                <div className="flex items-center gap-2 text-sm opacity-60">
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>Processing...</span>
+                </div>
+              )}
+
+              {/* Pending DOM Approval in chat - uses shared handlers */}
+              {pendingDOMApproval && !isGeneratingSourcePatch && (
+                <div className={`mx-4 my-3 p-3 rounded-xl border ${
+                  isDarkMode
+                    ? 'bg-blue-950/50 border-blue-800/50'
+                    : 'bg-blue-50 border-blue-200'
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Palette size={16} className={isDarkMode ? 'text-blue-400' : 'text-blue-600'} />
+                      <span className={`text-sm font-medium truncate ${isDarkMode ? 'text-blue-300' : 'text-blue-800'}`}>
+                        {pendingDOMApproval.description}
+                      </span>
+                    </div>
+                    <div className="flex gap-2 items-center shrink-0">
+                      <button
+                        onClick={handleRejectDOMApproval}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                          isDarkMode
+                            ? 'bg-neutral-700 hover:bg-neutral-600 text-neutral-300'
+                            : 'bg-stone-200 hover:bg-stone-300 text-stone-700'
+                        }`}
+                      >
+                        Reject
+                      </button>
+                      <button
+                        onClick={handleAcceptDOMApproval}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
+                          isDarkMode
+                            ? 'bg-blue-600 hover:bg-blue-500 text-white'
+                            : 'bg-blue-600 hover:bg-blue-700 text-white'
+                        }`}
+                      >
+                        <Check size={14} />
+                        Accept
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Loading state while generating source patch */}
+              {isGeneratingSourcePatch && (
+                <div className={`mx-4 my-3 p-3 rounded-xl border ${
+                  isDarkMode
+                    ? 'bg-blue-950/50 border-blue-800/50'
+                    : 'bg-blue-50 border-blue-200'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <Loader2 size={16} className={`animate-spin ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`} />
+                    <span className={`text-sm ${isDarkMode ? 'text-blue-300' : 'text-blue-800'}`}>
+                      Updating source code...
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Pending Patch Confirmation */}
+              {pendingPatch && (
+                <div className={`mx-4 my-3 p-4 rounded-xl border ${
+                  isDarkMode
+                    ? 'bg-emerald-950/50 border-emerald-800/50'
+                    : 'bg-emerald-50 border-emerald-200'
+                }`}>
+                  <div className="flex items-start gap-3">
+                    <div className={`p-2 rounded-lg ${isDarkMode ? 'bg-emerald-900/50' : 'bg-emerald-100'}`}>
+                      <Code2 size={18} className={isDarkMode ? 'text-emerald-400' : 'text-emerald-600'} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className={`text-sm font-medium ${isDarkMode ? 'text-emerald-300' : 'text-emerald-800'}`}>
+                        Apply to Source Code?
+                      </div>
+                      <div className={`text-xs mt-0.5 ${isDarkMode ? 'text-emerald-400/70' : 'text-emerald-600/70'}`}>
+                        {pendingPatch.description}
+                      </div>
+                      <div className={`text-xs mt-1 font-mono truncate ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                        {pendingPatch.filePath.split('/').slice(-2).join('/')}
+                      </div>
+                    </div>
+                    <div className="flex gap-2 items-center">
+                      {/* Eye button - hold to preview original */}
+                      {pendingPatch.undoCode && pendingPatch.applyCode && (
+                        <button
+                          onMouseDown={() => {
+                            const webview = webviewRefs.current.get(activeTabId);
+                            if (pendingPatch.undoCode && webview) {
+                              console.log('[Preview] Showing original');
+                              (webview as Electron.WebviewTag).executeJavaScript(pendingPatch.undoCode);
+                              setIsPreviewingPatchOriginal(true);
+                            }
+                          }}
+                          onMouseUp={() => {
+                            const webview = webviewRefs.current.get(activeTabId);
+                            if (pendingPatch.applyCode && webview) {
+                              console.log('[Preview] Showing change');
+                              (webview as Electron.WebviewTag).executeJavaScript(pendingPatch.applyCode);
+                              setIsPreviewingPatchOriginal(false);
+                            }
+                          }}
+                          onMouseLeave={() => {
+                            if (!isPreviewingPatchOriginal) return;
+                            const webview = webviewRefs.current.get(activeTabId);
+                            if (pendingPatch.applyCode && webview) {
+                              console.log('[Preview] Showing change (mouse leave)');
+                              (webview as Electron.WebviewTag).executeJavaScript(pendingPatch.applyCode);
+                              setIsPreviewingPatchOriginal(false);
+                            }
+                          }}
+                          className={`p-1.5 rounded-lg transition-colors ${
+                            isDarkMode
+                              ? 'hover:bg-neutral-700 text-neutral-400'
+                              : 'hover:bg-stone-200 text-stone-500'
+                          }`}
+                          title="Hold to see original"
+                        >
+                          {isPreviewingPatchOriginal ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => {
+                          // Revert DOM changes when dismissing
+                          if (pendingPatch.undoCode) {
+                            const webview = webviewRefs.current.get(activeTabId);
+                            if (webview) {
+                              (webview as Electron.WebviewTag).executeJavaScript(pendingPatch.undoCode);
+                            }
+                          }
+                          setPendingPatch(null);
+                        }}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                          isDarkMode
+                            ? 'bg-neutral-700 hover:bg-neutral-600 text-neutral-300'
+                            : 'bg-stone-200 hover:bg-stone-300 text-stone-700'
+                        }`}
+                      >
+                        Dismiss
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (window.electronAPI?.files?.writeFile && pendingPatch) {
+                            const result = await window.electronAPI.files.writeFile(
+                              pendingPatch.filePath,
+                              pendingPatch.patchedContent
+                            );
+                            if (result.success) {
+                              console.log('[Source Patch] Applied successfully');
+                              setMessages(prev => [...prev, {
+                                id: `msg-patch-${Date.now()}`,
+                                role: 'assistant',
+                                content: `Source code updated: ${pendingPatch.filePath.split('/').pop()}`,
+                                timestamp: new Date(),
+                              }]);
+                            } else {
+                              console.error('[Source Patch] Failed to apply:', result.error);
+                            }
+                            setPendingPatch(null);
+                          }
+                        }}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
+                          isDarkMode
+                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                            : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                        }`}
+                      >
+                        <Check size={14} />
+                        Apply
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div ref={messagesEndRef} />
+            </div>
+
+            {/* Scroll to Bottom Button */}
+            {showScrollToBottom && (
+              <button
+                onClick={scrollToBottom}
+                className={`absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full shadow-lg transition-all duration-200 hover:scale-105 ${
+                  isDarkMode
+                    ? 'bg-neutral-700 text-neutral-200 hover:bg-neutral-600 border border-neutral-600'
+                    : 'bg-white text-stone-700 hover:bg-stone-50 border border-stone-200'
+                }`}
+                title="Scroll to bottom"
+              >
+                <ArrowDown size={14} />
+                <span className="text-xs font-medium">New messages</span>
+              </button>
+            )}
           </div>
 
           {/* Edited Files Drawer */}
@@ -2833,7 +4215,14 @@ If you're not sure what the user wants, ask for clarification.
                                           {(() => {
                                             const src = selectedElement.sourceLocation.sources?.[0];
                                             if (!src) return selectedElement.sourceLocation.summary;
-                                            const fileName = src.file?.split('/').pop() || 'unknown';
+                                            // Extract filename from URL path (//localhost:4000/src/App.tsx -> App.tsx)
+                                            let fileName = 'unknown';
+                                            if (src.file) {
+                                              // Remove localhost URL prefix and get just the filename
+                                              const cleanPath = src.file.replace(/^\/\/localhost:\d+\//, '');
+                                              const parts = cleanPath.split('/');
+                                              fileName = parts[parts.length - 1] || cleanPath;
+                                            }
                                             const startLine = src.line || 0;
                                             const endLine = src.endLine || startLine + 5;
                                             return `${fileName} (${startLine}-${endLine})`;
@@ -2880,6 +4269,16 @@ If you're not sure what the user wants, ask for clarification.
                               ? 'bg-gradient-to-r from-violet-500/20 to-purple-500/20 text-violet-300 border border-violet-500/30'
                               : 'bg-gradient-to-r from-violet-50 to-purple-50 text-violet-700 border border-violet-200'
                           }`}>
+                              {previewIntent.type === 'code_edit' && <Pencil size={12} />}
+                              {previewIntent.type === 'code_create' && <FilePlus size={12} />}
+                              {previewIntent.type === 'code_delete' && <Trash2 size={12} />}
+                              {previewIntent.type === 'code_explain' && <Lightbulb size={12} />}
+                              {previewIntent.type === 'code_refactor' && <RefreshCw size={12} />}
+                              {previewIntent.type === 'file_operation' && <Folder size={12} />}
+                              {previewIntent.type === 'question' && <HelpCircle size={12} />}
+                              {previewIntent.type === 'ui_inspect' && <Search size={12} />}
+                              {previewIntent.type === 'ui_modify' && <Palette size={12} />}
+                              {previewIntent.type === 'debug' && <Bug size={12} />}
                               <span>{previewIntent.label}</span>
                           </div>
                       </div>
@@ -3073,12 +4472,25 @@ If you're not sure what the user wants, ask for clarification.
                           {/* Agent Selector */}
                           <div className="relative">
                               <button
-                                  onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
-                                  className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-full border transition ${isDarkMode ? 'border-neutral-600 hover:bg-neutral-600 text-neutral-200 bg-neutral-700' : 'border-stone-200 hover:bg-stone-50 text-stone-700 bg-white'}`}
+                                  onClick={() => !isInspectorActive && setIsModelMenuOpen(!isModelMenuOpen)}
+                                  className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-full border transition ${
+                                    isInspectorActive
+                                      ? isDarkMode
+                                        ? 'border-blue-500/50 bg-blue-500/10 text-blue-300 cursor-not-allowed'
+                                        : 'border-blue-300 bg-blue-50 text-blue-600 cursor-not-allowed'
+                                      : isDarkMode
+                                        ? 'border-neutral-600 hover:bg-neutral-600 text-neutral-200 bg-neutral-700'
+                                        : 'border-stone-200 hover:bg-stone-50 text-stone-700 bg-white'
+                                  }`}
+                                  title={isInspectorActive ? 'Model locked while inspector is active' : ''}
                               >
                                   <selectedModel.Icon size={16} />
                                   <span>{selectedModel.name}</span>
-                                  <ChevronDown size={12} className={isDarkMode ? 'text-neutral-400' : 'text-stone-400'} />
+                                  {isInspectorActive ? (
+                                    <MousePointer2 size={12} className={isDarkMode ? 'text-blue-400' : 'text-blue-500'} />
+                                  ) : (
+                                    <ChevronDown size={12} className={isDarkMode ? 'text-neutral-400' : 'text-stone-400'} />
+                                  )}
                               </button>
 
                               {isModelMenuOpen && (
@@ -3113,6 +4525,76 @@ If you're not sure what the user wants, ask for clarification.
                                       </div>
                                   </>
                               )}
+                          </div>
+
+                          {/* Thinking Level Button with Popover */}
+                          <div className="relative" data-thinking-popover>
+                            <button
+                              onClick={() => !isInspectorActive && setShowThinkingPopover(!showThinkingPopover)}
+                              className={`p-2 rounded-lg transition-colors ${
+                                isInspectorActive
+                                  ? isDarkMode
+                                    ? 'text-neutral-600 cursor-not-allowed'
+                                    : 'text-stone-300 cursor-not-allowed'
+                                  : thinkingLevel !== 'off'
+                                    ? isDarkMode
+                                      ? 'bg-violet-500/20 text-violet-300 hover:bg-violet-500/30'
+                                      : 'bg-violet-50 text-violet-700 hover:bg-violet-100'
+                                    : isDarkMode
+                                      ? 'hover:bg-neutral-600 text-neutral-400'
+                                      : 'hover:bg-stone-100 text-stone-400'
+                              }`}
+                              title={isInspectorActive ? 'Thinking disabled while inspector is active' : `Thinking: ${thinkingLevel}`}
+                            >
+                              <Brain size={18} />
+                            </button>
+
+                            {/* Thinking Level Popover */}
+                            {showThinkingPopover && !isInspectorActive && (
+                              <div className={`absolute bottom-full right-0 mb-2 p-2 rounded-lg shadow-lg border min-w-[200px] z-50 ${
+                                isDarkMode ? 'bg-neutral-800 border-neutral-700' : 'bg-white border-stone-200'
+                              }`}>
+                                <div className={`text-xs font-medium mb-2 px-2 ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                                  Extended Thinking
+                                </div>
+                                {/* Model support note */}
+                                <div className={`text-xs px-2 py-1.5 mb-2 rounded ${
+                                  isDarkMode ? 'bg-neutral-700/50 text-neutral-400' : 'bg-stone-50 text-stone-500'
+                                }`}>
+                                  <span className="font-medium">{selectedModel.name}</span>
+                                  {selectedModel.id.includes('claude') || selectedModel.id.includes('opus') || selectedModel.id.includes('sonnet') || selectedModel.id.includes('haiku')
+                                    ? <span className="ml-1 text-emerald-500">(native)</span>
+                                    : <span className="ml-1 text-amber-500">(prompted)</span>
+                                  }
+                                </div>
+                                {(['off', 'low', 'med', 'high', 'ultrathink'] as ThinkingLevel[]).map((level) => (
+                                  <button
+                                    key={level}
+                                    onClick={() => {
+                                      setThinkingLevel(level);
+                                      setShowThinkingPopover(false);
+                                    }}
+                                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm transition ${
+                                      thinkingLevel === level
+                                        ? isDarkMode
+                                          ? 'bg-violet-500/20 text-violet-300'
+                                          : 'bg-violet-50 text-violet-700'
+                                        : isDarkMode
+                                          ? 'hover:bg-neutral-700 text-neutral-300'
+                                          : 'hover:bg-stone-50 text-stone-700'
+                                    }`}
+                                  >
+                                    {level === 'off' && <X size={14} />}
+                                    {level === 'low' && <Lightbulb size={14} />}
+                                    {level === 'med' && <Brain size={14} />}
+                                    {level === 'high' && <Flame size={14} />}
+                                    {level === 'ultrathink' && <Rocket size={14} />}
+                                    <span className="capitalize">{level === 'ultrathink' ? 'Ultra' : level}</span>
+                                    {thinkingLevel === level && <Check size={14} className="ml-auto" />}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </div>
 
                           </div>
@@ -3350,18 +4832,27 @@ If you're not sure what the user wants, ask for clarification.
               </button>
               <div className={`w-[1px] h-6 ${isDarkMode ? 'bg-neutral-600' : 'bg-neutral-200'}`}></div>
               <button
-                  onClick={handleRejectChange}
+                  onClick={handleRejectDOMApproval}
                   className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${isDarkMode ? 'hover:bg-red-900/20 text-neutral-400 hover:text-red-400' : 'hover:bg-red-50 text-neutral-600 hover:text-red-600'}`}
                   title="Discard changes"
               >
                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
               </button>
               <button
-                  onClick={handleApproveChange}
-                  className={`w-10 h-10 rounded-full flex items-center justify-center shadow-md transition-colors ${isDarkMode ? 'bg-neutral-100 text-neutral-900 hover:bg-white' : 'bg-neutral-900 text-white hover:bg-neutral-800'}`}
+                  onClick={handleAcceptDOMApproval}
+                  disabled={isGeneratingSourcePatch}
+                  className={`w-10 h-10 rounded-full flex items-center justify-center shadow-md transition-colors disabled:opacity-50 ${
+                    isGeneratingSourcePatch
+                      ? 'cursor-not-allowed'
+                      : (isDarkMode ? 'bg-neutral-100 text-neutral-900 hover:bg-white' : 'bg-neutral-900 text-white hover:bg-neutral-800')
+                  }`}
                   title="Apply changes"
               >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                  {isGeneratingSourcePatch ? (
+                    <Loader2 size={20} className="animate-spin" />
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                  )}
               </button>
           </div>
       )}
@@ -3393,6 +4884,7 @@ If you're not sure what the user wants, ask for clarification.
       {/* Hidden Media Elements */}
       <video ref={videoRef} className="hidden" autoPlay playsInline muted />
       <canvas ref={canvasRef} className="hidden" />
+
 
       {/* Settings Dialog */}
       <SettingsDialog

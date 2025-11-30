@@ -27,10 +27,18 @@ let currentState = null
 let callbackServer = null
 
 /**
- * Get the config file path
+ * Get the config file path for our app's OAuth config
  */
 function getConfigPath() {
   return path.join(app.getPath('userData'), 'codex-oauth-config.json')
+}
+
+/**
+ * Get the official Codex CLI auth.json path
+ */
+function getCodexCliAuthPath() {
+  const homeDir = require('os').homedir()
+  return path.join(homeDir, '.codex', 'auth.json')
 }
 
 /**
@@ -263,11 +271,74 @@ function isTokenExpired(tokens) {
 }
 
 /**
+ * Load tokens from official Codex CLI auth.json
+ */
+function loadCodexCliAuth() {
+  try {
+    const authPath = getCodexCliAuthPath()
+    if (fs.existsSync(authPath)) {
+      const data = fs.readFileSync(authPath, 'utf-8')
+      const parsed = JSON.parse(data)
+      if (parsed.tokens && parsed.tokens.access_token) {
+        console.log('[Codex OAuth] Found official Codex CLI auth.json')
+        return {
+          access: parsed.tokens.access_token,
+          refresh: parsed.tokens.refresh_token,
+          accountId: parsed.tokens.account_id,
+          // Parse expiration from JWT
+          expires: getJwtExpiration(parsed.tokens.access_token)
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[Codex OAuth] Failed to load Codex CLI auth:', error.message)
+  }
+  return null
+}
+
+/**
+ * Get expiration time from JWT token
+ */
+function getJwtExpiration(token) {
+  try {
+    const payload = decodeJWT(token)
+    if (payload && payload.exp) {
+      return payload.exp * 1000 // Convert to milliseconds
+    }
+  } catch (e) {
+    // Ignore
+  }
+  return 0
+}
+
+/**
  * Get a valid access token, refreshing if necessary
+ * First checks official Codex CLI auth.json, then falls back to our own OAuth
  */
 async function getValidAccessToken() {
+  // First, try official Codex CLI auth.json (shared with codex command)
+  const cliAuth = loadCodexCliAuth()
+  if (cliAuth && cliAuth.access) {
+    // Check if token is still valid
+    const fiveMinutes = 5 * 60 * 1000
+    if (cliAuth.expires > Date.now() + fiveMinutes) {
+      console.log('[Codex OAuth] Using token from Codex CLI auth.json')
+      return cliAuth.access
+    }
+    // Try to refresh the CLI token
+    console.log('[Codex OAuth] Codex CLI token expired, attempting refresh...')
+    const newTokens = await refreshAccessToken(cliAuth.refresh)
+    if (newTokens) {
+      // Save back to our config (not Codex CLI auth.json to avoid conflicts)
+      saveCodexTokens(newTokens)
+      return newTokens.access
+    }
+  }
+
+  // Fall back to our own OAuth tokens
   const tokens = getCodexTokens()
   if (!tokens) {
+    console.log('[Codex OAuth] No tokens available. Please authenticate with Codex CLI first (run: codex)')
     return null
   }
 
@@ -494,6 +565,23 @@ function getCodexBaseUrl() {
   return CODEX_BASE_URL
 }
 
+/**
+ * Get the ChatGPT account ID from Codex CLI or our own config
+ */
+function getAccountId() {
+  // First try Codex CLI auth.json
+  const cliAuth = loadCodexCliAuth()
+  if (cliAuth && cliAuth.accountId) {
+    return cliAuth.accountId
+  }
+  // Fall back to our tokens
+  const tokens = getCodexTokens()
+  if (tokens && tokens.access) {
+    return extractAccountId(tokens.access)
+  }
+  return null
+}
+
 module.exports = {
   generatePKCEChallenge,
   createState,
@@ -518,6 +606,8 @@ module.exports = {
   getRedirectPort,
   getLocalRedirectUri,
   getCodexBaseUrl,
+  getAccountId,
+  loadCodexCliAuth,
   CLIENT_ID,
   CODEX_BASE_URL,
 }

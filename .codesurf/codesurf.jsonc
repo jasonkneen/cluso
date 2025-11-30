@@ -1,0 +1,18 @@
+{
+  "favoriteTools": [
+    "cc_computer_use",
+    "write",
+    "cc_bash",
+    "add_memory",
+    "todoread",
+    "switch_mode",
+    "todowrite",
+    "cc_write",
+    "cc_glob",
+    "read",
+    "bash",
+    "grep",
+    "edit"
+  ],
+  "$schema": "https://opencode.ai/config.json"
+}
