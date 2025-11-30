@@ -1193,6 +1193,31 @@ export default function App() {
   // Handle AI element selection request
   const handleAiElementSelect = useCallback((selector: string, reasoning?: string) => {
     console.log('[AI] Requesting element selection:', selector, reasoning);
+
+    // Validate selector - catch common jQuery mistakes
+    const invalidPatterns = [
+      { pattern: /:contains\s*\(/i, name: ':contains()' },
+      { pattern: /:has\s*\([^)]*text/i, name: ':has(text)' },
+      { pattern: /:eq\s*\(/i, name: ':eq()' },
+      { pattern: /:gt\s*\(/i, name: ':gt()' },
+      { pattern: /:lt\s*\(/i, name: ':lt()' },
+      { pattern: /:first(?!\-)/i, name: ':first (use :first-child or :first-of-type)' },
+      { pattern: /:last(?!\-)/i, name: ':last (use :last-child or :last-of-type)' },
+    ];
+
+    for (const { pattern, name } of invalidPatterns) {
+      if (pattern.test(selector)) {
+        console.error(`[AI] Invalid selector: ${name} is not valid CSS. Use attribute selectors like [attr*="text"] instead.`);
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          role: 'system',
+          content: `Invalid selector: ${name} is jQuery-only, not valid CSS. Use attribute selectors like [attr*="text"] or call get_page_elements first.`,
+          timestamp: new Date()
+        }]);
+        return;
+      }
+    }
+
     const webview = webviewRefs.current.get(activeTabId);
     if (webview && isWebviewReady) {
       // Send IPC message to webview to highlight the element
@@ -1206,24 +1231,49 @@ export default function App() {
   // Handle AI code execution
   const handleExecuteCode = useCallback((code: string, description: string) => {
     console.log('[AI] Executing code:', description);
+    console.log('[AI] Code to execute:', code);
     const webview = webviewRefs.current.get(activeTabId);
     if (webview && isWebviewReady) {
-      webview.executeJavaScript(code)
-        .then(() => {
-          console.log('[AI] Code executed successfully');
-          setMessages(prev => [...prev, {
-            id: Date.now().toString(),
-            role: 'system',
-            content: `✓ ${description}`,
-            timestamp: new Date()
-          }]);
+      // Wrap code in try-catch to capture actual error from webview
+      const wrappedCode = `
+        (function() {
+          try {
+            ${code}
+            return { success: true };
+          } catch (err) {
+            return { success: false, error: err.message, stack: err.stack };
+          }
+        })()
+      `;
+      webview.executeJavaScript(wrappedCode)
+        .then((result: { success: boolean; error?: string; stack?: string }) => {
+          if (result && result.success) {
+            console.log('[AI] Code executed successfully');
+            setMessages(prev => [...prev, {
+              id: Date.now().toString(),
+              role: 'system',
+              content: `✓ ${description}`,
+              timestamp: new Date()
+            }]);
+          } else {
+            const errorMsg = result?.error || 'Unknown error';
+            console.error('[AI] Code execution error inside webview:', errorMsg);
+            if (result?.stack) console.error('[AI] Stack:', result.stack);
+            setMessages(prev => [...prev, {
+              id: Date.now().toString(),
+              role: 'system',
+              content: `✗ Error: ${errorMsg}`,
+              timestamp: new Date()
+            }]);
+          }
         })
         .catch((err: Error) => {
-          console.error('[AI] Code execution error:', err);
+          // This catches syntax errors that prevent the code from even running
+          console.error('[AI] Code execution error (syntax/parse):', err);
           setMessages(prev => [...prev, {
             id: Date.now().toString(),
             role: 'system',
-            content: `✗ Error: ${err.message}`,
+            content: `✗ Syntax Error: ${err.message}`,
             timestamp: new Date()
           }]);
         });
@@ -1246,6 +1296,291 @@ export default function App() {
     }
   }, [aiSelectedElement, activeTabId]);
 
+  // Handle get_page_elements tool - scans page for interactive elements
+  const handleGetPageElements = useCallback(async (category?: string): Promise<string> => {
+    console.log('[AI] Getting page elements, category:', category);
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      return 'Error: Webview not ready';
+    }
+
+    const scanCode = `
+      (function() {
+        const category = '${category || 'all'}';
+        const results = {};
+
+        // Helper to get element summary
+        function summarize(el) {
+          const text = el.innerText?.substring(0, 50) || '';
+          const id = el.id ? '#' + el.id : '';
+          const classes = el.className ? '.' + el.className.split(' ').slice(0, 2).join('.') : '';
+          const href = el.getAttribute('href') || '';
+          const ariaLabel = el.getAttribute('aria-label') || '';
+          return { tag: el.tagName.toLowerCase(), id, classes, text: text.trim(), href, ariaLabel };
+        }
+
+        // Buttons (native + ARIA + shadcn)
+        if (category === 'all' || category === 'buttons') {
+          const buttons = document.querySelectorAll('button, [role="button"], [data-slot="button"], input[type="button"], input[type="submit"]');
+          results.buttons = {
+            count: buttons.length,
+            examples: Array.from(buttons).slice(0, 5).map(summarize)
+          };
+        }
+
+        // Links
+        if (category === 'all' || category === 'links') {
+          const links = document.querySelectorAll('a[href], [role="link"]');
+          results.links = {
+            count: links.length,
+            examples: Array.from(links).slice(0, 5).map(summarize)
+          };
+        }
+
+        // Inputs
+        if (category === 'all' || category === 'inputs') {
+          const inputs = document.querySelectorAll('input, textarea, select, [role="textbox"], [contenteditable="true"]');
+          results.inputs = {
+            count: inputs.length,
+            examples: Array.from(inputs).slice(0, 5).map(el => ({
+              ...summarize(el),
+              type: el.getAttribute('type') || el.tagName.toLowerCase(),
+              name: el.getAttribute('name') || '',
+              placeholder: el.getAttribute('placeholder') || ''
+            }))
+          };
+        }
+
+        // Images
+        if (category === 'all' || category === 'images') {
+          const images = document.querySelectorAll('img, [role="img"], svg');
+          results.images = {
+            count: images.length,
+            examples: Array.from(images).slice(0, 3).map(el => ({
+              tag: el.tagName.toLowerCase(),
+              alt: el.getAttribute('alt') || '',
+              src: (el.getAttribute('src') || '').substring(0, 50)
+            }))
+          };
+        }
+
+        // Headings
+        if (category === 'all' || category === 'headings') {
+          const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6, [role="heading"]');
+          results.headings = {
+            count: headings.length,
+            examples: Array.from(headings).slice(0, 5).map(summarize)
+          };
+        }
+
+        // Interactive elements with click handlers (approximate)
+        if (category === 'all') {
+          const clickable = document.querySelectorAll('[onclick], [data-action], .cursor-pointer, [tabindex="0"]');
+          results.otherClickable = {
+            count: clickable.length,
+            note: 'Elements with onclick, data-action, cursor-pointer class, or tabindex=0'
+          };
+        }
+
+        return JSON.stringify(results, null, 2);
+      })()
+    `;
+
+    try {
+      const result = await webview.executeJavaScript(scanCode);
+      console.log('[AI] Page elements result:', result);
+      return result;
+    } catch (err) {
+      console.error('[AI] Failed to scan page elements:', err);
+      return 'Error scanning page: ' + (err as Error).message;
+    }
+  }, [isWebviewReady, activeTabId]);
+
+  // Handle patch_source_file tool - writes changes to actual source files
+  const handlePatchSourceFile = useCallback(async (
+    filePath: string,
+    searchCode: string,
+    replaceCode: string,
+    description: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    console.log('[AI] Patching source file:', filePath, description);
+
+    if (!isElectron || !window.electronAPI?.files) {
+      return { success: false, error: 'File editing only available in Electron mode' };
+    }
+
+    try {
+      // Read the current file content
+      const readResult = await window.electronAPI.files.readFile(filePath);
+      if (!readResult.success || !readResult.data) {
+        return { success: false, error: `Could not read file: ${filePath}` };
+      }
+
+      const currentContent = readResult.data;
+
+      // Check if the search code exists in the file
+      if (!currentContent.includes(searchCode)) {
+        return { success: false, error: `Could not find the code to replace in ${filePath}. The file may have changed.` };
+      }
+
+      // Replace the code
+      const newContent = currentContent.replace(searchCode, replaceCode);
+
+      // Write the updated content
+      const writeResult = await window.electronAPI.files.writeFile(filePath, newContent);
+      if (!writeResult.success) {
+        return { success: false, error: `Failed to write file: ${filePath}` };
+      }
+
+      // Add success message to chat
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        role: 'system',
+        content: `✓ Patched ${filePath}: ${description}`,
+        timestamp: new Date()
+      }]);
+
+      return { success: true };
+    } catch (err) {
+      console.error('[AI] Failed to patch source file:', err);
+      return { success: false, error: (err as Error).message };
+    }
+  }, [isElectron]);
+
+  // Handle list_files tool - list files in a directory
+  const handleListFiles = useCallback(async (path?: string): Promise<string> => {
+    console.log('[AI] Listing files:', path);
+    if (!isElectron || !window.electronAPI?.files) {
+      return 'Error: File listing only available in Electron mode';
+    }
+    try {
+      const result = await window.electronAPI.files.listDirectory(path);
+      if (result.success && result.data) {
+        const formatted = result.data.map(f =>
+          `${f.isDirectory ? '📁' : '📄'} ${f.name}${f.isDirectory ? '/' : ''}`
+        ).join('\n');
+        return formatted || 'Empty directory';
+      }
+      return 'Error: Could not list directory';
+    } catch (err) {
+      return 'Error: ' + (err as Error).message;
+    }
+  }, [isElectron]);
+
+  // Handle read_file tool - read a file's contents
+  const handleReadFile = useCallback(async (filePath: string): Promise<string> => {
+    console.log('[AI] Reading file:', filePath);
+    if (!isElectron || !window.electronAPI?.files) {
+      return 'Error: File reading only available in Electron mode';
+    }
+    try {
+      const result = await window.electronAPI.files.readFile(filePath);
+      if (result.success && result.data) {
+        // Truncate if too long
+        const content = result.data;
+        if (content.length > 10000) {
+          return content.substring(0, 10000) + '\n... (truncated, file is ' + content.length + ' chars)';
+        }
+        return content;
+      }
+      return 'Error: Could not read file';
+    } catch (err) {
+      return 'Error: ' + (err as Error).message;
+    }
+  }, [isElectron]);
+
+  // Handle click_element tool - click on an element
+  const handleClickElement = useCallback(async (selector: string): Promise<{ success: boolean; error?: string }> => {
+    console.log('[AI] Clicking element:', selector);
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      return { success: false, error: 'Webview not ready' };
+    }
+    try {
+      const code = `
+        (function() {
+          const el = document.querySelector('${selector.replace(/'/g, "\\'")}');
+          if (el) {
+            el.click();
+            return { success: true };
+          }
+          return { success: false, error: 'Element not found' };
+        })()
+      `;
+      const result = await webview.executeJavaScript(code);
+      return result;
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  }, [isWebviewReady, activeTabId]);
+
+  // Handle navigate tool - browser navigation
+  const handleNavigate = useCallback(async (action: string, url?: string): Promise<{ success: boolean; error?: string }> => {
+    console.log('[AI] Navigating:', action, url);
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview) {
+      return { success: false, error: 'Webview not available' };
+    }
+    try {
+      switch (action) {
+        case 'back':
+          webview.goBack();
+          break;
+        case 'forward':
+          webview.goForward();
+          break;
+        case 'reload':
+          webview.reload();
+          break;
+        case 'goto':
+          if (url) {
+            webview.loadURL(url);
+          } else {
+            return { success: false, error: 'URL required for goto action' };
+          }
+          break;
+        default:
+          return { success: false, error: `Unknown action: ${action}` };
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  }, [activeTabId]);
+
+  // Handle scroll tool - scroll the page
+  const handleScroll = useCallback(async (target: string): Promise<{ success: boolean; error?: string }> => {
+    console.log('[AI] Scrolling to:', target);
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      return { success: false, error: 'Webview not ready' };
+    }
+    try {
+      let code: string;
+      if (target === 'top') {
+        code = `window.scrollTo({ top: 0, behavior: 'smooth' }); true;`;
+      } else if (target === 'bottom') {
+        code = `window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); true;`;
+      } else {
+        // Assume it's a selector
+        code = `
+          (function() {
+            const el = document.querySelector('${target.replace(/'/g, "\\'")}');
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              return true;
+            }
+            return false;
+          })()
+        `;
+      }
+      const result = await webview.executeJavaScript(code);
+      return { success: !!result };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  }, [isWebviewReady, activeTabId]);
+
   const {
     streamState,
     connect,
@@ -1260,6 +1595,13 @@ export default function App() {
     onElementSelect: handleAiElementSelect,
     onExecuteCode: handleExecuteCode,
     onConfirmSelection: handleConfirmSelection,
+    onGetPageElements: handleGetPageElements,
+    onPatchSourceFile: handlePatchSourceFile,
+    onListFiles: handleListFiles,
+    onReadFile: handleReadFile,
+    onClickElement: handleClickElement,
+    onNavigate: handleNavigate,
+    onScroll: handleScroll,
     selectedElement: selectedElement
   });
 
