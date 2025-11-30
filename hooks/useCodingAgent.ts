@@ -325,7 +325,7 @@ If the question requires looking at additional files, use the read_file tool.`)
 For UI work:
 1. Analyze the element's structure and styling
 2. If modifying, identify the source file and component
-3. Suggest specific CSS or React changes
+3. Apply the changes to the source code using the write_file tool
 4. Consider accessibility and responsive design`)
       break
 
@@ -740,15 +740,8 @@ export function useCodingAgent(options: UseCodingAgentOptions = {}) {
   // Memoize combined tools (coding agent + MCP)
   const combinedTools = useMemo(() => {
     // DISABLED: MCP tools merging to fix schema issues
+    // We now pass MCP tools separately to the AI SDK wrapper
     return toolsRef.current
-    /*
-    if (!mcpTools.length || !callMCPTool) {
-      return toolsRef.current
-    }
-
-    const mcpToolsMap = mcpToolsToAISDKFormat(mcpTools, callMCPTool)
-    return mergeTools(toolsRef.current, mcpToolsMap)
-    */
   }, [mcpTools, callMCPTool])
 
   // Update context

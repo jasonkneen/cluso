@@ -1044,6 +1044,7 @@ export default function App() {
     description: string;
     additions: number;
     deletions: number;
+    source?: 'dom' | 'code';
   } | null>(null);
   const [isPreviewingOriginal, setIsPreviewingOriginal] = useState(false);
 
@@ -3167,9 +3168,10 @@ Instructions:
 You are an AI UI assistant that can modify web pages in real-time.
 
 When the user asks you to change, modify, or update something on the page:
-1. Output a JSON code block with BOTH forward and undo JavaScript
+1. Output a JSON code block with BOTH forward and undo JavaScript for IMMEDIATE PREVIEW
 2. Use the format: \`\`\`json-exec {"code": "...", "undo": "..."}\`\`\`
 3. The "code" will be executed immediately, "undo" restores the original
+4. CRITICAL: You MUST ALSO use the 'write_file' tool to save the changes to the source code permanently. The json-exec is ONLY for preview.
 
 Examples:
 - Change text: \`\`\`json-exec {"code": "document.querySelector('#myId').textContent = 'New'", "undo": "document.querySelector('#myId').textContent = 'Old'"}\`\`\`
@@ -3360,6 +3362,7 @@ If you're not sure what the user wants, ask for clarification.
               description: uiResult.description,
               additions: hasCssChangesCount + hasTextChangeCount,
               deletions: hasCssChangesCount + hasTextChangeCount,
+              source: 'dom',
             });
 
             if (selectedElement.sourceLocation?.sources?.[0]) {
@@ -3501,6 +3504,7 @@ If you're not sure what the user wants, ask for clarification.
           tools: shouldUseTools ? tools : undefined,
           maxSteps: 15, // Allow more steps for complex operations
           enableReasoning: thinkingLevel !== 'off',
+          mcpTools: mcpToolDefinitions, // Pass MCP tools separately
           onChunk: (chunk) => {
             // Update streaming message as chunks arrive (handled by hook callbacks)
             const chunkStr = typeof chunk === 'string' ? chunk : String(chunk ?? '');
@@ -3672,7 +3676,8 @@ If you're not sure what the user wants, ask for clarification.
             undoCode: undoCode || '',
             description: cleanedText || 'Change applied',
             additions,
-            deletions
+            deletions,
+            source: 'code',
           });
         }
       }
@@ -5834,7 +5839,7 @@ If you're not sure what the user wants, ask for clarification.
       )}
 
       {/* Pending Code Change Preview - 3 Button Popup */}
-      {pendingChange && (
+      {pendingChange?.source === 'dom' && (
           <div className={`absolute bottom-24 left-1/2 transform -translate-x-1/2 flex items-center gap-2 rounded-full shadow-xl p-2 z-50 ${isDarkMode ? 'bg-neutral-800 border border-neutral-700' : 'bg-white border border-neutral-200'}`}>
               {/* Diff Stats */}
               <div className="flex items-center gap-1.5 px-2 text-xs font-mono">
