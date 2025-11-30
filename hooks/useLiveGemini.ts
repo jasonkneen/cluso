@@ -10,6 +10,13 @@ interface UseLiveGeminiParams {
   onElementSelect?: (selector: string, reasoning?: string) => void;
   onExecuteCode?: (code: string, description: string) => void;
   onConfirmSelection?: (confirmed: boolean) => void;
+  onGetPageElements?: (category?: string) => Promise<string>;
+  onPatchSourceFile?: (filePath: string, searchCode: string, replaceCode: string, description: string) => Promise<{ success: boolean; error?: string }>;
+  onListFiles?: (path?: string) => Promise<string>;
+  onReadFile?: (filePath: string) => Promise<string>;
+  onClickElement?: (selector: string) => Promise<{ success: boolean; error?: string }>;
+  onNavigate?: (action: string, url?: string) => Promise<{ success: boolean; error?: string }>;
+  onScroll?: (target: string) => Promise<{ success: boolean; error?: string }>;
   selectedElement?: SelectedElement | null;
 }
 
@@ -30,20 +37,59 @@ const updateUiTool: FunctionDeclaration = {
 
 const selectElementTool: FunctionDeclaration = {
   name: 'select_element',
-  description: 'Select an element on the page based on the user\'s description. Use a CSS selector to identify the element. After selection, ask the user to confirm before making changes.',
+  description: `Select elements on the page using a CSS selector.
+
+⚠️ FORBIDDEN - THESE WILL CRASH:
+- :contains() - NEVER USE THIS
+- :has(text) - NEVER USE THIS
+- Any jQuery pseudo-selectors
+
+✅ VALID CSS SELECTORS:
+- Tag: 'button', 'a', 'div', 'img', 'h1', 'h2', 'section'
+- Class: '.btn', '.card', '.hero-section'
+- ID: '#submit-btn', '#hero'
+- Attribute contains: '[href*="download"]', '[src*="screenshot"]', '[alt*="app"]'
+- Attribute exact: '[data-testid="login"]'
+- Combined: 'button, [role="button"]', 'img, [role="img"]'
+
+🔍 TO FIND ELEMENTS BY TEXT/CONTENT:
+1. FIRST call get_page_elements to see what's on the page
+2. Use attribute selectors: '[aria-label*="Download"]', '[title*="Windows"]'
+3. Use class names: '.download-btn', '.hero-image'
+4. Use structural selectors: 'section img', '.hero img', 'main img'
+
+EXAMPLES:
+- "screenshot image" → 'img[alt*="screenshot"], img[src*="screenshot"], .screenshot img, section img'
+- "download button" → 'a[href*="download"], button[aria-label*="download"], .download'
+- "all buttons" → 'button, [role="button"], input[type="button"]'`,
   parameters: {
     type: Type.OBJECT,
     properties: {
       selector: {
         type: Type.STRING,
-        description: 'A CSS selector to identify the element (e.g., "#myButton", ".header", "button.submit", "div[data-id=\'123\']")',
+        description: 'CSS selector WITHOUT :contains() or jQuery syntax. Use [attr*="text"] for text matching.',
       },
       reasoning: {
         type: Type.STRING,
-        description: 'Brief explanation of why you chose this selector based on the user\'s description',
+        description: 'Brief explanation of selector choice',
       },
     },
     required: ['selector', 'reasoning'],
+  },
+};
+
+const getPageElementsTool: FunctionDeclaration = {
+  name: 'get_page_elements',
+  description: 'Get a summary of interactive elements on the current page. Use this BEFORE selecting elements to understand what\'s available. Returns counts and examples of buttons, links, inputs, and other interactive elements.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      category: {
+        type: Type.STRING,
+        description: 'Optional: Filter to specific category - "buttons", "links", "inputs", "images", "headings", or "all" (default)',
+      },
+    },
+    required: [],
   },
 };
 
@@ -68,13 +114,13 @@ const executeCodeTool: FunctionDeclaration = {
 
 const confirmSelectionTool: FunctionDeclaration = {
   name: 'confirm_selection',
-  description: 'Confirm or reject a pending element selection. Use this when the user says "yes"/"no" or specifies which numbered element they want (e.g., "the second one", "number 3").',
+  description: 'Confirm or reject a pending element selection. Use this when the user says "yes"/"no"/"approve"/"reject" or specifies which numbered element they want.',
   parameters: {
     type: Type.OBJECT,
     properties: {
       confirmed: {
         type: Type.BOOLEAN,
-        description: 'true if user confirmed (yes/correct/that\'s it), false if rejected (no/wrong/not that one)',
+        description: 'true if user approved (yes/approve/do it/go ahead), false if rejected (no/reject/cancel/wrong)',
       },
       elementNumber: {
         type: Type.NUMBER,
@@ -85,7 +131,120 @@ const confirmSelectionTool: FunctionDeclaration = {
   },
 };
 
-export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, selectedElement }: UseLiveGeminiParams) {
+const patchSourceFileTool: FunctionDeclaration = {
+  name: 'patch_source_file',
+  description: `SAVE changes to the actual source code file. Use this AFTER execute_code to make changes permanent.
+
+REQUIRES: The selected element must have sourceLocation info (file path and line number).
+Use this to write the modified code to disk so it persists after page reload.
+
+IMPORTANT: Provide the FULL updated content for the portion of the file being changed.`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      filePath: {
+        type: Type.STRING,
+        description: 'The source file path to modify (from selectedElement.sourceLocation)',
+      },
+      searchCode: {
+        type: Type.STRING,
+        description: 'The original code to find and replace in the file',
+      },
+      replaceCode: {
+        type: Type.STRING,
+        description: 'The new code to replace it with',
+      },
+      description: {
+        type: Type.STRING,
+        description: 'Brief description of the change being made',
+      },
+    },
+    required: ['filePath', 'searchCode', 'replaceCode', 'description'],
+  },
+};
+
+// File system tools
+const listFilesTool: FunctionDeclaration = {
+  name: 'list_files',
+  description: 'List files and folders in a directory. Use this to explore the project structure.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      path: {
+        type: Type.STRING,
+        description: 'Directory path to list. Use "." for current directory, or relative/absolute path.',
+      },
+    },
+    required: [],
+  },
+};
+
+const readFileTool: FunctionDeclaration = {
+  name: 'read_file',
+  description: 'Read the contents of a file. Use this to see the current code before making changes.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      filePath: {
+        type: Type.STRING,
+        description: 'Path to the file to read',
+      },
+    },
+    required: ['filePath'],
+  },
+};
+
+// Navigation tools
+const clickElementTool: FunctionDeclaration = {
+  name: 'click_element',
+  description: 'Click on an element (link, button, etc.) to navigate or trigger an action.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      selector: {
+        type: Type.STRING,
+        description: 'CSS selector for the element to click. Use valid CSS only (no :contains).',
+      },
+    },
+    required: ['selector'],
+  },
+};
+
+const navigateTool: FunctionDeclaration = {
+  name: 'navigate',
+  description: 'Navigate the browser - go back, forward, reload, or to a specific URL.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      action: {
+        type: Type.STRING,
+        description: 'Action to take: "back", "forward", "reload", or "goto"',
+      },
+      url: {
+        type: Type.STRING,
+        description: 'URL to navigate to (only needed if action is "goto")',
+      },
+    },
+    required: ['action'],
+  },
+};
+
+const scrollTool: FunctionDeclaration = {
+  name: 'scroll',
+  description: 'Scroll the page - to top, bottom, or to a specific element.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      target: {
+        type: Type.STRING,
+        description: '"top", "bottom", or a CSS selector to scroll to',
+      },
+    },
+    required: ['target'],
+  },
+};
+
+export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, selectedElement }: UseLiveGeminiParams) {
   const [streamState, setStreamState] = useState<StreamState>({
     isConnected: false,
     isStreaming: false,
@@ -166,53 +325,61 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
           },
-          tools: [{ functionDeclarations: [updateUiTool, selectElementTool, executeCodeTool, confirmSelectionTool] }],
-          systemInstruction: `You are a specialized AI UI Engineer with voice and element selection capabilities.
+          tools: [{ functionDeclarations: [updateUiTool, selectElementTool, executeCodeTool, confirmSelectionTool, getPageElementsTool, patchSourceFileTool, listFilesTool, readFileTool, clickElementTool, navigateTool, scrollTool] }],
+          systemInstruction: `You are a specialized AI UI Engineer with voice control, element selection, file editing, and browser navigation capabilities.
 
           You can see the user's screen or video feed if enabled.
           You can hear the user's voice commands.
 
-          WORKFLOW FOR MAKING CHANGES:
-          1. When the user describes an element they want to modify (e.g., "change the red button" or "update the header text"), use 'select_element' to highlight it.
-          2. The selector might match MULTIPLE elements. They will ALL be highlighted with numbered badges (💬1, 💬2, 💬3, etc.).
-          3. If multiple elements are found, the user will see them all and can either:
-             - Click on a specific numbered element to select it
-             - Say "the second one" or "number 3" via voice to clarify which one they meant
-             - Use confirm_selection with the specific element number
-          4. Wait for user confirmation before making changes.
-          5. Once confirmed, you have THREE options for making changes:
-             a) execute_code: Make quick runtime changes (change colors, text, styles, hide/show elements)
-             b) update_ui: Update the underlying HTML/CSS/JS source code (permanent changes)
-             c) Both: Use execute_code for immediate preview, then update_ui to save changes
+          CAPABILITIES:
+          📁 FILE SYSTEM: List files, read files, edit/patch source code
+          🔍 PAGE INSPECTION: Get page elements, select elements, execute code
+          🧭 NAVIGATION: Click links, go back/forward, scroll, navigate to URLs
+          ✏️ EDITING: Preview changes with execute_code, save with patch_source_file
 
-          ${selectedElement ? `CURRENTLY SELECTED ELEMENT (CONFIRMED):
+          CRITICAL - MODERN UI FRAMEWORKS:
+          Modern frameworks (shadcn, Radix, MUI, Tailwind) often don't use native HTML elements:
+          - "buttons" → 'button, [role="button"], [data-slot="button"]'
+          - "links" → 'a[href], [role="link"]'
+          - "inputs" → 'input, textarea, [role="textbox"]'
+
+          ALWAYS use compound selectors when user asks for common elements!
+
+          ${selectedElement ? `CURRENTLY SELECTED ELEMENT:
           - Tag: ${selectedElement.tagName}
           - ID: ${selectedElement.id || 'none'}
           - Classes: ${selectedElement.className || 'none'}
           - Text: "${selectedElement.text || ''}"
-          - Selector examples: ${selectedElement.id ? `#${selectedElement.id}` : selectedElement.className ? `.${selectedElement.className.split(' ')[0]}` : selectedElement.tagName}
+          ${selectedElement.sourceLocation ? `- SOURCE FILE: ${selectedElement.sourceLocation.summary}` : ''}` : ''}
 
-          The user has confirmed this element. You can now modify it with execute_code or update_ui.` : ''}
-
-          VOICE CONFIRMATIONS:
-          - If the user says "yes", "yeah", "yep", "correct", "that's it" → They're confirming your selection
-          - If the user says "no", "nope", "wrong", "not that one" → They're rejecting your selection
-          - When you hear a confirmation word, acknowledge it naturally (e.g., "Great, I'll change that now")
+          VOICE COMMANDS:
+          - "approve"/"yes"/"do it" → confirm_selection(true)
+          - "reject"/"no"/"cancel" → confirm_selection(false)
+          - "go back" → navigate("back")
+          - "scroll down/up/to top" → scroll("bottom"/"top")
+          - "click that link" → click_element(selector)
+          - "show me the files" → list_files()
+          - "read that file" → read_file(path)
+          - "save the changes" → patch_source_file()
 
           AVAILABLE TOOLS:
-          - select_element: Find and highlight an element by CSS selector
-          - execute_code: Run JavaScript to make runtime changes (quick, temporary)
-          - update_ui: Update the source HTML file (permanent, saved to disk)
+          📁 FILE TOOLS:
+          - list_files: List files/folders in a directory
+          - read_file: Read a file's contents
+          - patch_source_file: Save changes to source file
 
-          EXAMPLES:
-          User: "Make that button blue"
-          You: execute_code with "document.querySelector('#myBtn').style.backgroundColor = 'blue'"
+          🔍 PAGE TOOLS:
+          - get_page_elements: See what elements exist on the page
+          - select_element: Highlight elements by CSS selector
+          - execute_code: Run JavaScript to modify the page (preview)
 
-          User: "Change the heading text to 'Welcome'"
-          You: execute_code with "document.querySelector('h1').textContent = 'Welcome'"
+          🧭 NAVIGATION TOOLS:
+          - click_element: Click a link/button
+          - navigate: Go back, forward, reload, or to URL
+          - scroll: Scroll to top, bottom, or element
 
-          User: "Save those changes to the file"
-          You: update_ui with the modified HTML
+          ✅ CONFIRMATION:
+          - confirm_selection: Process user's yes/no
 
           Be concise in your spoken responses. Describe what you're doing.`,
         },
@@ -332,6 +499,264 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                                 }
                             });
                         });
+                    }
+                    else if (call.name === 'get_page_elements') {
+                        const category = (call.args as any).category || 'all';
+                        console.log("AI requesting page elements:", category);
+
+                        if (onGetPageElements) {
+                            onGetPageElements(category).then(result => {
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: {
+                                              result: result
+                                            }
+                                        }
+                                    });
+                                });
+                            }).catch(err => {
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: {
+                                              error: err.message || 'Failed to get page elements'
+                                            }
+                                        }
+                                    });
+                                });
+                            });
+                        } else {
+                            sessionPromiseRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: call.id,
+                                        name: call.name,
+                                        response: {
+                                          error: 'get_page_elements handler not available'
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                    else if (call.name === 'patch_source_file') {
+                        const filePath = (call.args as any).filePath;
+                        const searchCode = (call.args as any).searchCode;
+                        const replaceCode = (call.args as any).replaceCode;
+                        const description = (call.args as any).description;
+                        console.log("AI requesting source file patch:", filePath, description);
+
+                        if (onPatchSourceFile) {
+                            onPatchSourceFile(filePath, searchCode, replaceCode, description).then(result => {
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: result.success
+                                              ? { result: `Successfully patched ${filePath}: ${description}` }
+                                              : { error: result.error || 'Failed to patch file' }
+                                        }
+                                    });
+                                });
+                            }).catch(err => {
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: {
+                                              error: err.message || 'Failed to patch source file'
+                                            }
+                                        }
+                                    });
+                                });
+                            });
+                        } else {
+                            sessionPromiseRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: call.id,
+                                        name: call.name,
+                                        response: {
+                                          error: 'patch_source_file handler not available - file editing not supported'
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                    else if (call.name === 'list_files') {
+                        const path = (call.args as any).path || '.';
+                        console.log("AI listing files:", path);
+
+                        if (onListFiles) {
+                            onListFiles(path).then(result => {
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: { result }
+                                        }
+                                    });
+                                });
+                            }).catch(err => {
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: { error: err.message || 'Failed to list files' }
+                                        }
+                                    });
+                                });
+                            });
+                        } else {
+                            sessionPromiseRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: call.id,
+                                        name: call.name,
+                                        response: { error: 'list_files not available' }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                    else if (call.name === 'read_file') {
+                        const filePath = (call.args as any).filePath;
+                        console.log("AI reading file:", filePath);
+
+                        if (onReadFile) {
+                            onReadFile(filePath).then(result => {
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: { result }
+                                        }
+                                    });
+                                });
+                            }).catch(err => {
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: { error: err.message || 'Failed to read file' }
+                                        }
+                                    });
+                                });
+                            });
+                        } else {
+                            sessionPromiseRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: call.id,
+                                        name: call.name,
+                                        response: { error: 'read_file not available' }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                    else if (call.name === 'click_element') {
+                        const selector = (call.args as any).selector;
+                        console.log("AI clicking element:", selector);
+
+                        if (onClickElement) {
+                            onClickElement(selector).then(result => {
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: result.success
+                                              ? { result: `Clicked element: ${selector}` }
+                                              : { error: result.error || 'Failed to click element' }
+                                        }
+                                    });
+                                });
+                            });
+                        } else {
+                            sessionPromiseRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: call.id,
+                                        name: call.name,
+                                        response: { error: 'click_element not available' }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                    else if (call.name === 'navigate') {
+                        const action = (call.args as any).action;
+                        const url = (call.args as any).url;
+                        console.log("AI navigating:", action, url);
+
+                        if (onNavigate) {
+                            onNavigate(action, url).then(result => {
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: result.success
+                                              ? { result: `Navigation: ${action}${url ? ' to ' + url : ''}` }
+                                              : { error: result.error || 'Navigation failed' }
+                                        }
+                                    });
+                                });
+                            });
+                        } else {
+                            sessionPromiseRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: call.id,
+                                        name: call.name,
+                                        response: { error: 'navigate not available' }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                    else if (call.name === 'scroll') {
+                        const target = (call.args as any).target;
+                        console.log("AI scrolling to:", target);
+
+                        if (onScroll) {
+                            onScroll(target).then(result => {
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: result.success
+                                              ? { result: `Scrolled to: ${target}` }
+                                              : { error: result.error || 'Scroll failed' }
+                                        }
+                                    });
+                                });
+                            });
+                        } else {
+                            sessionPromiseRef.current?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: call.id,
+                                        name: call.name,
+                                        response: { error: 'scroll not available' }
+                                    }
+                                });
+                            });
+                        }
                     }
                 }
             }
