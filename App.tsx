@@ -309,13 +309,37 @@ async function generateSourcePatch(
   // Extract only a relevant portion of the file around the target line
   // This prevents exceeding Gemini's context limits for large files
   const lines = originalContent.split('\n');
-  const targetLine = source.line;
+  let targetLine = source.line;
+
+  // CRITICAL FIX: Source maps from Vite/HMR can report line numbers beyond file length
+  // This happens when the dev server adds transforms. Clamp to actual file length.
+  if (targetLine > lines.length) {
+    console.log('[Source Patch] ⚠️ Source map line', targetLine, 'exceeds file length', lines.length);
+    console.log('[Source Patch] Clamping target to end of file');
+    targetLine = lines.length;
+  }
+
   const contextLines = 100; // Lines before and after target
   const startLine = Math.max(0, targetLine - contextLines);
   const endLine = Math.min(lines.length, targetLine + contextLines);
+
+  // Safety check: ensure we get a valid range
+  if (startLine >= endLine) {
+    console.log('[Source Patch] ❌ ABORT: Invalid line range:', startLine, 'to', endLine);
+    return null;
+  }
+
   const codeSnippet = lines.slice(startLine, endLine).join('\n');
 
+  // Sanity check: ensure we have meaningful content
+  if (!codeSnippet || codeSnippet.trim().length < 10) {
+    console.log('[Source Patch] ❌ ABORT: Code snippet is empty or too small');
+    console.log('[Source Patch] Snippet length:', codeSnippet?.length || 0);
+    return null;
+  }
+
   console.log('[Source Patch] Extracting lines', startLine + 1, 'to', endLine, 'of', lines.length, 'total');
+  console.log('[Source Patch] Snippet length:', codeSnippet.length, 'chars');
   console.log('[Source Patch] Has CSS changes:', hasCssChanges, 'User request:', userRequest);
 
   // Build change description based on what we're modifying
@@ -331,8 +355,24 @@ async function generateSourcePatch(
     return null;
   }
 
+  // Determine if we need to search by element characteristics (line number unreliable)
+  const lineNumberReliable = source.line <= lines.length;
+  const searchByElement = !lineNumberReliable || element.text || element.className;
+
   // Build instructions based on the type of change
-  let instructions = `1. Find the JSX element near line ${targetLine} (should be near the middle of the snippet)`;
+  let instructions = '';
+  if (searchByElement) {
+    instructions = `1. SEARCH the snippet for a <${element.tagName}> element`;
+    if (element.text) {
+      instructions += ` containing text "${element.text.substring(0, 50)}"`;
+    }
+    if (element.className) {
+      instructions += ` with class "${element.className.split(' ')[0]}"`;
+    }
+  } else {
+    instructions = `1. Find the JSX element near line ${targetLine} (should be near the middle of the snippet)`;
+  }
+
   if (hasCssChanges) {
     instructions += `
 2. Add or modify the style prop to include the CSS changes
@@ -343,7 +383,13 @@ async function generateSourcePatch(
     const isTextChange = /^["'][^"']+["']$/.test(userRequest.trim()) ||
                          /(?:change|set|update)\s+(?:text|label|content|title)/i.test(userRequest) ||
                          /text\s*(?:to|:|=)/i.test(userRequest);
-    if (isTextChange || !hasCssChanges) {
+    // Check if this is a remove/delete request
+    const isRemoveRequest = /(?:remove|delete|hide)\s+(?:this|that|it|the)/i.test(userRequest);
+    if (isRemoveRequest) {
+      instructions += `
+2. To remove/delete/hide the element, add style={{ display: 'none' }} to it
+3. Or if the user wants it fully removed, wrap it in {false && <element>...</element>}`;
+    } else if (isTextChange || !hasCssChanges) {
       instructions += `
 2. Update the text content of the element based on the user's request
 3. If the request is quoted text like "New Text", use that as the new content`;
@@ -356,7 +402,7 @@ ${hasCssChanges ? '5' : '4'}. Preserve exact indentation and formatting`;
   const prompt = `You are a React/TypeScript code modifier. Given a code snippet and requested changes, output ONLY the modified snippet.
 
 Source file: ${source.file}
-Target line in original file: ${targetLine}
+${lineNumberReliable ? `Target line in original file: ${targetLine}` : '(Line number from source map may be inaccurate - search by element characteristics)'}
 Snippet shows lines ${startLine + 1} to ${endLine}
 
 Code snippet:
