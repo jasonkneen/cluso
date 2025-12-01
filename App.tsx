@@ -177,12 +177,23 @@ async function generateSourcePatch(
   projectPath?: string,
   userRequest?: string
 ): Promise<SourcePatch | null> {
-  console.log('[Source Patch] Starting patch generation...');
-  console.log('[Source Patch] Element sourceLocation:', element.sourceLocation);
-  console.log('[Source Patch] Project path:', projectPath);
+  console.log('='.repeat(60));
+  console.log('[Source Patch] === STARTING PATCH GENERATION ===');
+  console.log('[Source Patch] Input:', {
+    elementTag: element.tagName,
+    hasSourceLocation: !!element.sourceLocation,
+    sourceFile: element.sourceLocation?.sources?.[0]?.file,
+    sourceLine: element.sourceLocation?.sources?.[0]?.line,
+    cssChanges: Object.keys(cssChanges).length > 0 ? cssChanges : 'none',
+    projectPath: projectPath || 'NOT SET',
+    userRequest: userRequest?.substring(0, 50) || 'none',
+    modelId: providerConfig.modelId,
+  });
+  console.log('='.repeat(60));
 
   if (!element.sourceLocation?.sources?.[0]) {
-    console.log('[Source Patch] No source location available');
+    console.log('[Source Patch] ❌ ABORT: No source location available in element');
+    console.log('[Source Patch] element.sourceLocation =', JSON.stringify(element.sourceLocation, null, 2));
     return null;
   }
 
@@ -220,48 +231,56 @@ async function generateSourcePatch(
 
   console.log('[Source Patch] Cleaned path:', relativePath);
 
+  console.log('[Source Patch] Path analysis:', { isAbsoluteFilesystemPath, relativePath, projectPath: projectPath || 'NOT SET' });
+
   if (!isAbsoluteFilesystemPath) {
     if (projectPath) {
       // Combine with project path
       filePath = `${projectPath}/${relativePath}`;
-      console.log('[Source Patch] Full path with project:', filePath);
+      console.log('[Source Patch] ✓ Full path with project:', filePath);
     } else if (window.electronAPI?.files?.getCwd) {
       // Fallback: try to get current working directory from Electron
+      console.log('[Source Patch] No projectPath, trying getCwd fallback...');
       const cwdResult = await window.electronAPI.files.getCwd();
+      console.log('[Source Patch] getCwd result:', cwdResult);
       if (cwdResult.success && cwdResult.data) {
         filePath = `${cwdResult.data}/${relativePath}`;
-        console.log('[Source Patch] Full path with CWD fallback:', filePath);
+        console.log('[Source Patch] ✓ Full path with CWD fallback:', filePath);
       } else {
-        console.log('[Source Patch] ERROR: Cannot resolve path - no project path and getCwd failed');
+        console.log('[Source Patch] ❌ ABORT: getCwd failed:', cwdResult.error);
         return null;
       }
     } else {
-      console.log('[Source Patch] ERROR: Cannot resolve relative path without project path:', relativePath);
+      console.log('[Source Patch] ❌ ABORT: No projectPath AND no getCwd API');
       return null;
     }
+  } else {
+    console.log('[Source Patch] ✓ Path is already absolute:', filePath);
   }
 
   // SAFETY: Prevent patching the app's own source files (ai-cluso directory)
   // This prevents corrupting the running application
   if (filePath.includes('/ai-cluso/') && !filePath.includes('/ai-cluso/website/')) {
-    console.log('[Source Patch] BLOCKED: Cannot patch app source files:', filePath);
+    console.log('[Source Patch] ❌ ABORT: BLOCKED - Cannot patch app source files:', filePath);
     return null;
   }
 
   // Read the source file
   if (!window.electronAPI?.files?.readFile) {
-    console.log('[Source Patch] File API not available');
+    console.log('[Source Patch] ❌ ABORT: File API (readFile) not available');
     return null;
   }
 
   console.log('[Source Patch] Reading source file:', filePath);
   const fileResult = await window.electronAPI.files.readFile(filePath);
   if (!fileResult.success || !fileResult.data) {
-    console.log('[Source Patch] Failed to read source file:', fileResult.error);
+    console.log('[Source Patch] ❌ ABORT: Failed to read source file');
+    console.log('[Source Patch] Error:', fileResult.error);
+    console.log('[Source Patch] Result:', JSON.stringify(fileResult, null, 2));
     return null;
   }
 
-  console.log('[Source Patch] File read successfully, length:', fileResult.data.length);
+  console.log('[Source Patch] ✓ File read successfully, length:', fileResult.data.length);
   const originalContent = fileResult.data;
 
   // Get the appropriate provider for the model
@@ -381,7 +400,16 @@ Output the modified code snippet:`;
     const afterLines = lines.slice(endLine);
     const fullPatchedContent = [...beforeLines, ...patchedLines, ...afterLines].join('\n');
 
-    console.log('[Source Patch] Patch generated successfully, reconstructed file length:', fullPatchedContent.length);
+    console.log('='.repeat(60));
+    console.log('[Source Patch] ✅ === PATCH GENERATED SUCCESSFULLY ===');
+    console.log('[Source Patch] Output:', {
+      filePath,
+      originalLength: originalContent.length,
+      patchedLength: fullPatchedContent.length,
+      lineNumber: source.line,
+      changed: originalContent !== fullPatchedContent,
+    });
+    console.log('='.repeat(60));
     return {
       filePath,  // Use resolved filesystem path, not the source map URL
       originalContent,
@@ -389,7 +417,7 @@ Output the modified code snippet:`;
       lineNumber: source.line,
     };
   } catch (error) {
-    console.error('[Source Patch] Failed to generate:', error);
+    console.error('[Source Patch] ❌ EXCEPTION during generation:', error);
     return null;
   }
 }
@@ -3912,12 +3940,19 @@ If you're not sure what the user wants, ask for clarification.
     userRequest: string,
     projectPath?: string
   ) => {
-    console.log('[DOM Approval] Preparing source patch:', {
+    console.log('='.repeat(60));
+    console.log('[DOM Approval] === PREPARING SOURCE PATCH ===');
+    console.log('[DOM Approval] Inputs:', {
       approvalId,
-      cssChanges,
-      projectPath,
-      elementFile: element.sourceLocation?.sources?.[0]?.file,
+      elementTag: element.tagName,
+      cssChanges: Object.keys(cssChanges).length > 0 ? cssChanges : 'none',
+      projectPath: projectPath || 'NOT SET',
+      hasSourceLocation: !!element.sourceLocation,
+      sourceFile: element.sourceLocation?.sources?.[0]?.file || 'NONE',
+      sourceLine: element.sourceLocation?.sources?.[0]?.line || 'NONE',
+      userRequest: userRequest?.substring(0, 50),
     });
+    console.log('='.repeat(60));
     // Use refs to get current values (prevents stale closures during async operations)
     const providerConfig = { modelId: selectedModelRef.current.id, providers: providerConfigsRef.current };
     generateSourcePatch(element, cssChanges, providerConfig, projectPath || undefined, userRequest)
@@ -3993,7 +4028,16 @@ If you're not sure what the user wants, ask for clarification.
 
     const patch = pendingDOMApproval.patch;
     setIsGeneratingSourcePatch(true);
-    console.log('[DOM Approval] User approved, applying prepared source patch...');
+    console.log('='.repeat(60));
+    console.log('[DOM Approval] === USER APPROVED PATCH ===');
+    console.log('[DOM Approval] Patch details:', {
+      id: patch.id,
+      filePath: patch.filePath,
+      originalLength: patch.originalContent?.length || 0,
+      patchedLength: patch.patchedContent?.length || 0,
+      description: patch.description,
+    });
+    console.log('='.repeat(60));
 
     setMessages(prev => [...prev, {
       id: `msg-approved-${Date.now()}`,
@@ -4006,12 +4050,15 @@ If you're not sure what the user wants, ask for clarification.
 
     try {
       if (!window.electronAPI?.files?.writeFile) {
+        console.log('[DOM Approval] ❌ ABORT: writeFile API not available');
         throw new Error('File API not available');
       }
       console.log('[DOM Approval] Writing patch to disk:', patch.filePath);
+      console.log('[DOM Approval] Content length:', patch.patchedContent?.length || 0);
       const result = await window.electronAPI.files.writeFile(patch.filePath, patch.patchedContent);
+      console.log('[DOM Approval] writeFile result:', result);
       if (result.success) {
-        console.log('[Source Patch] Applied successfully');
+        console.log('[Source Patch] ✅ Applied successfully to:', patch.filePath);
         setMessages(prev => [...prev, {
           id: `msg-patch-${Date.now()}`,
           role: 'assistant',
