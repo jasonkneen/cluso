@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Folder, Clock, X, Plus } from 'lucide-react'
+import { debugLog } from '../utils/debug'
 
 // Cluso logo SVG component
 function ClusoLogo({ className }: { className?: string }) {
@@ -52,7 +53,7 @@ function loadRecentProjects(): RecentProject[] {
       return JSON.parse(stored)
     }
   } catch (e) {
-    console.error('Failed to load recent projects:', e)
+    debugLog.general.error('Failed to load recent projects:', e)
   }
   return []
 }
@@ -62,7 +63,7 @@ function saveRecentProjects(projects: RecentProject[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(projects))
   } catch (e) {
-    console.error('Failed to save recent projects:', e)
+    debugLog.general.error('Failed to save recent projects:', e)
   }
 }
 
@@ -126,7 +127,7 @@ export function NewTabPage({
         onOpenProject(path, name)
       }
     } else {
-      console.warn('Folder picker not available (not in Electron)')
+      debugLog.general.warn('Folder picker not available (not in Electron)')
     }
   }
 

@@ -9,6 +9,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { debugLog } from '../utils/debug'
 
 // ============================================================================
 // Types
@@ -212,17 +213,17 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
   // Initialize AI SDK on mount
   useEffect(() => {
     if (!window.electronAPI?.aiSdk) {
-      console.warn('[useAIChatV2] Electron AI SDK not available')
+      debugLog.aiChat.warn('Electron AI SDK not available')
       return
     }
 
     window.electronAPI.aiSdk.initialize()
       .then(() => {
         setIsInitialized(true)
-        console.log('[useAIChatV2] AI SDK initialized')
+        debugLog.aiChat.log('AI SDK initialized')
       })
       .catch((err: Error) => {
-        console.error('[useAIChatV2] Failed to initialize AI SDK:', err)
+        debugLog.aiChat.error('Failed to initialize AI SDK:', err)
       })
 
     // Cleanup on unmount
@@ -523,7 +524,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
             description: def.description,
             parameters: jsonSchemaParams,
           }
-          console.log(`[useAIChatV2] Tool ${name} params:`, JSON.stringify(jsonSchemaParams))
+          debugLog.aiChat.log(`Tool ${name} params:`, JSON.stringify(jsonSchemaParams))
         }
       }
 
@@ -717,7 +718,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     // Notify via callback
     optionsRef.current.onFinish?.()
 
-    console.log('[useAIChatV2] Request cancelled')
+    debugLog.aiChat.log('Request cancelled')
   }, [])
 
   return {

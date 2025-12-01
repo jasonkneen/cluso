@@ -30,6 +30,7 @@ import {
   Play,
   Square,
 } from 'lucide-react'
+import { debugLog } from '../utils/debug'
 
 type SettingsSection = 'general' | 'display' | 'providers' | 'models' | 'connections'
 
@@ -447,11 +448,11 @@ export function SettingsDialog({
     try {
       const result = await window.electronAPI.oauth.testApi()
       if (result.success) {
-        setApiTestResult({ success: true, message: 'API call succeeded! Check console for response.' })
-        console.log('[API Test] Response:', result.response)
+        setApiTestResult({ success: true, message: 'API call succeeded!' })
+        debugLog.general.log('API Test Response:', result.response)
       } else {
         setApiTestResult({ success: false, message: result.error || 'API call failed' })
-        console.log('[API Test] Error:', result.error)
+        debugLog.general.log('API Test Error:', result.error)
       }
     } catch (err) {
       setApiTestResult({ success: false, message: err instanceof Error ? err.message : 'Unknown error' })
@@ -526,11 +527,11 @@ export function SettingsDialog({
     try {
       const result = await window.electronAPI.codex.testApi()
       if (result.success) {
-        setCodexTestResult({ success: true, message: 'Codex API call succeeded! Check console for response.' })
-        console.log('[Codex API Test] Response:', result.response)
+        setCodexTestResult({ success: true, message: 'Codex API call succeeded!' })
+        debugLog.general.log('Codex API Test Response:', result.response)
       } else {
         setCodexTestResult({ success: false, message: result.error || 'Codex API call failed' })
-        console.log('[Codex API Test] Error:', result.error)
+        debugLog.general.log('Codex API Test Error:', result.error)
       }
     } catch (err) {
       setCodexTestResult({ success: false, message: err instanceof Error ? err.message : 'Unknown error' })

@@ -3,6 +3,7 @@ import { GoogleGenAI, Modality, LiveServerMessage, FunctionDeclaration, Type } f
 import { createAudioBlob, base64ToArrayBuffer, pcmToAudioBuffer } from '../utils/audio';
 import { StreamState, SelectedElement } from '../types';
 import { voiceLogger } from '../utils/voiceLogger';
+import { debugLog, debug } from '../utils/debug';
 
 interface UseLiveGeminiParams {
   videoRef: React.RefObject<HTMLVideoElement>;
@@ -407,7 +408,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
   // Helper to safely interact with session (handles errors silently)
   const withSession = useCallback((fn: (session: any) => void) => {
     sessionPromiseRef.current?.then(fn).catch(err => {
-      console.error('[useLiveGemini] Session error:', err);
+      debugLog.liveGemini.error('Session error:', err);
     });
   }, []);
   
@@ -567,7 +568,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
         },
         callbacks: {
           onopen: () => {
-            console.log("Connection Opened");
+            debug("Connection Opened");
             reconnectAttemptRef.current = 0; // Reset reconnect counter on successful connection
             setStreamState(prev => ({ ...prev, isConnected: true }));
 
@@ -592,13 +593,13 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
           onmessage: async (message: LiveServerMessage) => {
             // Handle Tool Calls (Code Updates)
             if (message.toolCall) {
-                console.log("Tool call received", message.toolCall);
+                debugLog.liveGemini.log("Tool call received", message.toolCall);
                 const functionCalls = message.toolCall.functionCalls;
                 if (functionCalls && functionCalls.length > 0) {
                     const call = functionCalls[0];
                     if (call.name === 'update_ui') {
                         const newHtml = (call.args as ToolArgs).html;
-                        console.log("Updating UI with new code");
+                        debugLog.liveGemini.log("Updating UI with new code");
                         if (onCodeUpdate && newHtml) {
                             onCodeUpdate(newHtml);
                         }
@@ -617,7 +618,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                     else if (call.name === 'select_element') {
                         const selector = (call.args as ToolArgs).selector;
                         const reasoning = (call.args as ToolArgs).reasoning;
-                        console.log("AI requesting element selection:", selector, reasoning);
+                        debugLog.liveGemini.log("AI requesting element selection:", selector, reasoning);
 
                         if (onElementSelect && selector) {
                             onElementSelect(selector, reasoning);
@@ -641,7 +642,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                     else if (call.name === 'execute_code') {
                         const code = (call.args as ToolArgs).code;
                         const description = (call.args as ToolArgs).description;
-                        console.log("AI requesting code execution:", description, code);
+                        debugLog.liveGemini.log("AI requesting code execution:", description, code);
 
                         if (onExecuteCode && code) {
                             onExecuteCode(code, description);
@@ -664,7 +665,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                     else if (call.name === 'confirm_selection') {
                         const confirmed = (call.args as ToolArgs).confirmed;
                         const elementNumber = (call.args as ToolArgs).elementNumber;
-                        console.log("AI confirming selection:", confirmed, "element number:", elementNumber);
+                        debugLog.liveGemini.log("AI confirming selection:", confirmed, "element number:", elementNumber);
 
                         if (onConfirmSelection) {
                             onConfirmSelection(confirmed, elementNumber);
@@ -685,7 +686,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                     }
                     else if (call.name === 'get_page_elements') {
                         const category = (call.args as ToolArgs).category || 'all';
-                        console.log("AI requesting page elements:", category);
+                        debugLog.liveGemini.log("AI requesting page elements:", category);
 
                         if (onGetPageElements) {
                             onGetPageElements(category).then(result => {
@@ -732,7 +733,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         const searchCode = (call.args as ToolArgs).searchCode;
                         const replaceCode = (call.args as ToolArgs).replaceCode;
                         const description = (call.args as ToolArgs).description;
-                        console.log("AI requesting source file patch:", filePath, description);
+                        debugLog.liveGemini.log("AI requesting source file patch:", filePath, description);
 
                         if (onPatchSourceFile) {
                             onPatchSourceFile(filePath, searchCode, replaceCode, description).then(result => {
@@ -776,7 +777,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                     }
                     else if (call.name === 'list_files') {
                         const path = (call.args as ToolArgs).path || '.';
-                        console.log("AI listing files:", path);
+                        debugLog.liveGemini.log("AI listing files:", path);
 
                         const sendListFilesResponse = (responseData: { result?: string; error?: string }) => {
                             withSession(session => {
@@ -798,7 +799,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                                     sendListFilesResponse({ result: String(result) });
                                 }
                             }).catch(err => {
-                                console.error('[useLiveGemini] list_files error:', err);
+                                debugLog.liveGemini.error('list_files error:', err);
                                 sendListFilesResponse({ error: err.message || 'Failed to list files' });
                             });
                         } else {
@@ -807,7 +808,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                     }
                     else if (call.name === 'read_file') {
                         const filePath = (call.args as ToolArgs).path ?? (call.args as ToolArgs).filePath;
-                        console.log("AI reading file:", filePath);
+                        debugLog.liveGemini.log("AI reading file:", filePath);
 
                         const sendReadFileResponse = (responseData: { result?: string; error?: string }) => {
                             withSession(session => {
@@ -830,13 +831,13 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                             onReadFile(filePath).then(result => {
                                 // Check for undefined/null result
                                 if (result === undefined || result === null) {
-                                    console.error('[useLiveGemini] read_file returned undefined for:', filePath);
+                                    debugLog.liveGemini.error('read_file returned undefined for:', filePath);
                                     sendReadFileResponse({ error: 'File read returned no content' });
                                 } else {
                                     sendReadFileResponse({ result: String(result) });
                                 }
                             }).catch(err => {
-                                console.error('[useLiveGemini] read_file error:', err);
+                                debugLog.liveGemini.error('read_file error:', err);
                                 sendReadFileResponse({ error: err.message || 'Failed to read file' });
                             });
                         } else {
@@ -845,7 +846,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                     }
                     else if (call.name === 'click_element') {
                         const selector = (call.args as ToolArgs).selector;
-                        console.log("AI clicking element:", selector);
+                        debugLog.liveGemini.log("AI clicking element:", selector);
 
                         if (onClickElement) {
                             onClickElement(selector).then(result => {
@@ -876,7 +877,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                     else if (call.name === 'navigate') {
                         const action = (call.args as ToolArgs).action;
                         const url = (call.args as ToolArgs).url;
-                        console.log("AI navigating:", action, url);
+                        debugLog.liveGemini.log("AI navigating:", action, url);
 
                         if (onNavigate) {
                             onNavigate(action, url).then(result => {
@@ -906,7 +907,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                     }
                     else if (call.name === 'scroll') {
                         const target = (call.args as ToolArgs).target;
-                        console.log("AI scrolling to:", target);
+                        debugLog.liveGemini.log("AI scrolling to:", target);
 
                         if (onScroll) {
                             onScroll(target).then(result => {
@@ -936,7 +937,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                     }
                     else if (call.name === 'open_item') {
                         const itemNumber = (call.args as ToolArgs).itemNumber;
-                        console.log("AI opening item:", itemNumber);
+                        debugLog.liveGemini.log("AI opening item:", itemNumber);
 
                         const sendOpenItemResponse = (responseData: { result?: string; error?: string }) => {
                             withSession(session => {
@@ -959,7 +960,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                     else if (call.name === 'open_file') {
                         const name = (call.args as ToolArgs).name;
                         const path = (call.args as ToolArgs).path;
-                        console.log("AI opening file:", name || path);
+                        debugLog.liveGemini.log("AI opening file:", name || path);
 
                         const sendOpenFileResponse = (responseData: { result?: string; error?: string }) => {
                             withSession(session => {
@@ -982,7 +983,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                     else if (call.name === 'open_folder') {
                         const name = (call.args as ToolArgs).name;
                         const itemNumber = (call.args as ToolArgs).itemNumber;
-                        console.log("AI opening folder:", name || `item #${itemNumber}`);
+                        debugLog.liveGemini.log("AI opening folder:", name || `item #${itemNumber}`);
 
                         const sendOpenFolderResponse = (responseData: { result?: string; error?: string }) => {
                             withSession(session => {
@@ -1003,7 +1004,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         }
                     }
                     else if (call.name === 'browser_back') {
-                        console.log("AI going back in file browser");
+                        debugLog.liveGemini.log("AI going back in file browser");
 
                         const sendBrowserBackResponse = (responseData: { result?: string; error?: string }) => {
                             withSession(session => {
@@ -1025,7 +1026,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         }
                     }
                     else if (call.name === 'close_browser') {
-                        console.log("AI closing file browser");
+                        debugLog.liveGemini.log("AI closing file browser");
 
                         const sendCloseBrowserResponse = (responseData: { result?: string; error?: string }) => {
                             withSession(session => {
@@ -1085,36 +1086,36 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
             }
           },
           onclose: () => {
-            console.log("Connection Closed");
+            debug("Connection Closed");
             // Attempt reconnection with exponential backoff
             if (reconnectAttemptRef.current < maxReconnectAttempts) {
               const delay = baseReconnectDelay * Math.pow(2, reconnectAttemptRef.current);
-              console.log(`[useLiveGemini] Scheduling reconnect attempt ${reconnectAttemptRef.current + 1}/${maxReconnectAttempts} in ${delay}ms`);
+              debugLog.liveGemini.log(`Scheduling reconnect attempt ${reconnectAttemptRef.current + 1}/${maxReconnectAttempts} in ${delay}ms`);
               reconnectAttemptRef.current++;
               reconnectTimeoutRef.current = window.setTimeout(() => {
-                console.log('[useLiveGemini] Attempting reconnection...');
+                debugLog.liveGemini.log('Attempting reconnection...');
                 cleanup(); // Clean up before reconnecting
                 // The user will need to manually reconnect by clicking connect again
                 // We just log the attempt here - full auto-reconnect would require more state management
               }, delay);
             } else {
-              console.log('[useLiveGemini] Max reconnect attempts reached');
+              debugLog.liveGemini.log('Max reconnect attempts reached');
               cleanup();
             }
           },
           onerror: (err) => {
-            console.error("Connection Error", err);
+            debugLog.liveGemini.error("Connection Error", err);
             setStreamState(prev => ({ ...prev, error: "Connection error occurred. Will attempt reconnection." }));
             // Attempt reconnection on error as well
             if (reconnectAttemptRef.current < maxReconnectAttempts) {
               const delay = baseReconnectDelay * Math.pow(2, reconnectAttemptRef.current);
-              console.log(`[useLiveGemini] Scheduling reconnect after error, attempt ${reconnectAttemptRef.current + 1}/${maxReconnectAttempts} in ${delay}ms`);
+              debugLog.liveGemini.log(`Scheduling reconnect after error, attempt ${reconnectAttemptRef.current + 1}/${maxReconnectAttempts} in ${delay}ms`);
               reconnectAttemptRef.current++;
               reconnectTimeoutRef.current = window.setTimeout(() => {
                 cleanup();
               }, delay);
             } else {
-              console.log('[useLiveGemini] Max reconnect attempts reached after error');
+              debugLog.liveGemini.log('Max reconnect attempts reached after error');
               cleanup();
             }
           }
@@ -1124,7 +1125,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
       sessionPromiseRef.current = sessionPromise;
 
     } catch (error: unknown) {
-      console.error(error);
+      debugLog.liveGemini.error(error);
       setStreamState(prev => ({ ...prev, error: error instanceof Error ? error.message : "Failed to connect" }));
       cleanup();
     }
