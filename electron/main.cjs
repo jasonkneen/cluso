@@ -336,9 +336,17 @@ function registerOAuthHandlers() {
       const responseText = await response.text()
 
       if (response.ok) {
-        return {
-          success: true,
-          response: JSON.parse(responseText)
+        try {
+          return {
+            success: true,
+            response: JSON.parse(responseText)
+          }
+        } catch (parseError) {
+          console.error('[OAuth Test] Invalid JSON response:', responseText.substring(0, 200))
+          return {
+            success: false,
+            error: 'Invalid JSON in API response'
+          }
         }
       } else {
         return {
@@ -540,9 +548,17 @@ function registerCodexHandlers() {
       const responseText = await response.text()
 
       if (response.ok) {
-        return {
-          success: true,
-          response: JSON.parse(responseText)
+        try {
+          return {
+            success: true,
+            response: JSON.parse(responseText)
+          }
+        } catch (parseError) {
+          console.error('[API Proxy] Invalid JSON response:', responseText.substring(0, 200))
+          return {
+            success: false,
+            error: 'Invalid JSON in API response'
+          }
         }
       } else {
         return {
