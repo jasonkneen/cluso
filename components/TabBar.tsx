@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Plus, X, Sun, Moon, Settings, Globe, LayoutGrid, CheckSquare, FileText, Columns3 } from 'lucide-react'
+import { Plus, X, Sun, Moon, Settings, Globe, LayoutGrid, CheckSquare, FileText, Columns3, Zap } from 'lucide-react'
 
 export type TabType = 'browser' | 'kanban' | 'todos' | 'notes'
 
@@ -20,6 +20,7 @@ interface TabBarProps {
   isDarkMode: boolean
   onToggleDarkMode: () => void
   onOpenSettings: () => void
+  fastApplyReady?: boolean
 }
 
 const TAB_TYPES = [
@@ -47,7 +48,8 @@ export function TabBar({
   onNewTab,
   isDarkMode,
   onToggleDarkMode,
-  onOpenSettings
+  onOpenSettings,
+  fastApplyReady
 }: TabBarProps) {
   const [showMenu, setShowMenu] = useState(false)
   const menuTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -226,11 +228,26 @@ export function TabBar({
         </div>
       </div>
 
-      {/* Right side - Dark Mode & Settings */}
+      {/* Right side - Fast Apply Status, Dark Mode & Settings */}
       <div
-        className="flex items-center gap-1 pr-3 flex-shrink-0"
+        className="flex items-center gap-1.5 pr-3 flex-shrink-0"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
+        {/* Fast Apply Status Chip */}
+        {fastApplyReady && (
+          <div
+            className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium backdrop-blur-md transition-all ${
+              isDarkMode
+                ? 'bg-gradient-to-r from-yellow-500/20 to-orange-500/20 text-yellow-300 border border-yellow-500/30 shadow-lg shadow-yellow-500/10'
+                : 'bg-gradient-to-r from-yellow-100 to-orange-100 text-yellow-700 border border-yellow-300/50 shadow-sm'
+            }`}
+            title="Fast Apply is ready - local AI model loaded"
+          >
+            <Zap size={10} className={isDarkMode ? 'text-yellow-400' : 'text-yellow-600'} />
+            <span>Fast</span>
+          </div>
+        )}
+
         {/* Dark Mode Toggle */}
         <button
           onClick={onToggleDarkMode}

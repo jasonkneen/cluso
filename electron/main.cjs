@@ -1727,6 +1727,256 @@ function registerMCPHandlers() {
   })
 }
 
+// ============================================
+// Fast Apply (Local LLM) IPC Handlers
+// ============================================
+let fastApplyInstance = null
+let fastApplyAvailable = null // null = not checked, true/false = check result
+
+// Mock model data for when the package isn't available yet
+const FAST_APPLY_MODELS = [
+  {
+    variant: 'Q4_K_M',
+    file: 'FastApply-1.5B-v1.0-Q4_K_M.gguf',
+    size: 986,
+    quality: 'Good',
+    memory: 1500,
+    description: 'Smallest & fastest. Good quality for most use cases.',
+    downloaded: false,
+  },
+  {
+    variant: 'Q5_K_M',
+    file: 'FastApply-1.5B-v1.0-Q5_K_M.gguf',
+    size: 1130,
+    quality: 'Better',
+    memory: 1700,
+    description: 'Slightly better quality, minimal speed impact.',
+    downloaded: false,
+  },
+  {
+    variant: 'Q8_0',
+    file: 'FastApply-1.5B-v1.0-Q8_0.gguf',
+    size: 1650,
+    quality: 'High',
+    memory: 2200,
+    description: 'High quality. Recommended if you have 4GB+ RAM.',
+    downloaded: false,
+  },
+  {
+    variant: 'F16',
+    file: 'FastApply-1.5B-v1.0-F16.gguf',
+    size: 3090,
+    quality: 'Maximum',
+    memory: 4000,
+    description: 'Maximum quality. Requires 6GB+ RAM.',
+    downloaded: false,
+  },
+]
+
+function getFastApply() {
+  if (!fastApplyInstance) {
+    try {
+      const { FastApply } = require('@ai-cluso/fast-apply')
+      fastApplyInstance = new FastApply({
+        storageDir: path.join(app.getPath('userData'), 'models', 'fast-apply'),
+        autoDownload: false,
+      })
+
+      // Forward events to renderer
+      fastApplyInstance.on('download:progress', (progress) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('fast-apply:progress', progress)
+        }
+      })
+
+      fastApplyInstance.on('download:complete', (modelPath) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('fast-apply:complete', modelPath)
+        }
+      })
+
+      fastApplyInstance.on('download:error', (error) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('fast-apply:error', error.message)
+        }
+      })
+
+      fastApplyInstance.on('model:loaded', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('fast-apply:model-loaded')
+        }
+      })
+
+      fastApplyInstance.on('model:unloaded', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('fast-apply:model-unloaded')
+        }
+      })
+
+      fastApplyAvailable = true
+      console.log('[FastApply] Initialized')
+    } catch (error) {
+      fastApplyAvailable = false
+      console.error('[FastApply] Failed to initialize:', error.message)
+      console.log('[FastApply] Package not installed - UI will show models but downloads disabled')
+      return null
+    }
+  }
+  return fastApplyInstance
+}
+
+function registerFastApplyHandlers() {
+  // Get status
+  ipcMain.handle('fast-apply:status', async () => {
+    try {
+      const fa = getFastApply()
+      if (!fa) {
+        // Return mock status when package not installed
+        return {
+          ready: false,
+          activeModel: null,
+          modelLoaded: false,
+          downloadedModels: [],
+          storageDir: path.join(app.getPath('userData'), 'models', 'fast-apply'),
+        }
+      }
+      const status = await fa.getStatus()
+      return status
+    } catch (error) {
+      return {
+        ready: false,
+        activeModel: null,
+        modelLoaded: false,
+        downloadedModels: [],
+        storageDir: path.join(app.getPath('userData'), 'models', 'fast-apply'),
+        error: error.message,
+      }
+    }
+  })
+
+  // List all available models
+  ipcMain.handle('fast-apply:list-models', async () => {
+    try {
+      const fa = getFastApply()
+      if (!fa) {
+        // Return mock models when package not installed (UI will show them as not downloaded)
+        return { success: true, models: FAST_APPLY_MODELS }
+      }
+      const models = await fa.listModels()
+      return { success: true, models }
+    } catch (error) {
+      // Fallback to mock models on error
+      return { success: true, models: FAST_APPLY_MODELS, error: error.message }
+    }
+  })
+
+  // Download a model variant
+  ipcMain.handle('fast-apply:download', async (_event, variant) => {
+    console.log('[FastApply IPC] Download requested for variant:', variant)
+    try {
+      const fa = getFastApply()
+      if (!fa) {
+        console.log('[FastApply IPC] FastApply instance not available')
+        return { success: false, error: 'Fast Apply package not installed. Please run: npm install in packages/fast-apply' }
+      }
+      console.log('[FastApply IPC] Starting download...')
+      const modelPath = await fa.download(variant)
+      console.log('[FastApply IPC] Download complete:', modelPath)
+      return { success: true, path: modelPath }
+    } catch (error) {
+      console.error('[FastApply IPC] Download error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Set active model
+  ipcMain.handle('fast-apply:set-model', async (_event, variant) => {
+    try {
+      const fa = getFastApply()
+      if (!fa) {
+        return { success: false, error: 'Fast Apply not available' }
+      }
+      await fa.setActiveModel(variant)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Apply code changes
+  ipcMain.handle('fast-apply:apply', async (_event, { code, update }) => {
+    try {
+      const fa = getFastApply()
+      if (!fa) {
+        return { success: false, error: 'Fast Apply not available' }
+      }
+      const result = await fa.apply(code, update)
+      return result
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Cancel download
+  ipcMain.handle('fast-apply:cancel', async () => {
+    try {
+      const fa = getFastApply()
+      if (fa) {
+        fa.cancelDownload()
+      }
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Delete a model
+  ipcMain.handle('fast-apply:delete', async (_event, variant) => {
+    try {
+      const fa = getFastApply()
+      if (!fa) {
+        return { success: false, error: 'Fast Apply not available' }
+      }
+      await fa.deleteModel(variant)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Load model into memory
+  ipcMain.handle('fast-apply:load', async () => {
+    try {
+      const fa = getFastApply()
+      if (!fa) {
+        return { success: false, error: 'Fast Apply not available' }
+      }
+      console.log('[FastApply IPC] Loading model into memory...')
+      await fa.load()
+      console.log('[FastApply IPC] Model loaded successfully')
+      return { success: true }
+    } catch (error) {
+      console.error('[FastApply IPC] Load error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Unload model to free memory
+  ipcMain.handle('fast-apply:unload', async () => {
+    try {
+      const fa = getFastApply()
+      if (fa) {
+        await fa.unload()
+      }
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  console.log('[FastApply] IPC handlers registered')
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -1785,6 +2035,7 @@ app.whenReady().then(async () => {
   registerCodexHandlers()
   registerClaudeCodeHandlers()
   registerMCPHandlers()
+  registerFastApplyHandlers()
 
   // Register AI SDK handlers and initialize
   aiSdkWrapper.registerHandlers()

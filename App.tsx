@@ -168,6 +168,9 @@ interface SourcePatch {
   originalContent: string;
   patchedContent: string;
   lineNumber: number;
+  // Metadata about how the patch was generated
+  generatedBy?: 'fast-apply' | 'gemini' | 'fast-path';
+  durationMs?: number;
 }
 
 async function generateSourcePatch(
@@ -348,6 +351,7 @@ async function generateSourcePatch(
         originalContent,
         patchedContent,
         lineNumber: source.line,
+        generatedBy: 'fast-path',
       };
     } else {
       console.log('[Source Patch] ⚡ Src fast path failed - falling back to AI');
@@ -395,6 +399,7 @@ async function generateSourcePatch(
         originalContent,
         patchedContent,
         lineNumber: source.line,
+        generatedBy: 'fast-path',
       };
     } else {
       console.log('[Source Patch] ⚡ Fast path failed - falling back to AI');
@@ -506,6 +511,7 @@ async function generateSourcePatch(
         originalContent,
         patchedContent,
         lineNumber: source.line,
+        generatedBy: 'fast-path',
       };
     } else {
       console.log('[Source Patch] ⚡ CSS fast path failed - falling back to AI');
@@ -612,6 +618,7 @@ async function generateSourcePatch(
         originalContent,
         patchedContent,
         lineNumber: source.line,
+        generatedBy: 'fast-path',
       };
     } else {
       console.log('[Source Patch] ⚡ Combined fast path failed - falling back to AI');
@@ -757,6 +764,80 @@ ${instructions}
 
 Output the modified code snippet:`;
 
+  // ⚡ PRO FEATURE: Try Fast Apply (local LLM) first for instant code merging
+  if (window.electronAPI?.fastApply) {
+    try {
+      console.log('[Source Patch] ⚡ Checking Fast Apply availability...');
+      const fastApplyStatus = await window.electronAPI.fastApply.getStatus();
+
+      // Check if a model is selected (it will load on-demand during apply)
+      if (fastApplyStatus.activeModel) {
+        console.log('[Source Patch] ⚡ Fast Apply has active model:', fastApplyStatus.activeModel, '- using local inference...');
+
+        // Check if this is a removal/deletion request - provide specific code guidance
+        const isRemoveRequest = userRequest && /(?:remove|delete|hide)\s+(?:this|that|it|the|element)?/i.test(userRequest);
+
+        // Build the update description for Fast Apply
+        let updateDescription = '';
+        if (isRemoveRequest) {
+          // For removal requests, provide explicit guidance on how to remove the element
+          updateDescription = `Remove/delete this element by either:
+1. Wrapping it in {false && <element>...</element>} to hide it
+2. Or simply deleting the entire JSX element from the code
+Target: <${element.tagName}>${element.text ? ` containing "${element.text.substring(0, 30)}"` : ''}${element.className ? ` with class="${element.className.split(' ')[0]}"` : ''}`;
+        } else if (hasCssChanges) {
+          updateDescription = `Apply these CSS changes: ${cssString}${userRequest ? `\n\nUser request: ${userRequest}` : ''}`;
+        } else {
+          updateDescription = userRequest || '';
+        }
+
+        const fastResult = await window.electronAPI.fastApply.apply(codeSnippet, updateDescription);
+
+        if (fastResult.success && fastResult.code) {
+          console.log('[Source Patch] ⚡ Fast Apply SUCCESS! Duration:', fastResult.durationMs, 'ms');
+
+          // Reconstruct the full file with the patched snippet
+          const patchedLines = fastResult.code.split('\n');
+          const beforeLines = lines.slice(0, startLine);
+          const afterLines = lines.slice(endLine);
+          const fullPatchedContent = [...beforeLines, ...patchedLines, ...afterLines].join('\n');
+
+          // Validate the patched content
+          if (fullPatchedContent !== originalContent) {
+            console.log('='.repeat(60));
+            console.log('[Source Patch] ⚡ === FAST APPLY PATCH GENERATED ===');
+            console.log('[Source Patch] Output:', {
+              filePath,
+              originalLength: originalContent.length,
+              patchedLength: fullPatchedContent.length,
+              lineNumber: source.line,
+              durationMs: fastResult.durationMs,
+            });
+            console.log('='.repeat(60));
+            return {
+              filePath,
+              originalContent,
+              patchedContent: fullPatchedContent,
+              lineNumber: source.line,
+              generatedBy: 'fast-apply',
+              durationMs: fastResult.durationMs,
+            };
+          } else {
+            console.log('[Source Patch] ⚡ Fast Apply returned unchanged content, falling back to Gemini');
+          }
+        } else {
+          console.log('[Source Patch] ⚡ Fast Apply failed:', fastResult.error || 'Unknown error');
+          console.log('[Source Patch] Falling back to Gemini...');
+        }
+      } else {
+        console.log('[Source Patch] Fast Apply not available (no model selected), using Gemini');
+      }
+    } catch (fastApplyError) {
+      console.log('[Source Patch] Fast Apply error:', fastApplyError);
+      console.log('[Source Patch] Falling back to Gemini...');
+    }
+  }
+
   try {
     console.log('[Source Patch] Calling Gemini for code modification...');
     const result = await generateText({
@@ -795,6 +876,7 @@ Output the modified code snippet:`;
       originalContent,
       patchedContent: fullPatchedContent,
       lineNumber: source.line,
+      generatedBy: 'gemini',
     };
   } catch (error) {
     console.error('[Source Patch] ❌ EXCEPTION during generation:', error);
@@ -1258,6 +1340,9 @@ export default function App() {
   // Settings Dialog State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
+  // Fast Apply Status (Pro Feature)
+  const [fastApplyReady, setFastApplyReady] = useState(false);
+
   // App Settings State - with localStorage persistence
   const [appSettings, setAppSettings] = useState<AppSettings>(() => {
     try {
@@ -1378,6 +1463,8 @@ export default function App() {
     cssChanges?: Record<string, string>  // CSS property changes made
     undoCode?: string  // JavaScript to revert DOM changes
     applyCode?: string  // JavaScript to re-apply DOM changes
+    generatedBy?: 'fast-apply' | 'gemini' | 'fast-path'  // Which method generated the patch
+    durationMs?: number  // How long it took to generate
   }
   const [pendingPatch, setPendingPatch] = useState<PendingPatch | null>(null)
   const [isPreviewingPatchOriginal, setIsPreviewingPatchOriginal] = useState(false)
@@ -1396,6 +1483,7 @@ export default function App() {
     patchStatus: 'preparing' | 'ready' | 'error'
     patch?: PendingPatch
     patchError?: string
+    userApproved?: boolean  // Set to true when user clicks Accept, triggers auto-apply when patch is ready
   }
   const [pendingDOMApproval, setPendingDOMApproval] = useState<PendingDOMApproval | null>(null)
   const [isGeneratingSourcePatch, setIsGeneratingSourcePatch] = useState(false)
@@ -1667,6 +1755,34 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('darkMode', String(isDarkMode));
   }, [isDarkMode]);
+
+  // Check Fast Apply status (Pro Feature)
+  useEffect(() => {
+    const checkFastApplyStatus = async () => {
+      if (!window.electronAPI?.fastApply) return;
+      try {
+        const status = await window.electronAPI.fastApply.getStatus();
+        setFastApplyReady(status.ready);
+      } catch (err) {
+        console.log('[FastApply] Status check error:', err);
+      }
+    };
+
+    checkFastApplyStatus();
+
+    // Listen for model loaded/unloaded events
+    const unsubLoaded = window.electronAPI?.fastApply?.onModelLoaded(() => {
+      setFastApplyReady(true);
+    });
+    const unsubUnloaded = window.electronAPI?.fastApply?.onModelUnloaded(() => {
+      setFastApplyReady(false);
+    });
+
+    return () => {
+      unsubLoaded?.();
+      unsubUnloaded?.();
+    };
+  }, []);
 
   // Keep refs in sync with state for webview event handler closures
   useEffect(() => {
@@ -4687,8 +4803,10 @@ If you're not sure what the user wants, ask for clarification.
               cssChanges,
               undoCode,
               applyCode,
+              generatedBy: patch.generatedBy,
+              durationMs: patch.durationMs,
             };
-            console.log('[DOM Approval] Patch ready:', { approvalId, filePath: patch.filePath });
+            console.log('[DOM Approval] Patch ready:', { approvalId, filePath: patch.filePath, generatedBy: patch.generatedBy });
             return {
               ...prev,
               patchStatus: 'ready',
@@ -4718,15 +4836,13 @@ If you're not sure what the user wants, ask for clarification.
       id: pendingDOMApproval.id,
       status: pendingDOMApproval.patchStatus,
       hasPatch: !!pendingDOMApproval.patch,
+      userApproved: pendingDOMApproval.userApproved,
     });
 
+    // If still preparing, mark as user-approved so it auto-applies when ready
     if (pendingDOMApproval.patchStatus === 'preparing') {
-      setMessages(prev => [...prev, {
-        id: `msg-wait-${Date.now()}`,
-        role: 'assistant',
-        content: 'Still preparing the source patch. Please wait a moment and try approving again.',
-        timestamp: new Date(),
-      }]);
+      console.log('[DOM Approval] Patch still preparing, marking as user-approved for auto-apply');
+      setPendingDOMApproval(prev => prev ? { ...prev, userApproved: true } : null);
       return;
     }
 
@@ -4829,6 +4945,14 @@ If you're not sure what the user wants, ask for clarification.
     setPendingChange(null); // Clear pill toolbar too
   }, [pendingDOMApproval, addEditedFile]);
 
+  // Auto-apply when patch is ready and user has pre-approved
+  useEffect(() => {
+    if (pendingDOMApproval?.userApproved && pendingDOMApproval.patchStatus === 'ready' && pendingDOMApproval.patch) {
+      console.log('[DOM Approval] Auto-applying: patch ready and user already approved');
+      handleAcceptDOMApproval();
+    }
+  }, [pendingDOMApproval?.patchStatus, pendingDOMApproval?.userApproved, handleAcceptDOMApproval]);
+
   // Handle rejecting DOM preview - reverts changes
   const handleRejectDOMApproval = useCallback(() => {
     if (!pendingDOMApproval) return;
@@ -4883,6 +5007,7 @@ If you're not sure what the user wants, ask for clarification.
         isDarkMode={isDarkMode}
         onToggleDarkMode={toggleDarkMode}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        fastApplyReady={fastApplyReady}
       />
 
       {/* Main Content Area */}
@@ -5907,27 +6032,60 @@ If you're not sure what the user wants, ask for clarification.
                       </button>
                       <button
                         onClick={handleAcceptDOMApproval}
-                        disabled={pendingDOMApproval.patchStatus !== 'ready'}
+                        disabled={pendingDOMApproval.userApproved}
                         className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
                           isDarkMode
                             ? 'bg-blue-600 hover:bg-blue-500 text-white'
                             : 'bg-blue-600 hover:bg-blue-700 text-white'
-                        } ${pendingDOMApproval.patchStatus !== 'ready' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        } ${pendingDOMApproval.userApproved ? 'opacity-60 cursor-not-allowed' : ''}`}
                       >
-                        {pendingDOMApproval.patchStatus === 'ready' ? (
+                        {pendingDOMApproval.userApproved ? (
+                          <>
+                            <Loader2 size={14} className="animate-spin" />
+                            Applying…
+                          </>
+                        ) : pendingDOMApproval.patchStatus === 'ready' ? (
                           <>
                             <Check size={14} />
                             Accept
                           </>
                         ) : (
                           <>
-                            <Loader2 size={14} className="animate-spin" />
-                            Waiting…
+                            <Check size={14} />
+                            Accept
                           </>
                         )}
                       </button>
                     </div>
                   </div>
+                  {/* Tool use indicator showing which method generated the patch */}
+                  {pendingDOMApproval.patchStatus === 'ready' && pendingDOMApproval.patch && (
+                    <div className={`mt-2 pt-2 border-t ${isDarkMode ? 'border-blue-800/30' : 'border-blue-200'}`}>
+                      <div className={`flex items-center gap-2 text-xs ${isDarkMode ? 'text-blue-300/70' : 'text-blue-700/70'}`}>
+                        {pendingDOMApproval.patch.generatedBy === 'fast-apply' ? (
+                          <>
+                            <Zap size={12} className="text-yellow-500" />
+                            <span className="font-medium text-yellow-500">Fast Apply</span>
+                            <span>·</span>
+                            <span>{pendingDOMApproval.patch.durationMs}ms</span>
+                          </>
+                        ) : pendingDOMApproval.patch.generatedBy === 'fast-path' ? (
+                          <>
+                            <Zap size={12} className="text-green-500" />
+                            <span className="font-medium text-green-500">Fast Path</span>
+                            <span>· instant</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={12} />
+                            <span className="font-medium">Gemini</span>
+                          </>
+                        )}
+                        <span>·</span>
+                        <span className="truncate">{pendingDOMApproval.patch.filePath.split('/').pop()}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -6132,9 +6290,9 @@ If you're not sure what the user wants, ask for clarification.
                 }`}
               >
                 {/* Drawer Header - always visible */}
-                <button
+                <div
                   onClick={() => setIsEditedFilesDrawerOpen(!isEditedFilesDrawerOpen)}
-                  className={`w-full flex items-center justify-between px-4 py-2.5 transition-colors ${
+                  className={`w-full flex items-center justify-between px-4 py-2.5 transition-colors cursor-pointer ${
                     isDarkMode ? 'hover:bg-neutral-700' : 'hover:bg-stone-200'
                   }`}
                 >
@@ -6171,7 +6329,7 @@ If you're not sure what the user wants, ask for clarification.
                       Keep All
                     </button>
                   </div>
-                </button>
+                </div>
 
                 {/* Drawer Content - file list */}
                 <div

@@ -1336,8 +1336,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                     </li>
                   </ul>
                   <a href="#download" className="btn btn-secondary">Contact Sales</a>
-                </div>
-              </div>
+</div>
+</div>
             </div>
           </div>
         </section>
@@ -1350,7 +1350,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               Download Cluso for free and transform how you build user interfaces.
             </p>
             <div className="cta-buttons">
-              <a href="#download" className="btn btn-primary btn-large">
+              <a href="#download" className="btn btn-primary btn-large" style={{ backgroundColor: 'white', color: 'black' }}>
                 Download Now
               </a>
             </div>
