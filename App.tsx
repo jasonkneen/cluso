@@ -3243,8 +3243,8 @@ If you're not sure what the user wants, ask for clarification.
       let text: string | null = null;
 
       // Process through coding agent for intent classification
-      const { intent, systemPrompt: agentSystemPrompt, tools } = processCodingMessage(userMessage.content);
-      console.log(`[Coding Agent] Intent: ${intent.type} (${Math.round(intent.confidence * 100)}%)`);
+      const { intent, systemPrompt: agentSystemPrompt, tools, promptMode } = processCodingMessage(userMessage.content);
+      console.log(`[Coding Agent] Intent: ${intent.type} (${Math.round(intent.confidence * 100)}%) | Mode: ${promptMode}`);
 
       // INSTANT UI UPDATE: For ui_modify with a selected element that has source mapping
       // Use Gemini Flash for instant DOM update + prepare source patch for confirmation
@@ -3481,13 +3481,14 @@ If you're not sure what the user wants, ask for clarification.
       }
 
       // Determine if we should use coding agent tools
-      // Use tools for file operations, code-related intents, UI operations, or when MCP tools are available
+      // Use tools for file operations, code-related intents, or when MCP tools are available
+      // DOM edits (ui_modify with selected element) use the fast path with minimal prompt
       const hasMCPTools = mcpToolDefinitions.length > 0
-      const intentNeedsTools = ['code_edit', 'code_create', 'code_delete', 'code_refactor', 'file_operation', 'debug', 'ui_inspect', 'ui_modify']
+      const intentNeedsTools = ['code_edit', 'code_create', 'code_delete', 'code_refactor', 'file_operation', 'debug', 'ui_inspect']
         .includes(intent.type)
-      // Always enable tools when MCP tools are connected so the AI can use them
-      const shouldUseTools = intentNeedsTools || hasMCPTools
-      console.log(`[AI SDK] MCP tools available: ${mcpToolDefinitions.length}, intent needs tools: ${intentNeedsTools}`);
+      // DOM edit mode uses minimal prompt without tools (fast path)
+      const shouldUseTools = promptMode !== 'dom_edit' && (intentNeedsTools || hasMCPTools)
+      console.log(`[AI SDK] Mode: ${promptMode} | MCP tools: ${mcpToolDefinitions.length} | Tools enabled: ${shouldUseTools}`);
 
       // Use AI SDK for OpenAI, Anthropic, Google text models, and OAuth providers
       // Google uses process.env.API_KEY directly, so bypass provider configs check for google too

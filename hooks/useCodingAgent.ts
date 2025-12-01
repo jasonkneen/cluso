@@ -2,6 +2,7 @@ import { useCallback, useRef, useState, useMemo } from 'react'
 import { z } from 'zod'
 import { ToolsMap, ToolDefinition, mcpToolsToAISDKFormat, MCPToolDefinition, MCPToolCaller, mergeTools } from './useAIChat'
 import { SelectedElement, Message } from '../types'
+import { getSystemPrompt, getPromptModeForIntent, type PromptMode } from '../utils/systemPrompts'
 
 // Helper to safely access electronAPI (fixes TS errors)
 const getElectronAPI = () => {
@@ -758,10 +759,11 @@ export function useCodingAgent(options: UseCodingAgentOptions = {}) {
   }, [])
 
   // Process a user message and return prepared data for AI call
-  const processMessage = useCallback((message: string): {
+  const processMessage = useCallback((message: string, options?: { forceMode?: PromptMode }): {
     intent: ClassifiedIntent
     systemPrompt: string
     tools: ToolsMap
+    promptMode: PromptMode
   } => {
     const intent = classifyIntent(message, state.context)
 
@@ -770,10 +772,27 @@ export function useCodingAgent(options: UseCodingAgentOptions = {}) {
       lastIntent: intent,
     }))
 
+    // Determine prompt mode based on intent and context
+    const promptMode = options?.forceMode ?? getPromptModeForIntent(intent.type, !!state.context.selectedElement)
+
+    // For DOM edits, use minimal prompt without tools
+    // For file ops and chat, use full prompt with all tools and MCP
+    let systemPrompt: string
+    if (promptMode === 'dom_edit') {
+      systemPrompt = getSystemPrompt('dom_edit', {
+        selectedElement: state.context.selectedElement,
+        projectPath: state.context.projectPath,
+      })
+    } else {
+      // Use full buildSystemPrompt for file ops and chat (includes MCP tools)
+      systemPrompt = buildSystemPrompt(state.context, intent, mcpTools.length > 0 ? mcpTools : undefined)
+    }
+
     return {
       intent,
-      systemPrompt: buildSystemPrompt(state.context, intent, mcpTools.length > 0 ? mcpTools : undefined),
-      tools: combinedTools,
+      systemPrompt,
+      tools: promptMode === 'dom_edit' ? {} : combinedTools, // No tools for DOM edit
+      promptMode,
     }
   }, [state.context, mcpTools, combinedTools])
 
