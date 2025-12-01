@@ -104,6 +104,92 @@ function injectStyles() {
     .element-number-badge::before {
       content: '';
     }
+
+    /* Drag-drop glow effect for selected elements */
+    .inspector-drag-over {
+      outline: 3px solid #22c55e !important;
+      outline-offset: 2px !important;
+      box-shadow: 0 0 20px 5px rgba(34, 197, 94, 0.5), 0 0 40px 10px rgba(34, 197, 94, 0.3) !important;
+      transition: all 0.15s ease-out !important;
+    }
+
+    .drop-zone-label {
+      position: fixed !important;
+      padding: 8px 16px !important;
+      background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%) !important;
+      color: white !important;
+      border-radius: 8px !important;
+      font-size: 14px !important;
+      font-weight: 600 !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+      box-shadow: 0 4px 12px rgba(34, 197, 94, 0.4), 0 2px 4px rgba(0, 0, 0, 0.1) !important;
+      z-index: 100000 !important;
+      pointer-events: none !important;
+      display: flex !important;
+      align-items: center !important;
+      gap: 8px !important;
+      animation: dropLabelPulse 1s ease-in-out infinite !important;
+    }
+
+    @keyframes dropLabelPulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.02); opacity: 0.95; }
+    }
+
+    .drop-zone-label::before {
+      content: '📥' !important;
+      font-size: 16px !important;
+    }
+
+    /* Inline editing styles */
+    .inspector-inline-editing {
+      outline: 2px solid #3b82f6 !important;
+      outline-offset: 2px !important;
+      min-height: 1em !important;
+    }
+
+    .inspector-edit-toolbar {
+      position: fixed !important;
+      display: flex !important;
+      gap: 4px !important;
+      z-index: 100001 !important;
+      background: rgba(255, 255, 255, 0.95) !important;
+      padding: 4px !important;
+      border-radius: 8px !important;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+      backdrop-filter: blur(8px) !important;
+    }
+
+    .inspector-edit-btn {
+      width: 28px !important;
+      height: 28px !important;
+      border: none !important;
+      border-radius: 6px !important;
+      cursor: pointer !important;
+      font-size: 14px !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      transition: all 0.15s ease !important;
+    }
+
+    .inspector-edit-btn.accept {
+      background: #22c55e !important;
+      color: white !important;
+    }
+
+    .inspector-edit-btn.accept:hover {
+      background: #16a34a !important;
+    }
+
+    .inspector-edit-btn.reject {
+      background: #ef4444 !important;
+      color: white !important;
+    }
+
+    .inspector-edit-btn.reject:hover {
+      background: #dc2626 !important;
+    }
   `
 
   // Append to head if available, otherwise body, otherwise documentElement
@@ -641,3 +727,236 @@ ipcRenderer.on('select-element-by-selector', async (event, selector) => {
     })
   }
 })
+
+// --- Drag-Drop on Selected Elements ---
+let dropLabel = null
+let originalTextContent = null
+let isEditing = false
+let editToolbar = null
+
+function getDropAction(element, dataTransfer) {
+  const hasFiles = dataTransfer.types.includes('Files')
+  const hasUrl = dataTransfer.types.includes('text/uri-list') || dataTransfer.types.includes('text/plain')
+  const tagName = element.tagName.toLowerCase()
+
+  if (tagName === 'img' && hasFiles) return 'Replace Image'
+  if (tagName === 'img' && hasUrl) return 'Set Image URL'
+  if ((tagName === 'a' || tagName === 'button') && hasUrl) return 'Set Link'
+  if (hasFiles) return 'Insert Image'
+  if (hasUrl) return 'Insert Link'
+  return 'Drop Here'
+}
+
+function showDropLabel(element, action) {
+  if (!dropLabel) {
+    dropLabel = document.createElement('div')
+    dropLabel.className = 'drop-zone-label'
+    document.body.appendChild(dropLabel)
+  }
+
+  const rect = element.getBoundingClientRect()
+  dropLabel.textContent = action
+  dropLabel.style.left = (rect.left + rect.width / 2 - 60) + 'px'
+  dropLabel.style.top = (rect.top - 40) + 'px'
+  dropLabel.style.display = 'flex'
+}
+
+function hideDropLabel() {
+  if (dropLabel) {
+    dropLabel.style.display = 'none'
+  }
+}
+
+function createEditToolbar(element) {
+  if (editToolbar) editToolbar.remove()
+
+  editToolbar = document.createElement('div')
+  editToolbar.className = 'inspector-edit-toolbar'
+
+  const acceptBtn = document.createElement('button')
+  acceptBtn.className = 'inspector-edit-btn accept'
+  acceptBtn.textContent = '✓'
+  acceptBtn.title = 'Accept'
+
+  const rejectBtn = document.createElement('button')
+  rejectBtn.className = 'inspector-edit-btn reject'
+  rejectBtn.textContent = '✗'
+  rejectBtn.title = 'Reject'
+
+  editToolbar.appendChild(acceptBtn)
+  editToolbar.appendChild(rejectBtn)
+
+  const rect = element.getBoundingClientRect()
+  editToolbar.style.left = (rect.right + 8) + 'px'
+  editToolbar.style.top = rect.top + 'px'
+
+  document.body.appendChild(editToolbar)
+
+  // Accept button handler
+  acceptBtn.addEventListener('click', function(e) {
+    e.stopPropagation()
+    const newText = element.textContent
+    ipcRenderer.sendToHost('inline-edit-accept', {
+      oldText: originalTextContent,
+      newText: newText,
+      element: getElementSummary(element)
+    })
+    finishEditing(element)
+  })
+
+  // Reject button handler
+  rejectBtn.addEventListener('click', function(e) {
+    e.stopPropagation()
+    element.textContent = originalTextContent
+    finishEditing(element)
+  })
+
+  return editToolbar
+}
+
+function startEditing(element) {
+  if (isEditing) return
+
+  // Only allow editing for text-like elements
+  const tagName = element.tagName.toLowerCase()
+  if (['img', 'video', 'audio', 'iframe', 'canvas', 'svg'].includes(tagName)) return
+  if (element.children.length > 0 && element.textContent.trim().length > 200) return // Skip complex elements
+
+  isEditing = true
+  originalTextContent = element.textContent
+
+  element.contentEditable = 'true'
+  element.classList.add('inspector-inline-editing')
+  element.focus()
+
+  createEditToolbar(element)
+
+  // Select all text
+  const range = document.createRange()
+  range.selectNodeContents(element)
+  const sel = window.getSelection()
+  sel.removeAllRanges()
+  sel.addRange(range)
+}
+
+function finishEditing(element) {
+  isEditing = false
+  element.contentEditable = 'false'
+  element.classList.remove('inspector-inline-editing')
+  originalTextContent = null
+
+  if (editToolbar) {
+    editToolbar.remove()
+    editToolbar = null
+  }
+}
+
+// Global drag event handlers
+document.addEventListener('dragover', function(e) {
+  if (!currentSelected) return
+
+  const rect = currentSelected.getBoundingClientRect()
+  const isOverSelected = (
+    e.clientX >= rect.left && e.clientX <= rect.right &&
+    e.clientY >= rect.top && e.clientY <= rect.bottom
+  )
+
+  if (isOverSelected) {
+    e.preventDefault()
+    e.stopPropagation()
+    currentSelected.classList.add('inspector-drag-over')
+    const action = getDropAction(currentSelected, e.dataTransfer)
+    showDropLabel(currentSelected, action)
+  } else {
+    currentSelected.classList.remove('inspector-drag-over')
+    hideDropLabel()
+  }
+}, true)
+
+document.addEventListener('dragleave', function(e) {
+  if (!currentSelected) return
+
+  // Only hide if truly leaving the element
+  const rect = currentSelected.getBoundingClientRect()
+  const isStillOver = (
+    e.clientX >= rect.left && e.clientX <= rect.right &&
+    e.clientY >= rect.top && e.clientY <= rect.bottom
+  )
+
+  if (!isStillOver) {
+    currentSelected.classList.remove('inspector-drag-over')
+    hideDropLabel()
+  }
+}, true)
+
+document.addEventListener('drop', function(e) {
+  if (!currentSelected) return
+
+  const rect = currentSelected.getBoundingClientRect()
+  const isOverSelected = (
+    e.clientX >= rect.left && e.clientX <= rect.right &&
+    e.clientY >= rect.top && e.clientY <= rect.bottom
+  )
+
+  if (!isOverSelected) return
+
+  e.preventDefault()
+  e.stopPropagation()
+
+  currentSelected.classList.remove('inspector-drag-over')
+  hideDropLabel()
+
+  const files = e.dataTransfer.files
+  const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain')
+  const summary = getElementSummary(currentSelected)
+
+  if (files.length > 0 && files[0].type.startsWith('image/')) {
+    // Read the file and send to parent
+    const reader = new FileReader()
+    reader.onload = function(ev) {
+      ipcRenderer.sendToHost('drop-image-on-element', {
+        imageData: ev.target.result,
+        element: summary,
+        rect: {
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height
+        }
+      })
+    }
+    reader.readAsDataURL(files[0])
+  } else if (url && url.startsWith('http')) {
+    ipcRenderer.sendToHost('drop-url-on-element', {
+      url: url,
+      element: summary,
+      rect: {
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height
+      }
+    })
+  }
+}, true)
+
+// Double-click to start inline editing
+document.addEventListener('dblclick', function(e) {
+  if (!currentSelected) return
+  if (e.target !== currentSelected && !currentSelected.contains(e.target)) return
+
+  e.preventDefault()
+  e.stopPropagation()
+  startEditing(currentSelected)
+}, true)
+
+// Escape to cancel editing
+document.addEventListener('keydown', function(e) {
+  if (!isEditing) return
+  if (e.key === 'Escape') {
+    if (currentSelected) {
+      currentSelected.textContent = originalTextContent
+      finishEditing(currentSelected)
+    }
+  }
+}, true)
