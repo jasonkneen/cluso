@@ -4216,9 +4216,252 @@ If you're not sure what the user wants, ask for clarification.
       const { intent, systemPrompt: agentSystemPrompt, tools, promptMode } = processCodingMessage(userMessage.content);
       console.log(`[Coding Agent] Intent: ${intent.type} (${Math.round(intent.confidence * 100)}%) | Mode: ${promptMode}`);
 
+      const googleProvider = appSettings.providers.find(p => p.id === 'google' && p.enabled && p.apiKey);
+
+      // 🖼️ IMAGE ATTACHMENT HANDLER - works WITH or WITHOUT selected element
+      // Must be BEFORE the selectedElement check to handle standalone image attachments
+      const hasAttachedImageGlobal = attachedImages.length > 0;
+      const isImageRelatedMessage = /(?:add|insert|put|use|replace|change|swap|set|place|show|save|upload).*(?:image|photo|picture|attached|this|screenshot)|(?:this|the|attached)\s*(?:image|photo|picture|screenshot)|(?:image|photo|picture|screenshot)\s*(?:here|to|in|on|as)/i.test(userMessage.content);
+
+      if (hasAttachedImageGlobal && isImageRelatedMessage) {
+        const projectPath = activeTab?.projectPath;
+        if (!projectPath) {
+          const errorMessage: ChatMessage = {
+            id: `msg-error-${Date.now()}`,
+            role: 'assistant',
+            content: 'Cannot save image: No project folder is set. Please open a project first.',
+            timestamp: new Date(),
+            model: 'system',
+          };
+          setMessages(prev => [...prev, errorMessage]);
+          setAttachedImages([]);
+          return;
+        }
+
+        try {
+          // Generate content-hash based filename
+          const hashCode = (str: string) => {
+            let hash = 0;
+            for (let i = 0; i < Math.min(str.length, 10000); i++) {
+              const char = str.charCodeAt(i);
+              hash = ((hash << 5) - hash) + char;
+              hash = hash & hash;
+            }
+            return Math.abs(hash).toString(16).padStart(8, '0');
+          };
+          const attachedImage = attachedImages[0];
+          const contentHash = hashCode(attachedImage);
+          const mimeMatch = attachedImage.match(/^data:image\/(\w+);/);
+          const ext = mimeMatch ? mimeMatch[1].replace('jpeg', 'jpg') : 'png';
+          const filename = `img-${contentHash}.${ext}`;
+          const publicPath = `${projectPath}/public/uploads`;
+          const fullPath = `${publicPath}/${filename}`;
+          const relativePath = `/uploads/${filename}`;
+
+          console.log('[Image Save] Saving to:', fullPath);
+
+          // Save the image
+          const saveResult = await window.electronAPI?.files.saveImage(attachedImage, fullPath);
+          if (!saveResult?.success) {
+            throw new Error(saveResult?.error || 'Failed to save image');
+          }
+
+          console.log('[Image Save] Image saved successfully');
+
+          // If we have a selected element, apply the image to it
+          if (selectedElement) {
+            const webview = webviewRefs.current.get(activeTabId);
+            if (webview) {
+              const tagName = selectedElement.tagName?.toLowerCase() || '';
+              const isImgElement = tagName === 'img';
+              const isContainerElement = ['div', 'section', 'article', 'aside', 'header', 'footer', 'main', 'figure', 'span', 'p'].includes(tagName);
+
+              let applyCode: string;
+              let undoCode: string;
+              let description: string;
+
+              if (isImgElement) {
+                // Strategy 1: Direct img src replacement
+                const originalSrc = await (webview as Electron.WebviewTag).executeJavaScript(`
+                  (function() {
+                    const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    return el ? el.src : '';
+                  })();
+                `);
+
+                applyCode = `
+                  (function() {
+                    const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    if (el && el.tagName === 'IMG') { el.src = '${relativePath}'; return 'Applied'; }
+                    return 'Not found';
+                  })();
+                `;
+                undoCode = `
+                  (function() {
+                    const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    if (el && el.tagName === 'IMG') { el.src = '${originalSrc}'; return 'Reverted'; }
+                    return 'Not found';
+                  })();
+                `;
+                description = `Set image src to ${filename}`;
+
+                await (webview as Electron.WebviewTag).executeJavaScript(applyCode);
+
+                // Prepare source patch
+                const approvalId = `dom-img-${Date.now()}`;
+                const approvalPayload: PendingDOMApproval = {
+                  id: approvalId,
+                  element: selectedElement,
+                  cssChanges: {},
+                  srcChange: { oldSrc: originalSrc || '', newSrc: relativePath },
+                  description,
+                  undoCode,
+                  applyCode,
+                  userRequest: userMessage.content || 'Insert image',
+                  patchStatus: 'preparing',
+                };
+                setPendingDOMApproval(approvalPayload);
+                prepareDomPatch(approvalId, selectedElement, {}, description, undoCode, applyCode, userMessage.content || 'Insert image', projectPath, undefined, { oldSrc: originalSrc || '', newSrc: relativePath });
+              } else if (isContainerElement) {
+                // Strategy 2: Check for child img, or use background-image
+                const childImgInfo = await (webview as Electron.WebviewTag).executeJavaScript(`
+                  (function() {
+                    const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    if (!el) return null;
+                    const img = el.querySelector('img');
+                    if (img) return { hasChildImg: true, childSrc: img.src };
+                    return { hasChildImg: false, currentBg: el.style.backgroundImage };
+                  })();
+                `);
+
+                if (childImgInfo?.hasChildImg) {
+                  applyCode = `
+                    (function() {
+                      const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                      if (el) { const img = el.querySelector('img'); if (img) { img.src = '${relativePath}'; return 'Applied'; } }
+                      return 'Not found';
+                    })();
+                  `;
+                  undoCode = `
+                    (function() {
+                      const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                      if (el) { const img = el.querySelector('img'); if (img) { img.src = '${childImgInfo.childSrc}'; return 'Reverted'; } }
+                      return 'Not found';
+                    })();
+                  `;
+                  description = `Set child image src to ${filename}`;
+                } else {
+                  // Use background-image
+                  const captureContent = await (webview as Electron.WebviewTag).executeJavaScript(`
+                    (function() {
+                      const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                      return el ? { text: el.textContent, bg: el.style.backgroundImage, bgSize: el.style.backgroundSize, bgPos: el.style.backgroundPosition } : null;
+                    })();
+                  `);
+
+                  applyCode = `
+                    (function() {
+                      const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                      if (el) {
+                        el.textContent = '';
+                        el.style.backgroundImage = 'url(${relativePath})';
+                        el.style.backgroundSize = 'cover';
+                        el.style.backgroundPosition = 'center';
+                        return 'Applied as background';
+                      }
+                      return 'Not found';
+                    })();
+                  `;
+                  undoCode = `
+                    (function() {
+                      const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                      if (el) {
+                        el.textContent = ${JSON.stringify(captureContent?.text || '')};
+                        el.style.backgroundImage = '${captureContent?.bg || ''}';
+                        el.style.backgroundSize = '${captureContent?.bgSize || ''}';
+                        el.style.backgroundPosition = '${captureContent?.bgPos || ''}';
+                        return 'Reverted';
+                      }
+                      return 'Not found';
+                    })();
+                  `;
+                  description = `Set background image to ${filename}`;
+                }
+
+                await (webview as Electron.WebviewTag).executeJavaScript(applyCode!);
+
+                // Prepare source patch for CSS changes
+                const approvalId = `dom-img-${Date.now()}`;
+                const approvalPayload: PendingDOMApproval = {
+                  id: approvalId,
+                  element: selectedElement,
+                  cssChanges: childImgInfo?.hasChildImg ? {} : { backgroundImage: `url(${relativePath})`, backgroundSize: 'cover', backgroundPosition: 'center' },
+                  srcChange: childImgInfo?.hasChildImg ? { oldSrc: childImgInfo.childSrc || '', newSrc: relativePath } : undefined,
+                  description: description!,
+                  undoCode: undoCode!,
+                  applyCode: applyCode!,
+                  userRequest: userMessage.content || 'Insert image',
+                  patchStatus: 'preparing',
+                };
+                setPendingDOMApproval(approvalPayload);
+                prepareDomPatch(approvalId, selectedElement, childImgInfo?.hasChildImg ? {} : { backgroundImage: `url(${relativePath})`, backgroundSize: 'cover', backgroundPosition: 'center' }, description!, undoCode!, applyCode!, userMessage.content || 'Insert image', projectPath);
+              } else {
+                // Fallback: Try setting src anyway
+                applyCode = `
+                  (function() {
+                    const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    if (el) { el.src = '${relativePath}'; return 'Applied'; }
+                    return 'Not found';
+                  })();
+                `;
+                undoCode = 'location.reload()';
+                description = `Set ${tagName} src to ${filename}`;
+                await (webview as Electron.WebviewTag).executeJavaScript(applyCode);
+              }
+
+              const successMessage: ChatMessage = {
+                id: `msg-img-${Date.now()}`,
+                role: 'assistant',
+                content: `✅ ${description}`,
+                timestamp: new Date(),
+                model: 'system',
+                intent: 'ui_modify',
+              };
+              setMessages(prev => [...prev, successMessage]);
+              setPendingChange({ code: applyCode!, undoCode: undoCode!, description: description!, additions: 1, deletions: 1, source: 'dom' });
+              setAttachedImages([]);
+              return;
+            }
+          }
+
+          // No selected element - just save the image and confirm
+          const successMessage: ChatMessage = {
+            id: `msg-img-${Date.now()}`,
+            role: 'assistant',
+            content: `✅ Image saved to \`${relativePath}\`\n\nTo insert this image into an element, select an element first and then attach the image.`,
+            timestamp: new Date(),
+            model: 'system',
+          };
+          setMessages(prev => [...prev, successMessage]);
+          setAttachedImages([]);
+          return;
+        } catch (error) {
+          console.error('[Image Save] Error:', error);
+          const errorMessage: ChatMessage = {
+            id: `msg-error-${Date.now()}`,
+            role: 'assistant',
+            content: `Failed to save image: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            timestamp: new Date(),
+            model: 'system',
+          };
+          setMessages(prev => [...prev, errorMessage]);
+          setAttachedImages([]);
+          return;
+        }
+      }
+
       // INSTANT UI UPDATE: For ui_modify with a selected element that has source mapping
       // Use Gemini Flash for instant DOM update + prepare source patch for confirmation
-      const googleProvider = appSettings.providers.find(p => p.id === 'google' && p.enabled && p.apiKey);
       console.log('[Instant UI] Check conditions:', {
         intentType: intent.type,
         hasSelectedElement: !!selectedElement,
