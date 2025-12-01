@@ -3015,6 +3015,148 @@ export default function App() {
           content: `Could not find element: ${data.selector}. ${data.error}`,
           timestamp: new Date()
         }]);
+      } else if (channel === 'drop-image-on-element') {
+        // Handle image dropped on selected element
+        const data = args[0] as { imageData: string; element: SelectedElement; rect: unknown };
+        console.log('[Drop] Image dropped on element:', data.element.tagName);
+
+        // Trigger the image replacement flow
+        const projectPath = activeTab?.projectPath;
+        if (!projectPath) {
+          console.error('[Drop] No project path set');
+          return;
+        }
+
+        // Generate unique filename
+        const timestamp = Date.now();
+        const mimeMatch = data.imageData.match(/^data:image\/(\w+);/);
+        const ext = mimeMatch ? mimeMatch[1].replace('jpeg', 'jpg') : 'png';
+        const filename = `dropped-${timestamp}.${ext}`;
+        const publicPath = `${projectPath}/public/uploads`;
+        const fullPath = `${publicPath}/${filename}`;
+        const relativePath = `/uploads/${filename}`;
+
+        // Save image and apply
+        window.electronAPI?.files.saveImage(data.imageData, fullPath)
+          .then(saveResult => {
+            if (!saveResult?.success) throw new Error(saveResult?.error || 'Failed to save');
+            console.log('[Drop] Image saved:', relativePath);
+
+            // Update DOM and set pending change
+            const applyCode = `
+              (function() {
+                const elements = document.querySelectorAll('${data.element.tagName}');
+                for (const el of elements) {
+                  if (el.className === '${data.element.className}') {
+                    el.src = '${relativePath}';
+                    return 'Applied';
+                  }
+                }
+                return 'Element not found';
+              })();
+            `;
+
+            webview.executeJavaScript(applyCode);
+
+            setMessages(prev => [...prev, {
+              id: Date.now().toString(),
+              role: 'assistant',
+              content: `Replaced ${data.element.tagName} with dropped image (${filename})`,
+              timestamp: new Date(),
+              model: 'system',
+              intent: 'ui_modify'
+            }]);
+
+            setPendingChange({
+              code: applyCode,
+              undoCode: 'location.reload()',
+              description: `Replace with ${filename}`,
+              additions: 1,
+              deletions: 1,
+              source: 'dom',
+            });
+          })
+          .catch(err => {
+            console.error('[Drop] Failed to save image:', err);
+          });
+      } else if (channel === 'drop-url-on-element') {
+        // Handle URL dropped on element
+        const data = args[0] as { url: string; element: SelectedElement; rect: unknown };
+        console.log('[Drop] URL dropped on element:', data.element.tagName, data.url);
+
+        // Apply URL based on element type
+        const tagName = data.element.tagName?.toLowerCase();
+        let attrToSet = 'src';
+        if (tagName === 'a') attrToSet = 'href';
+        else if (tagName === 'img' || tagName === 'video' || tagName === 'audio') attrToSet = 'src';
+        else if (tagName === 'iframe') attrToSet = 'src';
+
+        const applyCode = `
+          (function() {
+            const elements = document.querySelectorAll('${data.element.tagName}');
+            for (const el of elements) {
+              if (el.className === '${data.element.className}') {
+                el.${attrToSet} = '${data.url}';
+                return 'Applied';
+              }
+            }
+            return 'Element not found';
+          })();
+        `;
+
+        webview.executeJavaScript(applyCode);
+
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: `Set ${attrToSet} to dropped URL on ${data.element.tagName}`,
+          timestamp: new Date(),
+          model: 'system',
+          intent: 'ui_modify'
+        }]);
+      } else if (channel === 'inline-edit-accept') {
+        // Handle inline text edit acceptance
+        const data = args[0] as { oldText: string; newText: string; element: SelectedElement };
+        console.log('[Inline Edit] Accepted:', { old: data.oldText?.substring(0, 30), new: data.newText?.substring(0, 30) });
+
+        // Trigger source patch with the text change
+        if (selectedElement?.sourceLocation?.sources?.[0] && activeTab?.projectPath) {
+          const textChangePayload = { oldText: data.oldText, newText: data.newText };
+
+          const approvalId = `inline-${Date.now()}`;
+          setPendingDOMApproval({
+            id: approvalId,
+            element: selectedElement,
+            cssChanges: {},
+            textChange: data.newText,
+            description: `Change text: "${data.oldText?.substring(0, 20)}..." → "${data.newText?.substring(0, 20)}..."`,
+            undoCode: `document.querySelector('*').textContent = ${JSON.stringify(data.oldText)}`,
+            applyCode: `document.querySelector('*').textContent = ${JSON.stringify(data.newText)}`,
+            userRequest: 'Inline text edit',
+            patchStatus: 'preparing',
+          });
+
+          prepareDomPatch(
+            approvalId,
+            selectedElement,
+            {},
+            `Change text to "${data.newText?.substring(0, 30)}..."`,
+            '',
+            '',
+            'Inline text edit',
+            activeTab.projectPath,
+            textChangePayload
+          );
+        }
+
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: `Text changed: "${data.oldText?.substring(0, 30)}..." → "${data.newText?.substring(0, 30)}..."`,
+          timestamp: new Date(),
+          model: 'system',
+          intent: 'ui_modify'
+        }]);
       }
     };
 
