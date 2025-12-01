@@ -289,6 +289,10 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     // Store reference after null check to avoid repeated non-null assertions
     const aiSdk = window.electronAPI.aiSdk
 
+    // Clean up any existing stream listeners before starting a new one (prevents race conditions)
+    cleanupFnsRef.current.forEach(fn => fn())
+    cleanupFnsRef.current = []
+
     setIsLoading(true)
     setError(null)
 
