@@ -171,12 +171,26 @@ export const INJECTION_SCRIPT = `
     document.addEventListener('mouseover', function(e) {
       if (!isInspectorActive && !isScreenshotActive) return;
       e.stopPropagation();
-      
+
       if (isInspectorActive) {
           e.target.classList.add('inspector-hover-target');
       } else if (isScreenshotActive) {
           e.target.classList.add('screenshot-hover-target');
       }
+
+      // Send hover info to parent for display
+      const summary = getElementSummary(e.target);
+      const rect = e.target.getBoundingClientRect();
+      window.parent.postMessage({
+        type: 'INSPECTOR_HOVER',
+        element: summary,
+        rect: {
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height
+        }
+      }, '*');
     }, true);
 
     document.addEventListener('mouseout', function(e) {
@@ -184,6 +198,11 @@ export const INJECTION_SCRIPT = `
       e.stopPropagation();
       e.target.classList.remove('inspector-hover-target');
       e.target.classList.remove('screenshot-hover-target');
+
+      // Clear hover info
+      window.parent.postMessage({
+        type: 'INSPECTOR_HOVER_END'
+      }, '*');
     }, true);
 
     document.addEventListener('click', function(e) {

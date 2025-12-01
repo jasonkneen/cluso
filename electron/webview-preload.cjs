@@ -318,6 +318,19 @@ document.addEventListener('mouseover', function(e) {
   } else if (isScreenshotActive) {
     e.target.classList.add('screenshot-hover-target')
   }
+
+  // Send hover info to host for element label display
+  const summary = getElementSummary(e.target)
+  const rect = e.target.getBoundingClientRect()
+  ipcRenderer.sendToHost('inspector-hover', {
+    element: summary,
+    rect: {
+      top: rect.top,
+      left: rect.left,
+      width: rect.width,
+      height: rect.height
+    }
+  })
 }, true)
 
 document.addEventListener('mouseout', function(e) {
@@ -326,6 +339,9 @@ document.addEventListener('mouseout', function(e) {
   e.stopPropagation()
   e.target.classList.remove('inspector-hover-target')
   e.target.classList.remove('screenshot-hover-target')
+
+  // Clear hover info
+  ipcRenderer.sendToHost('inspector-hover-end')
 }, true)
 
 document.addEventListener('click', async function(e) {
