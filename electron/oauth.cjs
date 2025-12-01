@@ -30,6 +30,8 @@ let currentState = null
 let callbackServer = null
 // Store callback promise resolver
 let callbackResolver = null
+// Lock for token refresh to prevent concurrent refreshes
+let refreshInProgress = null
 
 /**
  * Get the config file path
@@ -286,6 +288,7 @@ function isTokenExpired(tokens) {
 
 /**
  * Get a valid access token, refreshing if necessary
+ * Uses a lock to prevent concurrent refresh attempts
  */
 async function getValidAccessToken() {
   const tokens = getOAuthTokens()
@@ -294,14 +297,41 @@ async function getValidAccessToken() {
   }
 
   if (isTokenExpired(tokens)) {
-    console.log('Access token expired, refreshing...')
-    const newTokens = await refreshAccessToken(tokens.refresh)
-    if (!newTokens) {
-      console.error('Failed to refresh token')
-      return null
+    // Check if a refresh is already in progress
+    if (refreshInProgress) {
+      console.log('Token refresh already in progress, waiting...')
+      try {
+        const result = await refreshInProgress
+        return result
+      } catch {
+        // If the other refresh failed, we'll try again below
+      }
     }
-    saveOAuthTokens(newTokens)
-    return newTokens.access
+
+    // Start a new refresh with a lock
+    console.log('Access token expired, refreshing...')
+    refreshInProgress = (async () => {
+      try {
+        // Re-check tokens in case another caller just refreshed
+        const currentTokens = getOAuthTokens()
+        if (currentTokens && !isTokenExpired(currentTokens)) {
+          return currentTokens.access
+        }
+
+        const newTokens = await refreshAccessToken(tokens.refresh)
+        if (!newTokens) {
+          console.error('Failed to refresh token')
+          return null
+        }
+        saveOAuthTokens(newTokens)
+        return newTokens.access
+      } finally {
+        // Clear the lock after refresh completes
+        refreshInProgress = null
+      }
+    })()
+
+    return refreshInProgress
   }
 
   return tokens.access
