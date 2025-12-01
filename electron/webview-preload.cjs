@@ -406,9 +406,14 @@ ipcRenderer.on('set-inspector-mode', (event, active) => {
   isInspectorActive = active
   if (active) isScreenshotActive = false
 
-  if (!active && currentSelected) {
-    currentSelected.classList.remove('inspector-selected-target')
-    currentSelected = null
+  if (!active) {
+    // Clean up all inspector UI when turning off
+    if (currentSelected) {
+      currentSelected.classList.remove('inspector-selected-target')
+      currentSelected.classList.remove('inspector-drag-over')
+      currentSelected = null
+    }
+    hideDropLabel()
   }
 })
 
@@ -876,9 +881,9 @@ function finishEditing(element) {
   }
 }
 
-// Global drag event handlers
+// Global drag event handlers - only work when inspector is active
 document.addEventListener('dragover', function(e) {
-  if (!currentSelected) return
+  if (!currentSelected || !isInspectorActive) return
 
   const rect = currentSelected.getBoundingClientRect()
   const isOverSelected = (
@@ -899,7 +904,7 @@ document.addEventListener('dragover', function(e) {
 }, true)
 
 document.addEventListener('dragleave', function(e) {
-  if (!currentSelected) return
+  if (!currentSelected || !isInspectorActive) return
 
   // Only hide if truly leaving the element
   const rect = currentSelected.getBoundingClientRect()
@@ -915,7 +920,7 @@ document.addEventListener('dragleave', function(e) {
 }, true)
 
 document.addEventListener('drop', function(e) {
-  if (!currentSelected) return
+  if (!currentSelected || !isInspectorActive) return
 
   const rect = currentSelected.getBoundingClientRect()
   const isOverSelected = (
@@ -934,6 +939,7 @@ document.addEventListener('drop', function(e) {
   const files = e.dataTransfer.files
   const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain')
   const summary = getElementSummary(currentSelected)
+  const xpath = getXPath(currentSelected)
 
   if (files.length > 0 && files[0].type.startsWith('image/')) {
     // Read the file and send to parent
@@ -941,7 +947,7 @@ document.addEventListener('drop', function(e) {
     reader.onload = function(ev) {
       ipcRenderer.sendToHost('drop-image-on-element', {
         imageData: ev.target.result,
-        element: summary,
+        element: { ...summary, xpath },
         rect: {
           top: rect.top,
           left: rect.left,
@@ -954,7 +960,7 @@ document.addEventListener('drop', function(e) {
   } else if (url && url.startsWith('http')) {
     ipcRenderer.sendToHost('drop-url-on-element', {
       url: url,
-      element: summary,
+      element: { ...summary, xpath },
       rect: {
         top: rect.top,
         left: rect.left,
@@ -965,9 +971,9 @@ document.addEventListener('drop', function(e) {
   }
 }, true)
 
-// Double-click to start inline editing
+// Double-click to start inline editing - only when inspector is active
 document.addEventListener('dblclick', function(e) {
-  if (!currentSelected) return
+  if (!currentSelected || !isInspectorActive) return
   if (e.target !== currentSelected && !currentSelected.contains(e.target)) return
 
   e.preventDefault()
