@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { debugLog } from '../utils/debug'
 
 export interface ClaudeCodeMessage {
   id: string
@@ -169,7 +170,7 @@ export function useClaudeCode(options: UseClaudeCodeOptions = {}): UseClaudeCode
       await window.electronAPI.claudeCode.stop()
       setIsStreaming(false)
     } catch (err) {
-      console.error('Failed to stop:', err)
+      debugLog.general.error('Failed to stop Claude Code:', err)
     }
   }, [])
 
@@ -184,7 +185,7 @@ export function useClaudeCode(options: UseClaudeCodeOptions = {}): UseClaudeCode
       setIsStreaming(false)
       setError(null)
     } catch (err) {
-      console.error('Failed to reset:', err)
+      debugLog.general.error('Failed to reset Claude Code:', err)
     }
   }, [])
 

@@ -9,6 +9,8 @@ import {
   getSourceFromHostInstance,
 } from 'bippy/source';
 
+import { debugLog } from './debug';
+
 export interface ComponentSource {
   name: string;
   file: string;
@@ -27,15 +29,15 @@ export interface ElementSourceInfo {
  */
 export async function getElementSourceLocation(element: HTMLElement): Promise<ElementSourceInfo | null> {
   try {
-    console.log('[SourceLocation] Attempting to get source for element:', element.tagName, element.id || element.className);
+    debugLog.sourcePatch.log('Attempting to get source for element:', element.tagName, element.id || element.className);
 
     // Use bippy's getSourceFromHostInstance - this handles all the complexity
     const sourceInfo = await getSourceFromHostInstance(element);
 
-    console.log('[SourceLocation] Source info from bippy:', sourceInfo);
+    debugLog.sourcePatch.log('Source info from bippy:', sourceInfo);
 
     if (!sourceInfo || !sourceInfo.fileName) {
-      console.warn('[SourceLocation] No source info found');
+      debugLog.sourcePatch.warn('No source info found');
       return null;
     }
 
@@ -53,7 +55,7 @@ export async function getElementSourceLocation(element: HTMLElement): Promise<El
       summary,
     };
   } catch (error) {
-    console.error('[SourceLocation] Error getting source location:', error);
+    debugLog.sourcePatch.error('Error getting source location:', error);
     return null;
   }
 }
