@@ -50,39 +50,41 @@ export const MODEL_REPO = 'Kortix/FastApply-1.5B-v1.0_GGUF'
 export const DEFAULT_STORAGE_DIR = '.cluso/models/fast-apply'
 
 /**
- * Inference timeout in milliseconds
+ * Inference timeout in milliseconds (60s for large files)
  */
-export const INFERENCE_TIMEOUT = 30000
+export const INFERENCE_TIMEOUT = 60000
 
 /**
- * Temperature for inference (0 = deterministic)
+ * Temperature for inference
+ * Note: 0 causes instability in fine-tuned models, use small positive value
  */
-export const TEMPERATURE = 0
+export const TEMPERATURE = 0.1
 
 /**
- * Maximum tokens to generate
+ * Maximum tokens to generate (8192 for complete file outputs)
  */
-export const MAX_TOKENS = 4096
+export const MAX_TOKENS = 8192
 
 /**
  * System prompt for the FastApply model
+ * Note: Must be specific about the model's task - vague prompts cause prose fallback
  */
-export const SYSTEM_PROMPT = `You are a coding assistant that helps merge code updates, ensuring every modification is fully integrated.`
+export const SYSTEM_PROMPT = `You are a coding assistant specialized in applying code changes and merging updates. Your task is to integrate the provided update into the existing code while preserving structure, comments, formatting, and all original content. Return only the complete, updated code.`
 
 /**
  * User prompt template for the FastApply model
  * Uses {original_code} and {update_snippet} placeholders
+ * Note: Model outputs code directly, not wrapped in tags - it wasn't trained for that
  */
-export const USER_PROMPT_TEMPLATE = `Merge all changes from the <update> snippet into the <code> below.
-- Preserve the code's structure, order, comments, and indentation exactly.
-- Output only the updated code, enclosed within <updated-code> and </updated-code> tags.
-- Do not include any additional text, explanations, placeholders, ellipses, or code fences.
+export const USER_PROMPT_TEMPLATE = `Apply this update to the code below. Return the complete updated file only - no explanations, no tags, no code fences.
 
-<code>{original_code}</code>
+<code>
+{original_code}
+</code>
 
-<update>{update_snippet}</update>
-
-Provide the complete updated code.`
+<update>
+{update_snippet}
+</update>`
 
 /**
  * Build the full chat prompt for inference
@@ -103,6 +105,7 @@ ${userPrompt}<|im_end|>
 
 /**
  * Parse the model output to extract the updated code
+ * Note: FastApply model outputs code directly without wrapper tags
  */
 export function parseOutput(output: string): string | null {
   if (!output || typeof output !== 'string') {
@@ -113,49 +116,72 @@ export function parseOutput(output: string): string | null {
   console.log('[FastApply Parse] Raw output length:', output.length)
   console.log('[FastApply Parse] First 500 chars:', output.substring(0, 500))
 
-  // Look for <updated-code>...</updated-code> tags
-  const match = output.match(/<updated-code>([\s\S]*?)<\/updated-code>/)
-  if (match) {
-    console.log('[FastApply Parse] Found <updated-code> tags')
-    return match[1].trim()
-  }
-
-  // Also try with self-closing or slight variations
-  const altMatch = output.match(/<updated[-_]?code>([\s\S]*?)<\/updated[-_]?code>/i)
-  if (altMatch) {
-    console.log('[FastApply Parse] Found alternate <updated-code> tags')
-    return altMatch[1].trim()
-  }
-
-  // Fallback: try to find code between common markers
-  const codeBlockMatch = output.match(/```[\w]*\n?([\s\S]*?)\n?```/)
-  if (codeBlockMatch) {
-    console.log('[FastApply Parse] Found code block')
-    return codeBlockMatch[1].trim()
-  }
-
-  // Check if output starts with code-like content (JSX, HTML, etc.)
   const trimmed = output.trim()
 
-  // Remove any ChatML end tokens that might be present
-  const cleanedOutput = trimmed
+  // Remove ChatML end tokens that might be present
+  let cleanedOutput = trimmed
     .replace(/<\|im_end\|>/g, '')
     .replace(/<\|im_start\|>[\s\S]*$/g, '')
     .trim()
 
-  // If it looks like code (starts with <, import, export, const, function, etc.)
-  const codePatterns = /^(<[\w]|import\s|export\s|const\s|let\s|var\s|function\s|class\s|\{)/
+  // Primary path: FastApply outputs code directly, check if it looks like code
+  // Match common code patterns at the start (multiline flag for flexibility)
+  const codePatterns = /^(<[\w!]|import\s|export\s|const\s|let\s|var\s|function\s|class\s|interface\s|type\s|enum\s|\/\/|\/\*|\{|#|package\s|using\s|public\s|private\s|protected\s|def\s|async\s|await\s)/m
+
   if (cleanedOutput.length > 0 && codePatterns.test(cleanedOutput)) {
-    console.log('[FastApply Parse] Output looks like code, using as-is')
+    console.log('[FastApply Parse] ✅ Output recognized as code')
     return cleanedOutput
   }
 
-  // Last resort: if it's not prose, return it
-  if (cleanedOutput.length > 0 && !cleanedOutput.startsWith('I ') && !cleanedOutput.startsWith('The ') && !cleanedOutput.startsWith('Here')) {
-    console.log('[FastApply Parse] Using fallback - output does not look like prose')
+  // Secondary: Check for markdown code fences (model might still use them)
+  const codeBlockMatch = cleanedOutput.match(/```[\w]*\n?([\s\S]*?)\n?```/)
+  if (codeBlockMatch) {
+    console.log('[FastApply Parse] ✅ Found code in markdown fences')
+    return codeBlockMatch[1].trim()
+  }
+
+  // Tertiary: Check for legacy <updated-code> tags (backwards compat)
+  const legacyMatch = cleanedOutput.match(/<updated[-_]?code>([\s\S]*?)<\/updated[-_]?code>/i)
+  if (legacyMatch) {
+    console.log('[FastApply Parse] ✅ Found legacy <updated-code> tags')
+    return legacyMatch[1].trim()
+  }
+
+  // Detect prose fallback - model failed to produce code
+  // These patterns match common ways LLMs start explanatory text
+  const proseIndicators = [
+    /^I\s/i,               // "I "
+    /^I['']/i,             // "I'll", "I've", "I'd" (contractions)
+    /^The\s/i,             // "The "
+    /^Here/i,              // "Here", "Here's", "Here is"
+    /^This\s/i,            // "This "
+    /^To\s/i,              // "To "
+    /^You\s/i,             // "You "
+    /^Let\s?me/i,          // "Let me", "Let's"
+    /^Sure/i,              // "Sure", "Sure!"
+    /^Certainly/i,         // "Certainly"
+    /^Of course/i,         // "Of course"
+    /^Okay/i,              // "Okay", "Ok"
+    /^First/i,             // "First,"
+    /^Now\s/i,             // "Now let's" (but not "Now()" code)
+    /^Below/i,             // "Below is"
+    /^Great/i,             // "Great!"
+    /^Happy/i,             // "Happy to help"
+  ]
+
+  for (const pattern of proseIndicators) {
+    if (pattern.test(cleanedOutput)) {
+      console.log('[FastApply Parse] ❌ Output is prose explanation - model failed')
+      return null
+    }
+  }
+
+  // If output is substantial and doesn't look like prose, use it
+  if (cleanedOutput.length > 50) {
+    console.log('[FastApply Parse] ⚠️ Using output as-is (>50 chars, not prose)')
     return cleanedOutput
   }
 
-  console.log('[FastApply Parse] Could not parse output')
+  console.log('[FastApply Parse] ❌ Could not parse output - too short or unrecognized')
   return null
 }

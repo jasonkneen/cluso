@@ -80,9 +80,9 @@ export class InferenceEngine extends EventEmitter {
         modelPath,
       })
 
-      // Create context
+      // Create context with larger size for complete file outputs
       this.context = await this.model.createContext({
-        contextSize: 4096,
+        contextSize: 8192,
       })
 
       this.modelPath = modelPath
@@ -133,7 +133,11 @@ export class InferenceEngine extends EventEmitter {
     try {
       // Build the prompt
       const prompt = buildPrompt(originalCode, updateSnippet)
-      console.log('[FastApply] Prompt built, getting sequence...')
+      console.log('[FastApply] Prompt built')
+      console.log('[FastApply] Original code length:', originalCode.length)
+      console.log('[FastApply] Update snippet length:', updateSnippet.length)
+      console.log('[FastApply] Total prompt length:', prompt.length)
+      console.log('[FastApply] Getting sequence...')
 
       // Get a sequence from context
       const { LlamaChatSession } = await dynamicImport<LlamaModule>('node-llama-cpp')
