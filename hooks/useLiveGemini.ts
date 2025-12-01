@@ -3,7 +3,7 @@ import { GoogleGenAI, Modality, LiveServerMessage, FunctionDeclaration, Type } f
 import { createAudioBlob, base64ToArrayBuffer, pcmToAudioBuffer } from '../utils/audio';
 import { StreamState, SelectedElement } from '../types';
 import { voiceLogger } from '../utils/voiceLogger';
-import { debugLog, debug } from '../utils/debug';
+import { debugLog, debug, withTimeout, TIMEOUTS, TimeoutError } from '../utils/debug';
 
 interface UseLiveGeminiParams {
   videoRef: React.RefObject<HTMLVideoElement>;
@@ -689,7 +689,11 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         debugLog.liveGemini.log("AI requesting page elements:", category);
 
                         if (onGetPageElements) {
-                            onGetPageElements(category).then(result => {
+                            withTimeout(
+                              onGetPageElements(category),
+                              TIMEOUTS.TOOL_CALL,
+                              'get_page_elements'
+                            ).then(result => {
                                 sessionPromiseRef.current?.then(session => {
                                     session.sendToolResponse({
                                         functionResponses: {
@@ -702,13 +706,16 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                                     });
                                 });
                             }).catch(err => {
+                                const errorMsg = err instanceof TimeoutError
+                                  ? err.message
+                                  : (err.message || 'Failed to get page elements');
                                 sessionPromiseRef.current?.then(session => {
                                     session.sendToolResponse({
                                         functionResponses: {
                                             id: call.id,
                                             name: call.name,
                                             response: {
-                                              error: err.message || 'Failed to get page elements'
+                                              error: errorMsg
                                             }
                                         }
                                     });
@@ -736,7 +743,11 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         debugLog.liveGemini.log("AI requesting source file patch:", filePath, description);
 
                         if (onPatchSourceFile) {
-                            onPatchSourceFile(filePath, searchCode, replaceCode, description).then(result => {
+                            withTimeout(
+                              onPatchSourceFile(filePath, searchCode, replaceCode, description),
+                              TIMEOUTS.TOOL_CALL,
+                              'patch_source_file'
+                            ).then(result => {
                                 sessionPromiseRef.current?.then(session => {
                                     session.sendToolResponse({
                                         functionResponses: {
@@ -749,13 +760,16 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                                     });
                                 });
                             }).catch(err => {
+                                const errorMsg = err instanceof TimeoutError
+                                  ? err.message
+                                  : (err.message || 'Failed to patch source file');
                                 sessionPromiseRef.current?.then(session => {
                                     session.sendToolResponse({
                                         functionResponses: {
                                             id: call.id,
                                             name: call.name,
                                             response: {
-                                              error: err.message || 'Failed to patch source file'
+                                              error: errorMsg
                                             }
                                         }
                                     });
@@ -792,15 +806,22 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         };
 
                         if (onListFiles) {
-                            onListFiles(path).then(result => {
+                            withTimeout(
+                              onListFiles(path),
+                              TIMEOUTS.FILE_LIST,
+                              'list_files'
+                            ).then(result => {
                                 if (result === undefined || result === null) {
                                     sendListFilesResponse({ error: 'Directory listing returned no content' });
                                 } else {
                                     sendListFilesResponse({ result: String(result) });
                                 }
                             }).catch(err => {
+                                const errorMsg = err instanceof TimeoutError
+                                  ? err.message
+                                  : (err.message || 'Failed to list files');
                                 debugLog.liveGemini.error('list_files error:', err);
-                                sendListFilesResponse({ error: err.message || 'Failed to list files' });
+                                sendListFilesResponse({ error: errorMsg });
                             });
                         } else {
                             sendListFilesResponse({ error: 'list_files not available' });
@@ -828,7 +849,11 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         }
 
                         if (onReadFile) {
-                            onReadFile(filePath).then(result => {
+                            withTimeout(
+                              onReadFile(filePath),
+                              TIMEOUTS.FILE_READ,
+                              'read_file'
+                            ).then(result => {
                                 // Check for undefined/null result
                                 if (result === undefined || result === null) {
                                     debugLog.liveGemini.error('read_file returned undefined for:', filePath);
@@ -837,8 +862,11 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                                     sendReadFileResponse({ result: String(result) });
                                 }
                             }).catch(err => {
+                                const errorMsg = err instanceof TimeoutError
+                                  ? err.message
+                                  : (err.message || 'Failed to read file');
                                 debugLog.liveGemini.error('read_file error:', err);
-                                sendReadFileResponse({ error: err.message || 'Failed to read file' });
+                                sendReadFileResponse({ error: errorMsg });
                             });
                         } else {
                             sendReadFileResponse({ error: 'read_file not available' });
@@ -849,7 +877,11 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         debugLog.liveGemini.log("AI clicking element:", selector);
 
                         if (onClickElement) {
-                            onClickElement(selector).then(result => {
+                            withTimeout(
+                              onClickElement(selector),
+                              TIMEOUTS.QUICK,
+                              'click_element'
+                            ).then(result => {
                                 sessionPromiseRef.current?.then(session => {
                                     session.sendToolResponse({
                                         functionResponses: {
@@ -858,6 +890,19 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                                             response: result.success
                                               ? { result: `Clicked element: ${selector}` }
                                               : { error: result.error || 'Failed to click element' }
+                                        }
+                                    });
+                                });
+                            }).catch(err => {
+                                const errorMsg = err instanceof TimeoutError
+                                  ? err.message
+                                  : (err.message || 'Failed to click element');
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: { error: errorMsg }
                                         }
                                     });
                                 });
@@ -880,7 +925,11 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         debugLog.liveGemini.log("AI navigating:", action, url);
 
                         if (onNavigate) {
-                            onNavigate(action, url).then(result => {
+                            withTimeout(
+                              onNavigate(action, url),
+                              TIMEOUTS.TOOL_CALL,
+                              'navigate'
+                            ).then(result => {
                                 sessionPromiseRef.current?.then(session => {
                                     session.sendToolResponse({
                                         functionResponses: {
@@ -889,6 +938,19 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                                             response: result.success
                                               ? { result: `Navigation: ${action}${url ? ' to ' + url : ''}` }
                                               : { error: result.error || 'Navigation failed' }
+                                        }
+                                    });
+                                });
+                            }).catch(err => {
+                                const errorMsg = err instanceof TimeoutError
+                                  ? err.message
+                                  : (err.message || 'Navigation failed');
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: { error: errorMsg }
                                         }
                                     });
                                 });
@@ -910,7 +972,11 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         debugLog.liveGemini.log("AI scrolling to:", target);
 
                         if (onScroll) {
-                            onScroll(target).then(result => {
+                            withTimeout(
+                              onScroll(target),
+                              TIMEOUTS.QUICK,
+                              'scroll'
+                            ).then(result => {
                                 sessionPromiseRef.current?.then(session => {
                                     session.sendToolResponse({
                                         functionResponses: {
@@ -919,6 +985,19 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                                             response: result.success
                                               ? { result: `Scrolled to: ${target}` }
                                               : { error: result.error || 'Scroll failed' }
+                                        }
+                                    });
+                                });
+                            }).catch(err => {
+                                const errorMsg = err instanceof TimeoutError
+                                  ? err.message
+                                  : (err.message || 'Scroll failed');
+                                sessionPromiseRef.current?.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            id: call.id,
+                                            name: call.name,
+                                            response: { error: errorMsg }
                                         }
                                     });
                                 });
@@ -948,10 +1027,17 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         };
 
                         if (onOpenItem) {
-                            onOpenItem(itemNumber).then(result => {
+                            withTimeout(
+                              onOpenItem(itemNumber),
+                              TIMEOUTS.FILE_READ,
+                              'open_item'
+                            ).then(result => {
                                 sendOpenItemResponse({ result: result ?? 'Item opened' });
                             }).catch(err => {
-                                sendOpenItemResponse({ error: err.message || 'Failed to open item' });
+                                const errorMsg = err instanceof TimeoutError
+                                  ? err.message
+                                  : (err.message || 'Failed to open item');
+                                sendOpenItemResponse({ error: errorMsg });
                             });
                         } else {
                             sendOpenItemResponse({ error: 'open_item not available' });
@@ -971,10 +1057,17 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         };
 
                         if (onOpenFile) {
-                            onOpenFile(name, path).then(result => {
+                            withTimeout(
+                              onOpenFile(name, path),
+                              TIMEOUTS.FILE_READ,
+                              'open_file'
+                            ).then(result => {
                                 sendOpenFileResponse({ result: result ?? 'File opened' });
                             }).catch(err => {
-                                sendOpenFileResponse({ error: err.message || 'Failed to open file' });
+                                const errorMsg = err instanceof TimeoutError
+                                  ? err.message
+                                  : (err.message || 'Failed to open file');
+                                sendOpenFileResponse({ error: errorMsg });
                             });
                         } else {
                             sendOpenFileResponse({ error: 'open_file not available' });
@@ -994,10 +1087,17 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         };
 
                         if (onOpenFolder) {
-                            onOpenFolder(name, itemNumber).then(result => {
+                            withTimeout(
+                              onOpenFolder(name, itemNumber),
+                              TIMEOUTS.FILE_LIST,
+                              'open_folder'
+                            ).then(result => {
                                 sendOpenFolderResponse({ result: result ?? 'Folder opened' });
                             }).catch(err => {
-                                sendOpenFolderResponse({ error: err.message || 'Failed to open folder' });
+                                const errorMsg = err instanceof TimeoutError
+                                  ? err.message
+                                  : (err.message || 'Failed to open folder');
+                                sendOpenFolderResponse({ error: errorMsg });
                             });
                         } else {
                             sendOpenFolderResponse({ error: 'open_folder not available' });

@@ -58,3 +58,44 @@ export function debug(...args: unknown[]): void {
     console.log(...args)
   }
 }
+
+/**
+ * Wrap a promise with a timeout
+ * @param promise The promise to wrap
+ * @param ms Timeout in milliseconds
+ * @param operation Name of the operation for error messages
+ * @returns The promise result or throws a TimeoutError
+ */
+export class TimeoutError extends Error {
+  constructor(operation: string, ms: number) {
+    super(`Operation "${operation}" timed out after ${ms}ms`)
+    this.name = 'TimeoutError'
+  }
+}
+
+export function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  operation: string
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout>
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new TimeoutError(operation, ms))
+    }, ms)
+  })
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId)
+  })
+}
+
+// Default timeout values for different operation types
+export const TIMEOUTS = {
+  TOOL_CALL: 30000,      // 30 seconds for tool calls
+  FILE_READ: 10000,      // 10 seconds for file reads
+  FILE_LIST: 10000,      // 10 seconds for directory listings
+  API_CALL: 60000,       // 60 seconds for API calls
+  QUICK: 5000,           // 5 seconds for quick operations
+} as const
