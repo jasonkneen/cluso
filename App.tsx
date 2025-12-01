@@ -3134,9 +3134,10 @@ export default function App() {
           timestamp: new Date()
         }]);
       } else if (channel === 'drop-image-on-element') {
-        // Handle image dropped on selected element
+        // Handle image dropped on selected element - SMART insertion
         const data = args[0] as { imageData: string; element: SelectedElement; rect: unknown };
-        console.log('[Drop] Image dropped on element:', data.element.tagName);
+        const tagName = data.element.tagName?.toLowerCase() || '';
+        console.log('[Drop] Image dropped on element:', tagName, 'classes:', data.element.className);
 
         // Get project path from the current tab (use ref for current state)
         const currentTab = tabsRef.current.find(t => t.id === tabId);
@@ -3152,41 +3153,242 @@ export default function App() {
           return;
         }
 
-        // Generate unique filename
-        const timestamp = Date.now();
+        // Generate content-hash based filename to prevent duplicates
+        // Use first 8 chars of a simple hash of the base64 data
+        const hashCode = (str: string) => {
+          let hash = 0;
+          for (let i = 0; i < Math.min(str.length, 10000); i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+          }
+          return Math.abs(hash).toString(16).padStart(8, '0');
+        };
+        const contentHash = hashCode(data.imageData);
         const mimeMatch = data.imageData.match(/^data:image\/(\w+);/);
         const ext = mimeMatch ? mimeMatch[1].replace('jpeg', 'jpg') : 'png';
-        const filename = `dropped-${timestamp}.${ext}`;
+        const filename = `img-${contentHash}.${ext}`;
         const publicPath = `${projectPath}/public/uploads`;
         const fullPath = `${publicPath}/${filename}`;
         const relativePath = `/uploads/${filename}`;
 
-        // Save image and apply
+        // Determine insertion strategy based on element type
+        const isImgElement = tagName === 'img';
+        const isContainerElement = ['div', 'section', 'article', 'aside', 'header', 'footer', 'main', 'figure', 'span', 'p'].includes(tagName);
+
+        // Save image first
         window.electronAPI?.files.saveImage(data.imageData, fullPath)
-          .then(saveResult => {
+          .then(async (saveResult) => {
             if (!saveResult?.success) throw new Error(saveResult?.error || 'Failed to save');
             console.log('[Drop] Image saved:', relativePath);
 
-            // Update DOM and set pending change
-            const applyCode = `
-              (function() {
-                const elements = document.querySelectorAll('${data.element.tagName}');
-                for (const el of elements) {
-                  if (el.className === '${data.element.className}') {
-                    el.src = '${relativePath}';
-                    return 'Applied';
-                  }
-                }
-                return 'Element not found';
-              })();
-            `;
+            let applyCode: string;
+            let undoCode: string;
+            let description: string;
+            let insertionMethod: 'src' | 'background' | 'child-img' | 'replace-content';
 
-            webview.executeJavaScript(applyCode);
+            if (isImgElement) {
+              // Strategy 1: Direct img src replacement
+              insertionMethod = 'src';
+              const captureOriginal = await webview.executeJavaScript(`
+                (function() {
+                  const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  return el ? el.src : '';
+                })();
+              `);
+
+              applyCode = `
+                (function() {
+                  const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  if (el && el.tagName === 'IMG') {
+                    el.src = '${relativePath}';
+                    return 'Applied src';
+                  }
+                  return 'Element not found';
+                })();
+              `;
+              undoCode = `
+                (function() {
+                  const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  if (el && el.tagName === 'IMG') {
+                    el.src = '${captureOriginal}';
+                    return 'Reverted';
+                  }
+                  return 'Element not found';
+                })();
+              `;
+              description = `Set image src to ${filename}`;
+
+              // Trigger source patch for img src change
+              if (data.element.sourceLocation?.sources?.[0]) {
+                const approvalId = `dom-drop-${Date.now()}`;
+                const approvalPayload: PendingDOMApproval = {
+                  id: approvalId,
+                  element: data.element,
+                  cssChanges: {},
+                  srcChange: { oldSrc: captureOriginal || '', newSrc: relativePath },
+                  description,
+                  undoCode,
+                  applyCode,
+                  userRequest: 'Drop image on element',
+                  patchStatus: 'preparing',
+                };
+                setPendingDOMApproval(approvalPayload);
+                prepareDomPatch(
+                  approvalId,
+                  data.element,
+                  {},
+                  description,
+                  undoCode,
+                  applyCode,
+                  'Drop image on element',
+                  projectPath,
+                  undefined,
+                  { oldSrc: captureOriginal || '', newSrc: relativePath }
+                );
+              }
+
+            } else if (isContainerElement) {
+              // Strategy 2: Check for child img, or use background-image
+              const childImgInfo = await webview.executeJavaScript(`
+                (function() {
+                  const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  if (!el) return null;
+                  const img = el.querySelector('img');
+                  if (img) {
+                    return { hasChildImg: true, childSrc: img.src };
+                  }
+                  return { hasChildImg: false, currentBg: el.style.backgroundImage };
+                })();
+              `);
+
+              if (childImgInfo?.hasChildImg) {
+                // Strategy 2a: Update child img src
+                insertionMethod = 'child-img';
+                applyCode = `
+                  (function() {
+                    const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    if (el) {
+                      const img = el.querySelector('img');
+                      if (img) {
+                        img.src = '${relativePath}';
+                        return 'Applied to child img';
+                      }
+                    }
+                    return 'Element not found';
+                  })();
+                `;
+                undoCode = `
+                  (function() {
+                    const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    if (el) {
+                      const img = el.querySelector('img');
+                      if (img) {
+                        img.src = '${childImgInfo.childSrc}';
+                        return 'Reverted';
+                      }
+                    }
+                    return 'Element not found';
+                  })();
+                `;
+                description = `Set child image src to ${filename}`;
+              } else {
+                // Strategy 2b: Use background-image and clear text content
+                insertionMethod = 'background';
+                const captureContent = await webview.executeJavaScript(`
+                  (function() {
+                    const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    return el ? { text: el.textContent, bg: el.style.backgroundImage, bgSize: el.style.backgroundSize, bgPos: el.style.backgroundPosition } : null;
+                  })();
+                `);
+
+                applyCode = `
+                  (function() {
+                    const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    if (el) {
+                      el.style.backgroundImage = 'url(${relativePath})';
+                      el.style.backgroundSize = 'cover';
+                      el.style.backgroundPosition = 'center';
+                      el.textContent = '';
+                      return 'Applied background-image';
+                    }
+                    return 'Element not found';
+                  })();
+                `;
+                undoCode = `
+                  (function() {
+                    const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    if (el) {
+                      el.style.backgroundImage = '${captureContent?.bg || ''}';
+                      el.style.backgroundSize = '${captureContent?.bgSize || ''}';
+                      el.style.backgroundPosition = '${captureContent?.bgPos || ''}';
+                      el.textContent = '${(captureContent?.text || '').replace(/'/g, "\\'")}';
+                      return 'Reverted';
+                    }
+                    return 'Element not found';
+                  })();
+                `;
+                description = `Set background-image to ${filename}`;
+
+                // Trigger source patch with CSS changes
+                if (data.element.sourceLocation?.sources?.[0]) {
+                  const approvalId = `dom-drop-${Date.now()}`;
+                  const approvalPayload: PendingDOMApproval = {
+                    id: approvalId,
+                    element: data.element,
+                    cssChanges: {
+                      backgroundImage: `url(${relativePath})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                    },
+                    description,
+                    undoCode,
+                    applyCode,
+                    userRequest: 'Drop image on container element',
+                    patchStatus: 'preparing',
+                  };
+                  setPendingDOMApproval(approvalPayload);
+                  prepareDomPatch(
+                    approvalId,
+                    data.element,
+                    {
+                      backgroundImage: `url(${relativePath})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                    },
+                    description,
+                    undoCode,
+                    applyCode,
+                    'Drop image on container element',
+                    projectPath
+                  );
+                }
+              }
+            } else {
+              // Fallback: Try setting src anyway (for video, iframe, etc.)
+              insertionMethod = 'src';
+              applyCode = `
+                (function() {
+                  const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  if (el) {
+                    el.src = '${relativePath}';
+                    return 'Applied src';
+                  }
+                  return 'Element not found';
+                })();
+              `;
+              undoCode = 'location.reload()';
+              description = `Set ${tagName} src to ${filename}`;
+            }
+
+            // Execute the DOM change
+            await webview.executeJavaScript(applyCode);
+            console.log('[Drop] Applied image with method:', insertionMethod);
 
             setMessages(prev => [...prev, {
               id: Date.now().toString(),
               role: 'assistant',
-              content: `Replaced ${data.element.tagName} with dropped image (${filename})`,
+              content: description,
               timestamp: new Date(),
               model: 'system',
               intent: 'ui_modify'
@@ -3194,15 +3396,21 @@ export default function App() {
 
             setPendingChange({
               code: applyCode,
-              undoCode: 'location.reload()',
-              description: `Replace with ${filename}`,
+              undoCode,
+              description,
               additions: 1,
               deletions: 1,
               source: 'dom',
             });
           })
           .catch(err => {
-            console.error('[Drop] Failed to save image:', err);
+            console.error('[Drop] Failed to save/apply image:', err);
+            setMessages(prev => [...prev, {
+              id: Date.now().toString(),
+              role: 'system',
+              content: `Failed to apply image: ${err.message}`,
+              timestamp: new Date()
+            }]);
           });
       } else if (channel === 'drop-url-on-element') {
         // Handle URL dropped on element
