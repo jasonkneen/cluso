@@ -4053,10 +4053,34 @@ If you're not sure what the user wants, ask for clarification.
         console.log('[DOM Approval] ❌ ABORT: writeFile API not available');
         throw new Error('File API not available');
       }
+      // Verify content actually changed
+      const contentChanged = patch.originalContent !== patch.patchedContent;
+      console.log('[DOM Approval] Content changed:', contentChanged);
+      if (!contentChanged) {
+        console.log('[DOM Approval] ⚠️ WARNING: Patch content is IDENTICAL to original!');
+        console.log('[DOM Approval] This means the AI did not make any changes.');
+      }
       console.log('[DOM Approval] Writing patch to disk:', patch.filePath);
-      console.log('[DOM Approval] Content length:', patch.patchedContent?.length || 0);
+      console.log('[DOM Approval] Original length:', patch.originalContent?.length || 0);
+      console.log('[DOM Approval] Patched length:', patch.patchedContent?.length || 0);
+      console.log('[DOM Approval] First 200 chars of patched content:', patch.patchedContent?.substring(0, 200));
+
       const result = await window.electronAPI.files.writeFile(patch.filePath, patch.patchedContent);
       console.log('[DOM Approval] writeFile result:', result);
+
+      // Verify the write by reading it back
+      if (result.success && window.electronAPI?.files?.readFile) {
+        const verifyResult = await window.electronAPI.files.readFile(patch.filePath);
+        if (verifyResult.success) {
+          const matches = verifyResult.data === patch.patchedContent;
+          console.log('[DOM Approval] Verification read-back:', matches ? '✅ MATCHES' : '❌ MISMATCH');
+          if (!matches) {
+            console.log('[DOM Approval] Expected length:', patch.patchedContent?.length);
+            console.log('[DOM Approval] Actual length:', verifyResult.data?.length);
+          }
+        }
+      }
+
       if (result.success) {
         console.log('[Source Patch] ✅ Applied successfully to:', patch.filePath);
         setMessages(prev => [...prev, {
