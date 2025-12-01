@@ -1308,6 +1308,11 @@ async function streamChat(options) {
       }
     }
 
+    // Add stopWhen for explicit agent loop termination (matching non-streaming behavior)
+    if (Object.keys(sdkTools).length > 0 && ai?.stepCountIs && typeof ai.stepCountIs === 'function') {
+      streamOptions.stopWhen = ai.stepCountIs(maxSteps)
+    }
+
     if (enableReasoning) {
       if (providerType === 'anthropic' || providerType === 'claude-code') {
         streamOptions.providerOptions = {
