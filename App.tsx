@@ -4234,20 +4234,22 @@ If you're not sure what the user wants, ask for clarification.
           sourceLocation: selectedElement.sourceLocation,
         });
 
-        // 🖼️ IMAGE REPLACEMENT: Special fast path for img elements with attached images
-        const isImageElement = selectedElement.tagName?.toLowerCase() === 'img';
+        // 🖼️ SMART IMAGE INSERTION: Works with ANY element type
         const hasAttachedImage = attachedImages.length > 0;
-        const isImageReplaceIntent = /(?:use|replace|change|swap|set).*(?:image|photo|picture|attached)|(?:this|attached)\s*image/i.test(userMessage.content);
+        // Broad pattern to catch any image-related intent
+        const isImageInsertIntent = /(?:add|insert|put|use|replace|change|swap|set|place|show).*(?:image|photo|picture|attached|this)|(?:this|the|attached)\s*(?:image|photo|picture)|image\s*(?:here|to|in|on)/i.test(userMessage.content);
 
-        if (isImageElement && hasAttachedImage && (isImageReplaceIntent || userMessage.content.trim() === '')) {
-          console.log('[Image Replace] Detected image replacement request');
+        // Trigger if: has attached image AND (mentions image OR empty message with just the image)
+        if (hasAttachedImage && (isImageInsertIntent || userMessage.content.trim() === '')) {
+          const tagName = selectedElement.tagName?.toLowerCase() || '';
+          console.log('[Image Insert] Detected image insertion request for:', tagName);
 
           const projectPath = activeTab?.projectPath;
           if (!projectPath) {
             const errorMessage: ChatMessage = {
               id: `msg-error-${Date.now()}`,
               role: 'assistant',
-              content: 'Cannot replace image: No project folder is set. Please open a project first.',
+              content: 'Cannot insert image: No project folder is set. Please open a project first.',
               timestamp: new Date(),
               model: 'system',
             };
@@ -4257,17 +4259,26 @@ If you're not sure what the user wants, ask for clarification.
           }
 
           try {
-            // Generate unique filename based on timestamp
-            const timestamp = Date.now();
+            // Generate content-hash based filename to prevent duplicates
+            const hashCode = (str: string) => {
+              let hash = 0;
+              for (let i = 0; i < Math.min(str.length, 10000); i++) {
+                const char = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash;
+              }
+              return Math.abs(hash).toString(16).padStart(8, '0');
+            };
             const attachedImage = attachedImages[0];
+            const contentHash = hashCode(attachedImage);
             const mimeMatch = attachedImage.match(/^data:image\/(\w+);/);
             const ext = mimeMatch ? mimeMatch[1].replace('jpeg', 'jpg') : 'png';
-            const filename = `uploaded-${timestamp}.${ext}`;
+            const filename = `img-${contentHash}.${ext}`;
             const publicPath = `${projectPath}/public/uploads`;
             const fullPath = `${publicPath}/${filename}`;
             const relativePath = `/uploads/${filename}`;
 
-            console.log('[Image Replace] Saving to:', fullPath);
+            console.log('[Image Insert] Saving to:', fullPath);
 
             // Save the image to the project's public folder
             const saveResult = await window.electronAPI?.files.saveImage(attachedImage, fullPath);
@@ -4275,126 +4286,254 @@ If you're not sure what the user wants, ask for clarification.
               throw new Error(saveResult?.error || 'Failed to save image');
             }
 
-            console.log('[Image Replace] Image saved successfully:', saveResult.data);
+            console.log('[Image Insert] Image saved successfully');
 
-            // Get the webview and update the DOM
+            // Get the webview
             const webview = webviewRefs.current.get(activeTabId);
-            if (webview) {
-              // Capture original src for undo
-              const captureOriginalScript = `
-                (function() {
-                  const element = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                  if (element && element.tagName === 'IMG') {
-                    return element.src;
-                  }
-                  return null;
-                })();
-              `;
-              const originalSrc = await (webview as Electron.WebviewTag).executeJavaScript(captureOriginalScript);
+            if (!webview) {
+              throw new Error('Webview not available');
+            }
 
-              // Apply the new src
-              const applyScript = `
+            // Determine insertion strategy based on element type
+            const isImgElement = tagName === 'img';
+            const isContainerElement = ['div', 'section', 'article', 'aside', 'header', 'footer', 'main', 'figure', 'span', 'p'].includes(tagName);
+
+            let applyCode: string;
+            let undoCode: string;
+            let description: string;
+
+            if (isImgElement) {
+              // Strategy 1: Direct img src replacement
+              const originalSrc = await (webview as Electron.WebviewTag).executeJavaScript(`
                 (function() {
-                  const element = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                  if (element && element.tagName === 'IMG') {
-                    element.src = '${relativePath}';
-                    return 'Applied';
+                  const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  return el ? el.src : '';
+                })();
+              `);
+
+              applyCode = `
+                (function() {
+                  const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  if (el && el.tagName === 'IMG') {
+                    el.src = '${relativePath}';
+                    return 'Applied src';
                   }
                   return 'Element not found';
                 })();
               `;
-              await (webview as Electron.WebviewTag).executeJavaScript(applyScript);
-
-              // Create undo/apply code
-              const undoCode = `
+              undoCode = `
                 (function() {
-                  const element = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                  if (element) {
-                    element.src = '${originalSrc}';
+                  const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  if (el && el.tagName === 'IMG') {
+                    el.src = '${originalSrc}';
                     return 'Reverted';
                   }
                   return 'Element not found';
                 })();
               `;
-              const applyCode = `
-                (function() {
-                  const element = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                  if (element) {
-                    element.src = '${relativePath}';
-                    return 'Applied';
-                  }
-                  return 'Element not found';
-                })();
-              `;
+              description = `Set image src to ${filename}`;
 
-              // Add success message
-              const successMessage: ChatMessage = {
-                id: `msg-img-${Date.now()}`,
-                role: 'assistant',
-                content: `Preview: Replaced image with uploaded file (${filename})`,
-                timestamp: new Date(),
-                model: 'gemini-2.0-flash',
-                intent: 'ui_modify',
-              };
-              setMessages(prev => [...prev, successMessage]);
+              // Execute and prepare source patch with srcChange
+              await (webview as Electron.WebviewTag).executeJavaScript(applyCode);
 
-              // Set pending change for approval
-              setPendingChange({
-                code: applyCode,
-                undoCode: undoCode,
-                description: `Replace image with ${filename}`,
-                additions: 1,
-                deletions: 1,
-                source: 'dom',
-              });
-
-              // Prepare source patch if source location available
               if (selectedElement.sourceLocation?.sources?.[0]) {
                 const approvalId = `dom-img-${Date.now()}`;
                 const approvalPayload: PendingDOMApproval = {
                   id: approvalId,
                   element: selectedElement,
                   cssChanges: {},
-                  textChange: undefined,
-                  description: `Replace image with ${filename}`,
-                  undoCode: undoCode,
-                  applyCode: applyCode,
-                  userRequest: userMessage.content || 'Replace image',
+                  srcChange: { oldSrc: originalSrc || '', newSrc: relativePath },
+                  description,
+                  undoCode,
+                  applyCode,
+                  userRequest: userMessage.content || 'Insert image',
                   patchStatus: 'preparing',
-                  // Store srcChange for fast path
-                  srcChange: { oldSrc: originalSrc, newSrc: relativePath },
                 };
                 setPendingDOMApproval(approvalPayload);
-
-                // Trigger source patch generation with srcChange
                 prepareDomPatch(
                   approvalId,
                   selectedElement,
                   {},
-                  `Replace image with ${filename}`,
+                  description,
                   undoCode,
                   applyCode,
-                  userMessage.content || 'Replace image',
+                  userMessage.content || 'Insert image',
                   projectPath,
-                  undefined, // no textChange
-                  { oldSrc: originalSrc, newSrc: relativePath } // srcChange
+                  undefined,
+                  { oldSrc: originalSrc || '', newSrc: relativePath }
                 );
               }
+
+            } else if (isContainerElement) {
+              // Strategy 2: Check for child img, or use background-image
+              const childImgInfo = await (webview as Electron.WebviewTag).executeJavaScript(`
+                (function() {
+                  const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  if (!el) return null;
+                  const img = el.querySelector('img');
+                  if (img) {
+                    return { hasChildImg: true, childSrc: img.src };
+                  }
+                  return { hasChildImg: false, currentBg: el.style.backgroundImage };
+                })();
+              `);
+
+              if (childImgInfo?.hasChildImg) {
+                // Strategy 2a: Update child img src
+                applyCode = `
+                  (function() {
+                    const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    if (el) {
+                      const img = el.querySelector('img');
+                      if (img) {
+                        img.src = '${relativePath}';
+                        return 'Applied to child img';
+                      }
+                    }
+                    return 'Element not found';
+                  })();
+                `;
+                undoCode = `
+                  (function() {
+                    const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    if (el) {
+                      const img = el.querySelector('img');
+                      if (img) {
+                        img.src = '${childImgInfo.childSrc}';
+                        return 'Reverted';
+                      }
+                    }
+                    return 'Element not found';
+                  })();
+                `;
+                description = `Set child image src to ${filename}`;
+              } else {
+                // Strategy 2b: Use background-image and clear text content
+                const captureContent = await (webview as Electron.WebviewTag).executeJavaScript(`
+                  (function() {
+                    const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    return el ? { text: el.textContent, bg: el.style.backgroundImage, bgSize: el.style.backgroundSize, bgPos: el.style.backgroundPosition } : null;
+                  })();
+                `);
+
+                applyCode = `
+                  (function() {
+                    const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    if (el) {
+                      el.style.backgroundImage = 'url(${relativePath})';
+                      el.style.backgroundSize = 'cover';
+                      el.style.backgroundPosition = 'center';
+                      el.textContent = '';
+                      return 'Applied background-image';
+                    }
+                    return 'Element not found';
+                  })();
+                `;
+                undoCode = `
+                  (function() {
+                    const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    if (el) {
+                      el.style.backgroundImage = '${captureContent?.bg || ''}';
+                      el.style.backgroundSize = '${captureContent?.bgSize || ''}';
+                      el.style.backgroundPosition = '${captureContent?.bgPos || ''}';
+                      el.textContent = '${(captureContent?.text || '').replace(/'/g, "\\'")}';
+                      return 'Reverted';
+                    }
+                    return 'Element not found';
+                  })();
+                `;
+                description = `Set background-image to ${filename}`;
+
+                // Prepare source patch with CSS changes
+                if (selectedElement.sourceLocation?.sources?.[0]) {
+                  const approvalId = `dom-img-${Date.now()}`;
+                  const approvalPayload: PendingDOMApproval = {
+                    id: approvalId,
+                    element: selectedElement,
+                    cssChanges: {
+                      backgroundImage: `url(${relativePath})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                    },
+                    description,
+                    undoCode,
+                    applyCode,
+                    userRequest: userMessage.content || 'Insert image',
+                    patchStatus: 'preparing',
+                  };
+                  setPendingDOMApproval(approvalPayload);
+                  prepareDomPatch(
+                    approvalId,
+                    selectedElement,
+                    {
+                      backgroundImage: `url(${relativePath})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                    },
+                    description,
+                    undoCode,
+                    applyCode,
+                    userMessage.content || 'Insert image',
+                    projectPath
+                  );
+                }
+              }
+
+              // Execute the DOM change
+              await (webview as Electron.WebviewTag).executeJavaScript(applyCode);
+
+            } else {
+              // Fallback: Try setting src anyway
+              applyCode = `
+                (function() {
+                  const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  if (el) {
+                    el.src = '${relativePath}';
+                    return 'Applied src';
+                  }
+                  return 'Element not found';
+                })();
+              `;
+              undoCode = 'location.reload()';
+              description = `Set ${tagName} src to ${filename}`;
+              await (webview as Electron.WebviewTag).executeJavaScript(applyCode);
             }
+
+            // Add success message
+            const successMessage: ChatMessage = {
+              id: `msg-img-${Date.now()}`,
+              role: 'assistant',
+              content: `Preview: ${description}`,
+              timestamp: new Date(),
+              model: 'gemini-2.0-flash',
+              intent: 'ui_modify',
+            };
+            setMessages(prev => [...prev, successMessage]);
+
+            // Set pending change for approval
+            setPendingChange({
+              code: applyCode,
+              undoCode,
+              description,
+              additions: 1,
+              deletions: 1,
+              source: 'dom',
+            });
 
             // Clear attached images
             setAttachedImages([]);
             return;
           } catch (error) {
-            console.error('[Image Replace] Error:', error);
+            console.error('[Image Insert] Error:', error);
             const errorMessage: ChatMessage = {
               id: `msg-error-${Date.now()}`,
               role: 'assistant',
-              content: `Failed to replace image: ${error instanceof Error ? error.message : 'Unknown error'}`,
+              content: `Failed to insert image: ${error instanceof Error ? error.message : 'Unknown error'}`,
               timestamp: new Date(),
               model: 'system',
             };
             setMessages(prev => [...prev, errorMessage]);
+            setAttachedImages([]);
             return;
           }
         }
