@@ -1134,6 +1134,48 @@ function registerGitHandlers() {
     }
   })
 
+  // Save base64 image to file (for image uploads to project public folder)
+  ipcMain.handle('files:saveImage', async (event, base64DataUrl, destPath) => {
+    console.log('[Files] saveImage called with destPath:', destPath)
+
+    const validation = validatePath(destPath)
+    if (!validation.valid) {
+      return { success: false, error: validation.error }
+    }
+
+    try {
+      // Parse the base64 data URL: "data:image/png;base64,iVBORw0..."
+      const matches = base64DataUrl.match(/^data:(.+);base64,(.+)$/)
+      if (!matches) {
+        return { success: false, error: 'Invalid base64 data URL format' }
+      }
+
+      const mimeType = matches[1]
+      const base64Data = matches[2]
+      const buffer = Buffer.from(base64Data, 'base64')
+
+      // Ensure directory exists
+      const dir = path.dirname(validation.path)
+      await fs.mkdir(dir, { recursive: true })
+
+      // Write the file
+      await fs.writeFile(validation.path, buffer)
+      console.log('[Files] Image saved successfully:', validation.path, 'size:', buffer.length)
+
+      return {
+        success: true,
+        data: {
+          path: validation.path,
+          size: buffer.length,
+          mimeType
+        }
+      }
+    } catch (error) {
+      console.error('[Files] saveImage error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
   // Folder picker dialog
   ipcMain.handle('dialog:openFolder', async () => {
     const result = await dialog.showOpenDialog({
