@@ -771,16 +771,29 @@ function registerGitHandlers() {
 
   // Write file
   ipcMain.handle('files:writeFile', async (event, filePath, content) => {
+    console.log('[Files] writeFile called with path:', filePath)
+    console.log('[Files] Content length:', content?.length || 0)
+
     const validation = validatePath(filePath)
     if (!validation.valid) {
+      console.log('[Files] ❌ Path validation failed:', validation.error)
       return { success: false, error: validation.error }
     }
+
+    console.log('[Files] ✓ Path validated, writing to:', validation.path)
+
     try {
       await fs.writeFile(validation.path, content, 'utf-8')
-      console.log('[Files] Wrote file:', validation.path)
+      console.log('[Files] ✅ Successfully wrote file:', validation.path)
+
+      // Verify by reading back
+      const readBack = await fs.readFile(validation.path, 'utf-8')
+      console.log('[Files] Verification read-back length:', readBack.length)
+      console.log('[Files] Write verified:', readBack.length === content.length ? '✅ OK' : '❌ MISMATCH')
+
       return { success: true }
     } catch (error) {
-      console.error('[Files] Error writing file:', error.message)
+      console.error('[Files] ❌ Error writing file:', error.message)
       return { success: false, error: error.message }
     }
   })
