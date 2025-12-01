@@ -780,21 +780,25 @@ Output the modified code snippet:`;
         // Check if this is a removal/deletion request - provide specific code guidance
         const isRemoveRequest = userRequest && /(?:remove|delete|hide)\s+(?:this|that|it|the|element)?/i.test(userRequest);
 
-        // Build the update for Fast Apply - must be CODE, not instructions
-        // The model is trained on code diffs, not natural language instructions
+        // Build the update for Fast Apply - show FIND → REPLACE pattern
+        // The model needs to see what to find AND what to replace it with
         let updateDescription = '';
+        const classAttr = element.className ? ` className="${element.className.split(' ')[0]}"` : '';
+        const originalTag = `<${element.tagName}${classAttr}>`;
+
         if (isRemoveRequest) {
           // For removal, show wrapping the element with {false && ...}
-          updateDescription = `{false && <${element.tagName}${element.className ? ` className="${element.className.split(' ')[0]}"` : ''}>...</${element.tagName}>}`;
+          updateDescription = `FIND: ${originalTag}
+REPLACE WITH: {false && ${originalTag}...${element.tagName}>}`;
         } else if (hasCssChanges) {
-          // Build React style object string - provide a CODE snippet showing the change
+          // Build React style object string
           const styleObjEntries = Object.entries(cssChanges)
             .map(([prop, val]) => `${prop}: '${val}'`)
             .join(', ');
-          // Show the target element pattern with the style prop added
-          // The model will find the matching element and apply this change
-          const classAttr = element.className ? ` className="${element.className.split(' ')[0]}"` : '';
-          updateDescription = `<${element.tagName} style={{ ${styleObjEntries} }}${classAttr}>`;
+          const newTag = `<${element.tagName} style={{ ${styleObjEntries} }}${classAttr}>`;
+          // Show explicit FIND → REPLACE to avoid duplication
+          updateDescription = `FIND: ${originalTag}
+REPLACE WITH: ${newTag}`;
         } else {
           updateDescription = userRequest || '';
         }
