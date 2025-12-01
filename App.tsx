@@ -172,7 +172,7 @@ interface SourcePatch {
 async function generateSourcePatch(
   element: SelectedElement,
   cssChanges: Record<string, string>,
-  apiKey: string,
+  providerConfig: { modelId: string; providers: ProviderConfig[] },
   projectPath?: string,
   userRequest?: string
 ): Promise<SourcePatch | null> {
@@ -202,27 +202,30 @@ async function generateSourcePatch(
                                     filePath.startsWith('/var/') ||
                                     /^[A-Z]:\\/.test(filePath); // Windows paths like C:\
 
+  // Always clean up the path, even if we don't have a project path to resolve against
+  let relativePath = filePath;
+
+  // Remove localhost URL prefix if present
+  const urlMatch = relativePath.match(/localhost:\d+\/(.+)$/);
+  if (urlMatch) {
+    relativePath = urlMatch[1];
+  }
+
+  // Remove leading slashes to get relative path
+  relativePath = relativePath.replace(/^\/+/, '');
+
+  // Remove query strings (Vite cache busting like ?t=1234567890)
+  relativePath = relativePath.split('?')[0];
+
+  console.log('[Source Patch] Cleaned path:', relativePath);
+
   if (!isAbsoluteFilesystemPath && projectPath) {
-    // Extract just the relative path portion
-    let relativePath = filePath;
-
-    // Remove localhost URL prefix if present
-    const urlMatch = relativePath.match(/localhost:\d+\/(.+)$/);
-    if (urlMatch) {
-      relativePath = urlMatch[1];
-    }
-
-    // Remove leading slashes to get relative path
-    relativePath = relativePath.replace(/^\/+/, '');
-
-    // Remove query strings (Vite cache busting like ?t=1234567890)
-    relativePath = relativePath.split('?')[0];
-
-    console.log('[Source Patch] Extracted relative path:', relativePath);
-
     // Combine with project path
     filePath = `${projectPath}/${relativePath}`;
     console.log('[Source Patch] Full path with project:', filePath);
+  } else {
+    // Use the cleaned path as-is
+    filePath = relativePath;
   }
 
   // SAFETY: Prevent patching the app's own source files (ai-cluso directory)
@@ -247,7 +250,17 @@ async function generateSourcePatch(
 
   console.log('[Source Patch] File read successfully, length:', fileResult.data.length);
   const originalContent = fileResult.data;
-  const google = createGoogleGenerativeAI({ apiKey });
+
+  // Get the appropriate provider for the model
+  const providerType = getProviderForModel(providerConfig.modelId);
+  const provider = providerConfig.providers.find(p => p.id === providerType);
+
+  if (!provider?.apiKey) {
+    console.log('[Source Patch] No API key available for provider:', providerType);
+    return null;
+  }
+
+  const google = createGoogleGenerativeAI({ apiKey: provider.apiKey });
 
   // Convert CSS changes to inline style or className changes
   const hasCssChanges = Object.keys(cssChanges).length > 0;
@@ -936,6 +949,7 @@ export default function App() {
 
   // Pending DOM Approval State - stores DOM changes that need user approval before source patch
   interface PendingDOMApproval {
+    id: string;
     element: SelectedElement
     cssChanges: Record<string, string>
     textChange?: string
@@ -943,6 +957,9 @@ export default function App() {
     undoCode: string
     applyCode: string
     userRequest: string
+    patchStatus: 'preparing' | 'ready' | 'error'
+    patch?: PendingPatch
+    patchError?: string
   }
   const [pendingDOMApproval, setPendingDOMApproval] = useState<PendingDOMApproval | null>(null)
   const [isGeneratingSourcePatch, setIsGeneratingSourcePatch] = useState(false)
@@ -3366,7 +3383,9 @@ If you're not sure what the user wants, ask for clarification.
             });
 
             if (selectedElement.sourceLocation?.sources?.[0]) {
-              setPendingDOMApproval({
+              const approvalId = `dom-${Date.now()}`;
+              const approvalPayload: PendingDOMApproval = {
+                id: approvalId,
                 element: selectedElement,
                 cssChanges: uiResult.cssChanges,
                 textChange: uiResult.textChange,
@@ -3374,7 +3393,19 @@ If you're not sure what the user wants, ask for clarification.
                 undoCode: storedUndoCode,
                 applyCode: storedApplyCode,
                 userRequest: userMessage.content,
-              });
+                patchStatus: 'preparing',
+              };
+              setPendingDOMApproval(approvalPayload);
+              prepareDomPatch(
+                approvalId,
+                selectedElement,
+                uiResult.cssChanges,
+                uiResult.description,
+                storedUndoCode,
+                storedApplyCode,
+                userMessage.content,
+                activeTab?.projectPath
+              );
             }
 
             // Return early - wait for user to approve
@@ -3420,7 +3451,7 @@ If you're not sure what the user wants, ask for clarification.
           console.log('[Source Patch] Triggering source patch generation...');
           console.log('[Source Patch] User message:', userMessage.content);
 
-          generateSourcePatch(selectedElement, uiResult.cssChanges, googleProvider.apiKey, projectPath || undefined, userMessage.content)
+          generateSourcePatch(selectedElement, uiResult.cssChanges, { modelId: selectedModel.id, providers: providerConfigs }, projectPath || undefined, userMessage.content)
             .then(patch => {
               if (patch) {
                 console.log('[Source Patch] Generated patch for:', patch.filePath);
@@ -3496,6 +3527,7 @@ If you're not sure what the user wants, ask for clarification.
         console.log('[AI SDK] Starting stream...');
         let streamedTextBuffer = '';
 
+        console.log('[AI SDK] Streaming with project folder:', activeTab?.projectPath || '(none)')
         const result = await streamAI({
           modelId: selectedModel.id,
           messages: allMessages,
@@ -3505,6 +3537,7 @@ If you're not sure what the user wants, ask for clarification.
           maxSteps: 15, // Allow more steps for complex operations
           enableReasoning: thinkingLevel !== 'off',
           mcpTools: mcpToolDefinitions, // Pass MCP tools separately
+          projectFolder: activeTab?.projectPath || undefined,
           onChunk: (chunk) => {
             // Update streaming message as chunks arrive (handled by hook callbacks)
             const chunkStr = typeof chunk === 'string' ? chunk : String(chunk ?? '');
@@ -3790,87 +3823,119 @@ If you're not sure what the user wants, ask for clarification.
     }
   }, [selectedElement, isElectron, activeTab.projectPath]);
 
+  const prepareDomPatch = useCallback((
+    approvalId: string,
+    element: SelectedElement,
+    cssChanges: Record<string, string>,
+    description: string,
+    undoCode: string,
+    applyCode: string,
+    userRequest: string,
+    projectPath?: string
+  ) => {
+    const providerConfig = { modelId: selectedModel.id, providers: providerConfigs };
+    generateSourcePatch(element, cssChanges, providerConfig, projectPath || undefined, userRequest)
+      .then(patch => {
+        setPendingDOMApproval(prev => {
+          if (!prev || prev.id !== approvalId) return prev;
+          if (patch) {
+            const patchPayload: PendingPatch = {
+              id: `patch-${Date.now()}`,
+              filePath: patch.filePath,
+              originalContent: patch.originalContent,
+              patchedContent: patch.patchedContent,
+              description,
+              elementSelector: element.xpath || undefined,
+              cssChanges,
+              undoCode,
+              applyCode,
+            };
+            return {
+              ...prev,
+              patchStatus: 'ready',
+              patch: patchPayload,
+              patchError: undefined,
+            };
+          }
+          return { ...prev, patchStatus: 'error', patch: undefined, patchError: 'Could not generate source patch.' };
+        });
+      })
+      .catch((error: unknown) => {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to generate source patch';
+        setPendingDOMApproval(prev => {
+          if (!prev || prev.id !== approvalId) return prev;
+          return { ...prev, patchStatus: 'error', patch: undefined, patchError: errorMessage };
+        });
+      });
+  }, [providerConfigs, selectedModel.id]);
+
   // Handle accepting DOM preview - generates source patch and auto-approves
   const handleAcceptDOMApproval = useCallback(async () => {
     if (!pendingDOMApproval) return;
 
-    const { element, cssChanges, textChange, description, undoCode, applyCode, userRequest } = pendingDOMApproval;
-    const projectPath = activeTab?.projectPath;
-    const googleProvider = appSettings.providers.find(p => p.id === 'google' && p.enabled && p.apiKey);
-
-    if (!googleProvider?.apiKey) {
-      console.error('[DOM Approval] No Google API key found');
+    if (pendingDOMApproval.patchStatus === 'preparing') {
       setMessages(prev => [...prev, {
-        id: `msg-error-${Date.now()}`,
+        id: `msg-wait-${Date.now()}`,
         role: 'assistant',
-        content: 'Error: No Google API key configured',
+        content: 'Still preparing the source patch. Please wait a moment and try approving again.',
         timestamp: new Date(),
       }]);
-      setPendingDOMApproval(null);
       return;
     }
 
-    setIsGeneratingSourcePatch(true);
-    console.log('[DOM Approval] User approved, generating source patch...');
+    if (pendingDOMApproval.patchStatus === 'error' || !pendingDOMApproval.patch) {
+      setMessages(prev => [...prev, {
+        id: `msg-error-${Date.now()}`,
+        role: 'assistant',
+        content: pendingDOMApproval.patchError || 'Could not prepare a source patch for this change.',
+        timestamp: new Date(),
+      }]);
+      setPendingDOMApproval(null);
+      setPendingChange(null);
+      return;
+    }
 
-    // Add feedback message
+    const patch = pendingDOMApproval.patch;
+    setIsGeneratingSourcePatch(true);
+    console.log('[DOM Approval] User approved, applying prepared source patch...');
+
     setMessages(prev => [...prev, {
       id: `msg-approved-${Date.now()}`,
       role: 'assistant',
-      content: `Approved: ${description}. Updating source code...`,
+      content: `Approved: ${pendingDOMApproval.description}. Updating source code...`,
       timestamp: new Date(),
       model: 'gemini-2.0-flash',
       intent: 'ui_modify',
     }]);
 
     try {
-      const patch = await generateSourcePatch(element, cssChanges, googleProvider.apiKey, projectPath || undefined, userRequest);
-      if (patch) {
-        console.log('[Source Patch] Generated patch for:', patch.filePath);
-
-        // Auto-approve: write the file directly
-        if (window.electronAPI?.files?.writeFile) {
-          const result = await window.electronAPI.files.writeFile(patch.filePath, patch.patchedContent);
-          if (result.success) {
-            console.log('[Source Patch] Applied successfully');
-            setMessages(prev => [...prev, {
-              id: `msg-patch-${Date.now()}`,
-              role: 'assistant',
-              content: `Source code updated: ${patch.filePath.split('/').pop()}`,
-              timestamp: new Date(),
-            }]);
-            // Track edited file
-            addEditedFile({
-              path: patch.filePath,
-              additions: 1,
-              deletions: 1,
-              undoCode: undoCode,
-            });
-          } else {
-            console.error('[Source Patch] Failed to apply:', result.error);
-            setMessages(prev => [...prev, {
-              id: `msg-error-${Date.now()}`,
-              role: 'assistant',
-              content: `Failed to save: ${result.error}`,
-              timestamp: new Date(),
-            }]);
-          }
-        }
-      } else {
-        console.log('[Source Patch] No patch returned');
+      if (!window.electronAPI?.files?.writeFile) {
+        throw new Error('File API not available');
+      }
+      const result = await window.electronAPI.files.writeFile(patch.filePath, patch.patchedContent);
+      if (result.success) {
+        console.log('[Source Patch] Applied successfully');
         setMessages(prev => [...prev, {
-          id: `msg-nopatch-${Date.now()}`,
+          id: `msg-patch-${Date.now()}`,
           role: 'assistant',
-          content: 'Could not generate source patch. DOM changes kept.',
+          content: `Source code updated: ${patch.filePath.split('/').pop()}`,
           timestamp: new Date(),
         }]);
+        addEditedFile({
+          path: patch.filePath,
+          additions: 1,
+          deletions: 1,
+          undoCode: patch.undoCode,
+        });
+      } else {
+        throw new Error(result.error || 'Failed to save file');
       }
     } catch (e) {
       console.error('[Source Patch] Failed:', e);
       setMessages(prev => [...prev, {
         id: `msg-error-${Date.now()}`,
         role: 'assistant',
-        content: `Error: ${e instanceof Error ? e.message : 'Unknown error'}`,
+        content: `Failed to save: ${e instanceof Error ? e.message : 'Unknown error'}`,
         timestamp: new Date(),
       }]);
     }
@@ -3878,7 +3943,7 @@ If you're not sure what the user wants, ask for clarification.
     setIsGeneratingSourcePatch(false);
     setPendingDOMApproval(null);
     setPendingChange(null); // Clear pill toolbar too
-  }, [pendingDOMApproval, activeTab?.projectPath, appSettings.providers, addEditedFile]);
+  }, [pendingDOMApproval, addEditedFile]);
 
   // Handle rejecting DOM preview - reverts changes
   const handleRejectDOMApproval = useCallback(() => {
@@ -4933,6 +4998,19 @@ If you're not sure what the user wants, ask for clarification.
                       </span>
                     </div>
                     <div className="flex gap-2 items-center shrink-0">
+                      {pendingDOMApproval.patchStatus === 'preparing' && (
+                        <div className={`flex items-center gap-1 text-xs ${
+                          isDarkMode ? 'text-blue-300/70' : 'text-blue-700/70'
+                        }`}>
+                          <Loader2 size={14} className="animate-spin" />
+                          <span>Preparing source patch…</span>
+                        </div>
+                      )}
+                      {pendingDOMApproval.patchStatus === 'error' && (
+                        <div className={`text-xs ${isDarkMode ? 'text-red-300/80' : 'text-red-600/80'}`}>
+                          {pendingDOMApproval.patchError || 'Failed to prepare patch'}
+                        </div>
+                      )}
                       <button
                         onClick={handleRejectDOMApproval}
                         className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
@@ -4945,14 +5023,24 @@ If you're not sure what the user wants, ask for clarification.
                       </button>
                       <button
                         onClick={handleAcceptDOMApproval}
+                        disabled={pendingDOMApproval.patchStatus !== 'ready'}
                         className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
                           isDarkMode
                             ? 'bg-blue-600 hover:bg-blue-500 text-white'
                             : 'bg-blue-600 hover:bg-blue-700 text-white'
-                        }`}
+                        } ${pendingDOMApproval.patchStatus !== 'ready' ? 'opacity-60 cursor-not-allowed' : ''}`}
                       >
-                        <Check size={14} />
-                        Accept
+                        {pendingDOMApproval.patchStatus === 'ready' ? (
+                          <>
+                            <Check size={14} />
+                            Accept
+                          </>
+                        ) : (
+                          <>
+                            <Loader2 size={14} className="animate-spin" />
+                            Waiting…
+                          </>
+                        )}
                       </button>
                     </div>
                   </div>

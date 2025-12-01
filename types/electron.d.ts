@@ -443,9 +443,25 @@ interface ElectronTabDataAPI {
   list: (projectPath?: string) => Promise<GitResult<string[]>>
 }
 
+interface ElectronAISdkAPI {
+  streamAI: (params: {
+    messages: unknown[]
+    model: string
+    providerConfigs: unknown
+    agentSystemPrompt?: string
+    tools?: unknown[]
+    thinkingLevel?: string
+    mcpToolDefinitions?: unknown[]
+    onChunk?: (chunk: string) => void
+    onComplete?: (fullText: string) => void
+    onError?: (error: string) => void
+  }) => Promise<{ success: boolean; error?: string }>
+}
+
 interface ElectronAPI {
   git: ElectronGitAPI
   files: ElectronFilesAPI
+  aiSdk: ElectronAISdkAPI
   oauth: ElectronOAuthAPI
   codex: ElectronCodexAPI
   api: ElectronApiAPI

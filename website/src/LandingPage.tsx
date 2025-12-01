@@ -1330,7 +1330,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                 <h4>Connect</h4>
                 <ul>
                   <li><a href="#">Twitter</a></li>
-                  <li><a href="#">Discord</a></li>
                   <li><a href="mailto:hello@cluso.dev">Contact</a></li>
                 </ul>
               </div>

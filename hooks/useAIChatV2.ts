@@ -259,6 +259,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     enableReasoning = false,
     onReasoningChunk,
     mcpTools = [],
+    projectFolder,
   }: {
     modelId: string
     messages: CoreMessage[]
@@ -271,6 +272,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     enableReasoning?: boolean
     onReasoningChunk?: (chunk: string) => void
     mcpTools?: MCPToolDefinition[]
+    projectFolder?: string
   }): Promise<{
     text: string | null
     toolCalls?: ToolCallPart[]
@@ -529,6 +531,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
         maxSteps,
         enableReasoning,
         mcpTools,
+        projectFolder,
       }).catch((err: Error) => {
         setError(err)
         optionsRef.current.onError?.(err)
@@ -549,6 +552,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     tools,
     maxSteps = 5,
     mcpTools = [],
+    projectFolder,
   }: {
     modelId: string
     messages: CoreMessage[]
@@ -557,6 +561,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     tools?: ToolsMap
     maxSteps?: number
     mcpTools?: MCPToolDefinition[]
+    projectFolder?: string
   }): Promise<{
     text: string | null
     toolCalls?: ToolCallPart[]
@@ -637,6 +642,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
         tools: serializableTools,
         maxSteps,
         mcpTools,
+        projectFolder,
       })
 
       if (!result.success) {

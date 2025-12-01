@@ -377,17 +377,22 @@ export function createCodingAgentTools(): ToolsMap {
     read_file: {
       description: 'Read the contents of a file',
       parameters: z.object({
-        path: z.string().describe('Absolute path to the file'),
+        path: z.string().describe('Absolute path to the file').optional(),
+        filePath: z.string().describe('Legacy alias for path').optional(),
       }),
       execute: async (args: unknown) => {
-        const { path } = args as { path: string }
+        const { path, filePath } = args as { path?: string; filePath?: string }
+        const resolvedPath = path ?? filePath
+        if (!resolvedPath) {
+          return { error: 'read_file requires a "path" argument' }
+        }
         const electronAPI = getElectronAPI()
         if (!electronAPI?.files?.readFile) {
           return { error: 'File operations not available (not in Electron)' }
         }
-        const result = await electronAPI.files.readFile(path)
+        const result = await electronAPI.files.readFile(resolvedPath)
         if (result.success) {
-          return { content: result.data, path }
+          return { content: result.data, path: resolvedPath }
         }
         return { error: result.error }
       },

@@ -10,8 +10,10 @@
 
 const { ipcMain } = require('electron')
 const fs = require('fs').promises
+const fsSync = require('fs')
 const path = require('path')
 const { execSync } = require('child_process')
+const os = require('os')
 
 // Dynamic imports for ESM modules (AI SDK is ESM-only)
 let ai = null
@@ -473,6 +475,29 @@ const GOOGLE_PLACEHOLDER_DESCRIPTION = 'Placeholder parameter (can be omitted)'
  */
 const PROJECT_ROOT = path.join(__dirname, '..')
 
+function normalizeToolPath(inputPath, baseDir = PROJECT_ROOT) {
+  if (!inputPath || typeof inputPath !== 'string') return null
+  const tildeExpanded = inputPath.startsWith('~/')
+    ? path.join(os.homedir(), inputPath.slice(2))
+    : inputPath
+  if (path.isAbsolute(tildeExpanded)) {
+    if (fsSync.existsSync(tildeExpanded)) {
+      return tildeExpanded
+    }
+    const stripped = tildeExpanded.replace(/^\/+/, '')
+    return path.resolve(baseDir, stripped)
+  }
+  const cleaned = tildeExpanded.replace(/^\.\/+/, '')
+  return path.resolve(baseDir, cleaned)
+}
+
+function getProjectRoot(context) {
+  if (context && typeof context.projectRoot === 'string' && context.projectRoot.length > 0) {
+    return context.projectRoot
+  }
+  return PROJECT_ROOT
+}
+
 /**
  * Run a git command and return { success, data? , error? }
  */
@@ -492,60 +517,95 @@ function gitExec(command) {
  * Built-in tool executors for local coding agent tools
  */
 const BUILT_IN_TOOL_EXECUTORS = {
-  async read_file({ path: filePath }) {
+  async read_file({ path, filePath }, context = {}) {
+    const requestedPath = path ?? filePath
+    const baseDir = getProjectRoot(context)
+    console.log('[AI-SDK-Wrapper] read_file requested:', requestedPath)
+    const targetPath = normalizeToolPath(requestedPath, baseDir)
+    if (!targetPath) {
+      console.warn('[AI-SDK-Wrapper] read_file missing path', { path, filePath })
+      return { error: 'read_file requires a "path" argument' }
+    }
+    console.log('[AI-SDK-Wrapper] read_file normalized path:', targetPath)
     try {
-      const content = await fs.readFile(filePath, 'utf-8')
-      return { content, path: filePath }
+      const content = await fs.readFile(targetPath, 'utf-8')
+      return { content, path: targetPath }
+    } catch (error) {
+      console.error('[AI-SDK-Wrapper] read_file failed:', targetPath, error.message)
+      return { error: error.message }
+    }
+  },
+
+  async write_file({ path, filePath, content }, context = {}) {
+    try {
+      const baseDir = getProjectRoot(context)
+      const targetPath = normalizeToolPath(path ?? filePath, baseDir)
+      if (!targetPath) {
+        return { error: 'write_file requires "path"' }
+      }
+      await fs.writeFile(targetPath, content, 'utf-8')
+      return { success: true, path: targetPath, bytesWritten: Buffer.byteLength(content, 'utf-8') }
     } catch (error) {
       return { error: error.message }
     }
   },
 
-  async write_file({ path: filePath, content }) {
+  async create_file({ path, filePath, content = '' }, context = {}) {
     try {
-      await fs.writeFile(filePath, content, 'utf-8')
-      return { success: true, path: filePath, bytesWritten: Buffer.byteLength(content, 'utf-8') }
-    } catch (error) {
-      return { error: error.message }
-    }
-  },
-
-  async create_file({ path: filePath, content = '' }) {
-    try {
+      const baseDir = getProjectRoot(context)
+      const targetPath = normalizeToolPath(path ?? filePath, baseDir)
+      if (!targetPath) {
+        return { error: 'create_file requires a "path" argument' }
+      }
       try {
-        await fs.access(filePath)
+        await fs.access(targetPath)
         return { error: 'File already exists' }
       } catch {
         // File not found - proceed
       }
-      await fs.writeFile(filePath, content, 'utf-8')
-      return { success: true, path: filePath }
+      await fs.writeFile(targetPath, content, 'utf-8')
+      return { success: true, path: targetPath }
     } catch (error) {
       return { error: error.message }
     }
   },
 
-  async delete_file({ path: filePath }) {
+  async delete_file({ path, filePath }, context = {}) {
     try {
-      await fs.unlink(filePath)
-      return { success: true, path: filePath }
+      const baseDir = getProjectRoot(context)
+      const targetPath = normalizeToolPath(path ?? filePath, baseDir)
+      if (!targetPath) {
+        return { error: 'delete_file requires a "path" argument' }
+      }
+      await fs.unlink(targetPath)
+      return { success: true, path: targetPath }
     } catch (error) {
       return { error: error.message }
     }
   },
 
-  async rename_file({ oldPath, newPath }) {
+  async rename_file({ oldPath, newPath }, context = {}) {
     try {
-      await fs.rename(oldPath, newPath)
-      return { success: true, oldPath, newPath }
+      const baseDir = getProjectRoot(context)
+      const sourcePath = normalizeToolPath(oldPath, baseDir)
+      const destPath = normalizeToolPath(newPath, baseDir)
+      if (!sourcePath || !destPath) {
+        return { error: 'rename_file requires both oldPath and newPath' }
+      }
+      await fs.rename(sourcePath, destPath)
+      return { success: true, oldPath: sourcePath, newPath: destPath }
     } catch (error) {
       return { error: error.message }
     }
   },
 
-  async list_directory({ path: dirPath } = {}) {
+  async list_directory({ path: dirPath } = {}, context = {}) {
     try {
-      const targetDir = dirPath || PROJECT_ROOT
+      const baseDir = getProjectRoot(context)
+      const targetDir = dirPath ? normalizeToolPath(dirPath, baseDir) : baseDir
+      if (!targetDir) {
+        return { error: 'list_directory requires a valid path' }
+      }
       const entries = await fs.readdir(targetDir, { withFileTypes: true })
       const files = entries
         .map(entry => ({
@@ -564,29 +624,44 @@ const BUILT_IN_TOOL_EXECUTORS = {
     }
   },
 
-  async create_directory({ path: dirPath }) {
+  async create_directory({ path: dirPath }, context = {}) {
     try {
-      await fs.mkdir(dirPath, { recursive: true })
-      return { success: true, path: dirPath }
+      const baseDir = getProjectRoot(context)
+      const targetDir = normalizeToolPath(dirPath, baseDir)
+      if (!targetDir) {
+        return { error: 'create_directory requires a "path" argument' }
+      }
+      await fs.mkdir(targetDir, { recursive: true })
+      return { success: true, path: targetDir }
     } catch (error) {
       return { error: error.message }
     }
   },
 
-  async file_exists({ path: filePath }) {
+  async file_exists({ path, filePath }, context = {}) {
+    const baseDir = getProjectRoot(context)
+    const targetPath = normalizeToolPath(path ?? filePath, baseDir)
+    if (!targetPath) {
+      return { error: 'file_exists requires a "path" argument' }
+    }
     try {
-      await fs.access(filePath)
-      return { exists: true, path: filePath }
+      await fs.access(targetPath)
+      return { exists: true, path: targetPath }
     } catch {
-      return { exists: false, path: filePath }
+      return { exists: false, path: targetPath }
     }
   },
 
-  async file_stat({ path: filePath }) {
+  async file_stat({ path, filePath }, context = {}) {
     try {
-      const stats = await fs.stat(filePath)
+      const baseDir = getProjectRoot(context)
+      const targetPath = normalizeToolPath(path ?? filePath, baseDir)
+      if (!targetPath) {
+        return { error: 'file_stat requires a "path" argument' }
+      }
+      const stats = await fs.stat(targetPath)
       return {
-        path: filePath,
+        path: targetPath,
         size: stats.size,
         isFile: stats.isFile(),
         isDirectory: stats.isDirectory(),
@@ -625,10 +700,14 @@ const BUILT_IN_TOOL_EXECUTORS = {
     return { success: true, message }
   },
 
-  async search_in_files({ pattern, directory, filePattern, caseSensitive, maxResults }) {
+  async search_in_files({ pattern, directory, filePattern, caseSensitive, maxResults }, context = {}) {
     try {
       const limit = typeof maxResults === 'number' ? maxResults : 100
-      const searchDir = directory || process.cwd()
+      const baseDir = getProjectRoot(context)
+      const searchDir = directory ? normalizeToolPath(directory, baseDir) : baseDir
+      if (!searchDir) {
+        return { error: 'search_in_files requires a valid directory' }
+      }
       const regex = new RegExp(pattern, caseSensitive ? 'g' : 'gi')
       const results = []
 
@@ -687,10 +766,14 @@ const BUILT_IN_TOOL_EXECUTORS = {
     }
   },
 
-  async find_files({ pattern, directory }) {
+  async find_files({ pattern, directory }, context = {}) {
     try {
       const results = []
-      const searchDir = directory || process.cwd()
+      const baseDir = getProjectRoot(context)
+      const searchDir = directory ? normalizeToolPath(directory, baseDir) : baseDir
+      if (!searchDir) {
+        return { error: 'find_files requires a valid directory' }
+      }
 
       function matchGlob(filename, globPattern) {
         const regexPattern = globPattern
@@ -736,22 +819,33 @@ const BUILT_IN_TOOL_EXECUTORS = {
     }
   },
 
-  async copy_file({ sourcePath, destPath }) {
+  async copy_file({ sourcePath, destPath }, context = {}) {
     try {
-      await fs.copyFile(sourcePath, destPath)
-      return { success: true, sourcePath, destPath }
+      const baseDir = getProjectRoot(context)
+      const fromPath = normalizeToolPath(sourcePath, baseDir)
+      const toPath = normalizeToolPath(destPath, baseDir)
+      if (!fromPath || !toPath) {
+        return { error: 'copy_file requires sourcePath and destPath' }
+      }
+      await fs.copyFile(fromPath, toPath)
+      return { success: true, sourcePath: fromPath, destPath: toPath }
     } catch (error) {
       return { error: error.message }
     }
   },
 
-  async read_multiple_files({ paths }) {
+  async read_multiple_files({ paths }, context = {}) {
     try {
+      const baseDir = getProjectRoot(context)
       const results = await Promise.all(
         paths.map(async filePath => {
           try {
-            const content = await fs.readFile(filePath, 'utf-8')
-            return { path: filePath, success: true, content }
+            const targetPath = normalizeToolPath(filePath, baseDir)
+            if (!targetPath) {
+              return { path: filePath, success: false, error: 'Invalid path' }
+            }
+            const content = await fs.readFile(targetPath, 'utf-8')
+            return { path: targetPath, success: true, content }
           } catch (error) {
             return { path: filePath, success: false, error: error.message }
           }
@@ -763,9 +857,13 @@ const BUILT_IN_TOOL_EXECUTORS = {
     }
   },
 
-  async get_file_tree({ directory, maxDepth = 5, includeHidden = false }) {
+  async get_file_tree({ directory, maxDepth = 5, includeHidden = false }, context = {}) {
     try {
-      const startDir = directory || process.cwd()
+      const baseDir = getProjectRoot(context)
+      const startDir = directory ? normalizeToolPath(directory, baseDir) : baseDir
+      if (!startDir) {
+        return { error: 'get_file_tree requires a valid directory' }
+      }
 
       async function buildTree(dir, depth = 0) {
         if (depth >= maxDepth) return null
@@ -1010,6 +1108,7 @@ async function streamChat(options) {
     maxSteps = 5,
     enableReasoning = false,
     mcpTools = [],
+    projectFolder,
   } = options
 
   await initialize()
@@ -1040,6 +1139,20 @@ async function streamChat(options) {
     }
   }
 
+  let activeProjectRoot = PROJECT_ROOT
+  if (projectFolder && typeof projectFolder === 'string') {
+    try {
+      const resolved = path.resolve(projectFolder)
+      const stats = await fs.stat(resolved)
+      if (stats.isDirectory()) {
+        activeProjectRoot = resolved
+      }
+    } catch {
+      activeProjectRoot = PROJECT_ROOT
+    }
+  }
+  console.log('[AI-SDK-Wrapper] streamChat project root:', activeProjectRoot)
+
   try {
     const provider = await getProvider(providerType, apiKey)
     const normalizedModelId = normalizeModelId(modelId, providerType)
@@ -1052,9 +1165,10 @@ async function streamChat(options) {
 
     // Helper to wrap tool execution with logging and event emission
     const wrapExecutor = (name, executeFn) => async (args, context) => {
-      const toolCallId = context?.toolCallId || 'unknown'
+      const execContext = { ...context, projectRoot: activeProjectRoot }
+      const toolCallId = execContext?.toolCallId || 'unknown'
       try {
-        let result = await executeFn(args)
+        let result = await executeFn(args, execContext)
 
         // Handle find_files auto-read
         if (name === 'find_files' && result && Array.isArray(result.files) && result.files.length > 0) {
@@ -1062,7 +1176,7 @@ async function streamChat(options) {
             || result.files[0]
           if (preferred?.path && BUILT_IN_TOOL_EXECUTORS.read_file) {
             try {
-              const fileContent = await BUILT_IN_TOOL_EXECUTORS.read_file({ path: preferred.path })
+              const fileContent = await BUILT_IN_TOOL_EXECUTORS.read_file({ path: preferred.path }, execContext)
               result.autoReadFile = {
                 path: preferred.path,
                 content: fileContent.content,
