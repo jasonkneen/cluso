@@ -72,6 +72,7 @@ import {
   Globe,
   Image,
   FolderOpen,
+  Square,
 } from 'lucide-react';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
@@ -965,7 +966,7 @@ export default function App() {
   const [isGeneratingSourcePatch, setIsGeneratingSourcePatch] = useState(false)
 
   // Initialize AI Chat hook with streaming support
-  const { generate: generateAI, stream: streamAI, isLoading: isAILoading } = useAIChat({
+  const { generate: generateAI, stream: streamAI, cancel: cancelAI, isLoading: isAILoading } = useAIChat({
     onError: (err) => console.error('[AI SDK] Error:', err),
     onTextDelta: (delta) => {
       // Update streaming message content as chunks arrive
@@ -5846,11 +5847,28 @@ If you're not sure what the user wants, ask for clarification.
                               <Camera size={18} />
                           </button>
 
-                          {/* Send */}
+                          {/* Stop button (visible during streaming) */}
+                          {(isAILoading || isStreaming) && (
+                              <button
+                                  onClick={() => {
+                                      cancelAI()
+                                      setIsStreaming(false)
+                                      setStreamingMessage(null)
+                                      setStreamingContent('')
+                                  }}
+                                  className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'bg-red-600 text-white hover:bg-red-500' : 'bg-red-500 text-white hover:bg-red-600'}`}
+                                  title="Stop generating"
+                              >
+                                  <Square size={12} fill="currentColor" />
+                              </button>
+                          )}
+
+                          {/* Send button (always visible - queues messages during streaming) */}
                           <button
                               onClick={() => processPrompt(input)}
                               disabled={!input.trim()}
                               className={`p-1.5 rounded-lg transition-colors ml-1 disabled:opacity-30 disabled:cursor-not-allowed ${isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-800'}`}
+                              title={isAILoading || isStreaming ? "Queue message" : "Send message"}
                           >
                               <ArrowUp size={14} />
                           </button>
