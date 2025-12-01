@@ -284,9 +284,12 @@ async function generateSourcePatch(
   console.log('[Source Patch] ✓ File read successfully, length:', fileResult.data.length);
   const originalContent = fileResult.data;
 
-  // ⚡ FAST PATH: For simple text changes, skip AI and do direct replacement
+  // ⚡ FAST PATH: For simple changes, skip AI and do direct replacement
   const hasCssChanges = Object.keys(cssChanges).length > 0;
-  if (textChange && textChange.oldText && textChange.newText && !hasCssChanges) {
+  const hasTextChange = textChange && textChange.oldText && textChange.newText;
+
+  // Fast path for text-only changes
+  if (hasTextChange && !hasCssChanges) {
     console.log('[Source Patch] ⚡ FAST PATH: Simple text change detected');
     console.log('[Source Patch] Old text:', textChange.oldText.substring(0, 50));
     console.log('[Source Patch] New text:', textChange.newText.substring(0, 50));
@@ -329,6 +332,223 @@ async function generateSourcePatch(
       };
     } else {
       console.log('[Source Patch] ⚡ Fast path failed - falling back to AI');
+    }
+  }
+
+  // ⚡ FAST PATH: For CSS-only changes, modify style prop directly
+  if (hasCssChanges && (!textChange || !textChange.newText)) {
+    console.log('[Source Patch] ⚡ FAST PATH: CSS-only change detected');
+    console.log('[Source Patch] CSS changes:', cssChanges);
+
+    const lines = originalContent.split('\n');
+    let targetLine = source.line;
+
+    // Clamp target line to file length
+    if (targetLine > lines.length) {
+      targetLine = lines.length;
+    }
+
+    // Build the style object string for React
+    const styleEntries = Object.entries(cssChanges)
+      .map(([prop, val]) => `${prop}: '${val}'`)
+      .join(', ');
+    const styleObjStr = `{ ${styleEntries} }`;
+
+    // Search around the target line for the element's opening tag
+    const searchRadius = 10;
+    const startSearch = Math.max(0, targetLine - searchRadius - 1);
+    const endSearch = Math.min(lines.length, targetLine + searchRadius);
+
+    let patchedContent = originalContent;
+    let replaced = false;
+
+    // Try to find the element by tag name, class, or id
+    const tagName = element.tagName?.toLowerCase();
+    const className = element.className?.split(' ')[0]; // First class
+    const elementId = element.id;
+
+    for (let i = startSearch; i < endSearch && !replaced; i++) {
+      const line = lines[i];
+
+      // Look for opening JSX tag that matches our element
+      // Pattern: <tagName or <TagName (for components)
+      const tagPattern = new RegExp(`<${tagName}[\\s>]`, 'i');
+      const classPattern = className ? new RegExp(`className=["'\`][^"'\`]*\\b${className}\\b`) : null;
+      const idPattern = elementId ? new RegExp(`id=["'\`]${elementId}["'\`]`) : null;
+
+      const isMatch = tagPattern.test(line) ||
+                      (classPattern && classPattern.test(line)) ||
+                      (idPattern && idPattern.test(line));
+
+      if (isMatch) {
+        console.log('[Source Patch] ⚡ Found element at line', i + 1, ':', line.substring(0, 60));
+
+        // Check if style prop already exists
+        const styleExistsMatch = line.match(/style=\{(\{[^}]*\})\}/);
+        const styleStringMatch = line.match(/style="([^"]*)"/);
+
+        if (styleExistsMatch) {
+          // Merge into existing style object: style={{ existing }} -> style={{ existing, new }}
+          const existingStyle = styleExistsMatch[1];
+          // Remove trailing } and add our new properties
+          const mergedStyle = existingStyle.replace(/\s*\}$/, '') + ', ' + styleEntries + ' }';
+          const newLine = line.replace(styleExistsMatch[0], `style={${mergedStyle}}`);
+          lines[i] = newLine;
+          replaced = true;
+          console.log('[Source Patch] ⚡ Merged into existing style prop');
+        } else if (styleStringMatch) {
+          // Convert string style to object and merge: style="color: red" -> style={{ color: 'red', new }}
+          const existingCss = styleStringMatch[1];
+          const existingEntries = existingCss.split(';')
+            .filter(s => s.trim())
+            .map(s => {
+              const [prop, val] = s.split(':').map(x => x.trim());
+              const camelProp = prop.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+              return `${camelProp}: '${val}'`;
+            })
+            .join(', ');
+          const mergedStyle = existingEntries ? `{ ${existingEntries}, ${styleEntries} }` : styleObjStr;
+          const newLine = line.replace(styleStringMatch[0], `style={${mergedStyle}}`);
+          lines[i] = newLine;
+          replaced = true;
+          console.log('[Source Patch] ⚡ Converted string style and merged');
+        } else {
+          // No style prop exists - add one after the tag name
+          // Find position right after <tagName or after className/id
+          const insertMatch = line.match(new RegExp(`(<${tagName})([\\s>])`, 'i'));
+          if (insertMatch) {
+            const newLine = line.replace(
+              insertMatch[0],
+              `${insertMatch[1]} style={${styleObjStr}}${insertMatch[2]}`
+            );
+            lines[i] = newLine;
+            replaced = true;
+            console.log('[Source Patch] ⚡ Added new style prop');
+          }
+        }
+
+        if (replaced) {
+          patchedContent = lines.join('\n');
+        }
+      }
+    }
+
+    if (replaced && patchedContent !== originalContent) {
+      console.log('[Source Patch] ⚡ FAST PATH SUCCESS - modified style directly');
+      return {
+        filePath,
+        originalContent,
+        patchedContent,
+        lineNumber: source.line,
+      };
+    } else {
+      console.log('[Source Patch] ⚡ CSS fast path failed - falling back to AI');
+    }
+  }
+
+  // ⚡ FAST PATH: Combined text + CSS changes
+  if (hasTextChange && hasCssChanges) {
+    console.log('[Source Patch] ⚡ FAST PATH: Combined text + CSS change detected');
+
+    let patchedContent = originalContent;
+    let textReplaced = false;
+    let cssReplaced = false;
+
+    // Step 1: Apply text change
+    const escapedOld = textChange.oldText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const textPatterns = [
+      new RegExp(`(>\\s*)${escapedOld}(\\s*<)`, 'g'),
+      new RegExp(`(['"])${escapedOld}\\1`, 'g'),
+      new RegExp(`(\`)${escapedOld}(\`)`, 'g'),
+    ];
+
+    for (const pattern of textPatterns) {
+      if (pattern.test(patchedContent)) {
+        patchedContent = patchedContent.replace(pattern, (match, p1, p2) => {
+          return `${p1}${textChange.newText}${p2 || p1}`;
+        });
+        textReplaced = true;
+        console.log('[Source Patch] ⚡ Text replacement successful');
+        break;
+      }
+    }
+
+    // Step 2: Apply CSS changes to the (possibly modified) content
+    const lines = patchedContent.split('\n');
+    let targetLine = source.line;
+    if (targetLine > lines.length) targetLine = lines.length;
+
+    const styleEntries = Object.entries(cssChanges)
+      .map(([prop, val]) => `${prop}: '${val}'`)
+      .join(', ');
+    const styleObjStr = `{ ${styleEntries} }`;
+
+    const searchRadius = 10;
+    const startSearch = Math.max(0, targetLine - searchRadius - 1);
+    const endSearch = Math.min(lines.length, targetLine + searchRadius);
+
+    const tagName = element.tagName?.toLowerCase();
+    const className = element.className?.split(' ')[0];
+    const elementId = element.id;
+
+    for (let i = startSearch; i < endSearch && !cssReplaced; i++) {
+      const line = lines[i];
+      const tagPattern = new RegExp(`<${tagName}[\\s>]`, 'i');
+      const classPattern = className ? new RegExp(`className=["'\`][^"'\`]*\\b${className}\\b`) : null;
+      const idPattern = elementId ? new RegExp(`id=["'\`]${elementId}["'\`]`) : null;
+
+      const isMatch = tagPattern.test(line) ||
+                      (classPattern && classPattern.test(line)) ||
+                      (idPattern && idPattern.test(line));
+
+      if (isMatch) {
+        const styleExistsMatch = line.match(/style=\{(\{[^}]*\})\}/);
+        const styleStringMatch = line.match(/style="([^"]*)"/);
+
+        if (styleExistsMatch) {
+          const existingStyle = styleExistsMatch[1];
+          const mergedStyle = existingStyle.replace(/\s*\}$/, '') + ', ' + styleEntries + ' }';
+          lines[i] = line.replace(styleExistsMatch[0], `style={${mergedStyle}}`);
+          cssReplaced = true;
+        } else if (styleStringMatch) {
+          const existingCss = styleStringMatch[1];
+          const existingEntries = existingCss.split(';')
+            .filter(s => s.trim())
+            .map(s => {
+              const [prop, val] = s.split(':').map(x => x.trim());
+              const camelProp = prop.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+              return `${camelProp}: '${val}'`;
+            })
+            .join(', ');
+          const mergedStyle = existingEntries ? `{ ${existingEntries}, ${styleEntries} }` : styleObjStr;
+          lines[i] = line.replace(styleStringMatch[0], `style={${mergedStyle}}`);
+          cssReplaced = true;
+        } else {
+          const insertMatch = line.match(new RegExp(`(<${tagName})([\\s>])`, 'i'));
+          if (insertMatch) {
+            lines[i] = line.replace(insertMatch[0], `${insertMatch[1]} style={${styleObjStr}}${insertMatch[2]}`);
+            cssReplaced = true;
+          }
+        }
+      }
+    }
+
+    if (cssReplaced) {
+      patchedContent = lines.join('\n');
+    }
+
+    // Success if at least one change was applied
+    if ((textReplaced || cssReplaced) && patchedContent !== originalContent) {
+      console.log('[Source Patch] ⚡ FAST PATH SUCCESS - combined changes applied');
+      console.log('[Source Patch] Text replaced:', textReplaced, '| CSS replaced:', cssReplaced);
+      return {
+        filePath,
+        originalContent,
+        patchedContent,
+        lineNumber: source.line,
+      };
+    } else {
+      console.log('[Source Patch] ⚡ Combined fast path failed - falling back to AI');
     }
   }
 
