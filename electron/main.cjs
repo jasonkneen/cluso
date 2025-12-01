@@ -61,15 +61,11 @@ const fileSearchLimiter = new RateLimiter(2, 500)
 // Track the main window for sending events
 let mainWindow = null
 
-// Git helper - execute git commands
-function gitExec(command) {
-  try {
-    const cwd = process.cwd()
-    const result = execSync(`git ${command}`, { cwd, encoding: 'utf-8' })
-    return { success: true, data: result.trim() }
-  } catch (error) {
-    return { success: false, error: error.message }
-  }
+// DEPRECATED: Use gitExecSafe() instead to prevent command injection
+// This function is kept for reference but should not be used
+function gitExec_UNSAFE_DO_NOT_USE(command) {
+  console.warn('[SECURITY] gitExec_UNSAFE called - this function is deprecated')
+  throw new Error('gitExec is deprecated due to command injection risk. Use gitExecSafe() instead.')
 }
 
 // Safe git exec with args array - prevents command injection
@@ -88,18 +84,65 @@ function gitExecSafe(args) {
 
 // Path validation - prevents directory traversal attacks
 const os = require('os')
-function validatePath(filePath) {
+const fsSync = require('fs')
+
+function validatePath(filePath, options = {}) {
   if (!filePath || typeof filePath !== 'string') {
     return { valid: false, error: 'Invalid path' }
   }
-  const resolved = path.resolve(filePath)
+
+  // Resolve the path (handles .., ., etc)
+  let resolved = path.resolve(filePath)
+
+  // Resolve symlinks to prevent symlink-based bypasses
+  try {
+    if (fsSync.existsSync(resolved)) {
+      resolved = fsSync.realpathSync(resolved)
+    }
+  } catch (e) {
+    // If we can't resolve, use the original resolved path
+  }
+
   const projectRoot = path.resolve(process.cwd())
-  const homeDir = os.homedir()
-  // Allow paths within project root or user home directory
-  if (resolved.startsWith(projectRoot) || resolved.startsWith(homeDir)) {
+
+  // By default, only allow project root
+  // Use allowHomeDir: true only for specific trusted operations
+  if (resolved.startsWith(projectRoot + path.sep) || resolved === projectRoot) {
     return { valid: true, path: resolved }
   }
+
+  // Allow home directory only if explicitly requested (for user config files, etc)
+  if (options.allowHomeDir) {
+    const homeDir = os.homedir()
+    // Still block sensitive directories even in home
+    const blockedDirs = ['.ssh', '.aws', '.gnupg', '.kube', '.config/gcloud']
+    const relativePath = path.relative(homeDir, resolved)
+    const isBlocked = blockedDirs.some(dir =>
+      relativePath.startsWith(dir + path.sep) || relativePath === dir
+    )
+    if (!isBlocked && (resolved.startsWith(homeDir + path.sep) || resolved === homeDir)) {
+      return { valid: true, path: resolved }
+    }
+  }
+
   return { valid: false, error: 'Path outside allowed directories' }
+}
+
+// Validate git branch/ref names to prevent injection
+function validateGitRef(ref) {
+  if (!ref || typeof ref !== 'string') {
+    return { valid: false, error: 'Invalid ref name' }
+  }
+  // Git ref names can't contain: space, ~, ^, :, ?, *, [, \, ..
+  // Also block shell metacharacters
+  const invalidChars = /[\s~^:?*\[\]\\;&|`$()'"<>]/
+  if (invalidChars.test(ref) || ref.includes('..')) {
+    return { valid: false, error: 'Invalid characters in ref name' }
+  }
+  if (ref.startsWith('-')) {
+    return { valid: false, error: 'Ref name cannot start with dash' }
+  }
+  return { valid: true, ref: ref.trim() }
 }
 
 // Register all IPC handlers
@@ -627,11 +670,11 @@ function registerCodexHandlers() {
 // Register git IPC handlers
 function registerGitHandlers() {
   ipcMain.handle('git:getCurrentBranch', async () => {
-    return gitExec('rev-parse --abbrev-ref HEAD')
+    return gitExecSafe(['rev-parse', '--abbrev-ref', 'HEAD'])
   })
 
   ipcMain.handle('git:getBranches', async () => {
-    const result = gitExec('branch -a')
+    const result = gitExecSafe(['branch', '-a'])
     if (result.success) {
       const branches = result.data
         .split('\n')
@@ -643,15 +686,25 @@ function registerGitHandlers() {
   })
 
   ipcMain.handle('git:checkout', async (event, branch) => {
-    return gitExec(`checkout ${branch}`)
+    // Validate branch name to prevent injection
+    const validation = validateGitRef(branch)
+    if (!validation.valid) {
+      return { success: false, error: validation.error }
+    }
+    return gitExecSafe(['checkout', validation.ref])
   })
 
   ipcMain.handle('git:createBranch', async (event, name) => {
-    return gitExec(`checkout -b ${name}`)
+    // Validate branch name to prevent injection
+    const validation = validateGitRef(name)
+    if (!validation.valid) {
+      return { success: false, error: validation.error }
+    }
+    return gitExecSafe(['checkout', '-b', validation.ref])
   })
 
   ipcMain.handle('git:getStatus', async () => {
-    const result = gitExec('status --porcelain')
+    const result = gitExecSafe(['status', '--porcelain'])
     if (result.success) {
       const files = result.data
         .split('\n')
@@ -667,22 +720,23 @@ function registerGitHandlers() {
 
   ipcMain.handle('git:commit', async (event, message) => {
     // Stage all changes first
-    const addResult = gitExec('add -A')
+    const addResult = gitExecSafe(['add', '-A'])
     if (!addResult.success) return addResult
 
+    // Message is passed as array element, safe from injection
     return gitExecSafe(['commit', '-m', message])
   })
 
   ipcMain.handle('git:push', async () => {
-    return gitExec('push')
+    return gitExecSafe(['push'])
   })
 
   ipcMain.handle('git:pull', async () => {
-    return gitExec('pull')
+    return gitExecSafe(['pull'])
   })
 
   ipcMain.handle('git:stash', async () => {
-    return gitExec('stash')
+    return gitExecSafe(['stash'])
   })
 
   ipcMain.handle('git:stashWithMessage', async (event, message) => {
@@ -690,7 +744,7 @@ function registerGitHandlers() {
   })
 
   ipcMain.handle('git:stashPop', async () => {
-    return gitExec('stash pop')
+    return gitExecSafe(['stash', 'pop'])
   })
 
   // File operations handlers
@@ -1994,17 +2048,30 @@ function createWindow() {
   })
 
   // Configure webview security for preload script
-  // Note: Preload scripts always have Node access regardless of nodeIntegration setting
+  // SECURITY NOTE: contextIsolation is disabled for the webview because the inspector
+  // functionality requires DOM manipulation and React fiber access in the page context.
+  // This is a known tradeoff - mitigations are applied below.
+  // Future improvement: Migrate to contextBridge with webContents.executeJavaScript for source location.
   mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
     console.log('will-attach-webview called')
     console.log('params.preload:', params.preload)
 
     // Prevent guest page from accessing Node APIs directly
     webPreferences.nodeIntegration = false
+    webPreferences.nodeIntegrationInSubFrames = false
+
+    // Disable remote module (deprecated but explicit is safer)
+    webPreferences.enableRemoteModule = false
+
     // contextIsolation: false allows preload to manipulate page DOM for inspector
-    // TODO: Migrate to contextBridge for full isolation (requires preload rewrite)
+    // This is required for: hover highlighting, element selection, React source location detection
     webPreferences.contextIsolation = false
     webPreferences.sandbox = false
+
+    // Disable potentially dangerous features
+    webPreferences.allowRunningInsecureContent = false
+    webPreferences.experimentalFeatures = false
+    webPreferences.webSecurity = true
 
     // Ensure preload script path is valid
     if (params.preload) {
@@ -2014,6 +2081,24 @@ function createWindow() {
     }
 
     console.log('webPreferences:', JSON.stringify(webPreferences, null, 2))
+  })
+
+  // Block dangerous permission requests from webviews
+  mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+    const allowedPermissions = ['clipboard-read', 'clipboard-write']
+    const isAllowed = allowedPermissions.includes(permission)
+    console.log(`Permission request: ${permission} -> ${isAllowed ? 'allowed' : 'denied'}`)
+    callback(isAllowed)
+  })
+
+  // Block dangerous navigation in webviews (file://, javascript:, data: URIs)
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const parsed = new URL(url)
+    const blockedProtocols = ['file:', 'javascript:', 'data:', 'vbscript:']
+    if (blockedProtocols.includes(parsed.protocol)) {
+      console.warn(`Blocked navigation to dangerous URL: ${url}`)
+      event.preventDefault()
+    }
   })
 
   mainWindow.once('ready-to-show', () => {
