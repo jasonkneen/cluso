@@ -3395,6 +3395,7 @@ If you're not sure what the user wants, ask for clarification.
                 userRequest: userMessage.content,
                 patchStatus: 'preparing',
               };
+              console.log('[Instant UI] Pending DOM approval created:', approvalId);
               setPendingDOMApproval(approvalPayload);
               prepareDomPatch(
                 approvalId,
@@ -3833,9 +3834,16 @@ If you're not sure what the user wants, ask for clarification.
     userRequest: string,
     projectPath?: string
   ) => {
+    console.log('[DOM Approval] Preparing source patch:', {
+      approvalId,
+      cssChanges,
+      projectPath,
+      elementFile: element.sourceLocation?.sources?.[0]?.file,
+    });
     const providerConfig = { modelId: selectedModel.id, providers: providerConfigs };
     generateSourcePatch(element, cssChanges, providerConfig, projectPath || undefined, userRequest)
       .then(patch => {
+        console.log('[DOM Approval] Patch generation completed:', { approvalId, success: !!patch });
         setPendingDOMApproval(prev => {
           if (!prev || prev.id !== approvalId) return prev;
           if (patch) {
@@ -3850,6 +3858,7 @@ If you're not sure what the user wants, ask for clarification.
               undoCode,
               applyCode,
             };
+            console.log('[DOM Approval] Patch ready:', { approvalId, filePath: patch.filePath });
             return {
               ...prev,
               patchStatus: 'ready',
@@ -3857,11 +3866,13 @@ If you're not sure what the user wants, ask for clarification.
               patchError: undefined,
             };
           }
+          console.warn('[DOM Approval] Patch generation returned null:', approvalId);
           return { ...prev, patchStatus: 'error', patch: undefined, patchError: 'Could not generate source patch.' };
         });
       })
       .catch((error: unknown) => {
         const errorMessage = error instanceof Error ? error.message : 'Failed to generate source patch';
+        console.error('[DOM Approval] Patch generation failed:', { approvalId, error: errorMessage });
         setPendingDOMApproval(prev => {
           if (!prev || prev.id !== approvalId) return prev;
           return { ...prev, patchStatus: 'error', patch: undefined, patchError: errorMessage };
@@ -3872,6 +3883,12 @@ If you're not sure what the user wants, ask for clarification.
   // Handle accepting DOM preview - generates source patch and auto-approves
   const handleAcceptDOMApproval = useCallback(async () => {
     if (!pendingDOMApproval) return;
+
+    console.log('[DOM Approval] Accept clicked:', {
+      id: pendingDOMApproval.id,
+      status: pendingDOMApproval.patchStatus,
+      hasPatch: !!pendingDOMApproval.patch,
+    });
 
     if (pendingDOMApproval.patchStatus === 'preparing') {
       setMessages(prev => [...prev, {
@@ -3912,6 +3929,7 @@ If you're not sure what the user wants, ask for clarification.
       if (!window.electronAPI?.files?.writeFile) {
         throw new Error('File API not available');
       }
+      console.log('[DOM Approval] Writing patch to disk:', patch.filePath);
       const result = await window.electronAPI.files.writeFile(patch.filePath, patch.patchedContent);
       if (result.success) {
         console.log('[Source Patch] Applied successfully');
