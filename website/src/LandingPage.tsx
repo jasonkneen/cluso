@@ -53,6 +53,41 @@ const styles = `
     text-decoration: none;
   }
 
+  /* Notification Toast */
+  .notification-toast {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    padding: 1rem 1.5rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    animation: slideIn 0.3s ease;
+    z-index: 1000;
+    max-width: 400px;
+  }
+
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .notification-toast.success {
+    background: #22c55e;
+    color: white;
+  }
+
+  .notification-toast.error {
+    background: #ef4444;
+    color: white;
+  }
+
   /* Navigation */
   .landing-nav {
     position: fixed;
@@ -297,12 +332,17 @@ const styles = `
     border: none;
   }
 
+  .btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
   .btn-primary {
     background: #ffffff;
     color: #0a0a0a;
   }
 
-  .btn-primary:hover {
+  .btn-primary:hover:not(:disabled) {
     background: #e5e5e5;
     color: #0a0a0a;
     transform: translateY(-1px);
@@ -313,7 +353,7 @@ const styles = `
     color: #ffffff;
   }
 
-  .landing-page.light .btn-primary:hover {
+  .landing-page.light .btn-primary:hover:not(:disabled) {
     background: #1a1a1a;
     color: #ffffff;
   }
@@ -324,7 +364,7 @@ const styles = `
     border: 1px solid var(--border);
   }
 
-  .btn-secondary:hover {
+  .btn-secondary:hover:not(:disabled) {
     background: var(--bg-secondary);
     border-color: #404040;
   }
@@ -928,11 +968,17 @@ interface LandingPageProps {
   onDownload?: () => void;
 }
 
+interface NotificationState {
+  type: 'success' | 'error' | null;
+  message: string;
+}
+
 export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
   const [isDark, setIsDark] = useState(true);
   const [email, setEmail] = useState('');
   const [showScrollHeader, setShowScrollHeader] = useState(false);
   const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'submitted'>('idle');
+  const [notification, setNotification] = useState<NotificationState>({ type: null, message: '' });
 
   const toggleTheme = () => setIsDark(!isDark);
 
@@ -944,19 +990,43 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  const showNotification = (type: 'success' | 'error', message: string) => {
+    setNotification({ type, message });
+    setTimeout(() => {
+      setNotification({ type: null, message: '' });
+    }, 3000);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitState === 'submitted') return;
+    if (submitState === 'submitted' || submitState === 'submitting') return;
 
     setSubmitState('submitting');
-    console.log('Email submitted:', email);
 
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    try {
+      const response = await fetch('/.netlify/functions/send-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email }),
+      });
 
-    // TODO: Add actual submission logic
-    setSubmitState('submitted');
-    setEmail('');
+      const data = await response.json();
+
+      if (response.ok) {
+        setSubmitState('submitted');
+        setEmail('');
+        showNotification('success', 'Welcome! Check your email for confirmation.');
+      } else {
+        setSubmitState('idle');
+        showNotification('error', data.error || 'Failed to join waitlist. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      setSubmitState('idle');
+      showNotification('error', 'An error occurred. Please try again later.');
+    }
   };
 
   const getButtonText = () => {
@@ -971,6 +1041,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
     <>
       <style>{styles}</style>
       <div className={`landing-page ${isDark ? '' : 'light'}`}>
+        {/* Notification Toast */}
+        {notification.type && (
+          <div className={`notification-toast ${notification.type}`}>
+            {notification.message}
+          </div>
+        )}
+
         {/* Sticky Scroll Header */}
         <div className={`scroll-header ${showScrollHeader ? 'visible' : ''}`}>
           <div className="scroll-header-left">
@@ -990,7 +1067,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                 required
               />
             </form>
-            <button type="submit" className="btn btn-primary" onClick={handleSubmit} disabled={submitState === 'submitting'}>
+            <button type="submit" className="btn btn-primary" onClick={handleSubmit} disabled={submitState === 'submitting' || submitState === 'submitted'}>
               {getButtonText()}
             </button>
             <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
@@ -1067,7 +1144,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               onChange={(e) => setEmail(e.target.value)}
               required
             />
-            <button type="submit" className="btn btn-primary" disabled={submitState === 'submitting'}>
+            <button type="submit" className="btn btn-primary" disabled={submitState === 'submitting' || submitState === 'submitted'}>
               {getButtonText()}
             </button>
           </form>
@@ -1302,7 +1379,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                     onChange={(e) => setEmail(e.target.value)}
                     required
                   />
-                  <button type="submit" className="btn btn-primary" disabled={submitState === 'submitting'}>
+                  <button type="submit" className="btn btn-primary" disabled={submitState === 'submitting' || submitState === 'submitted'}>
                     {getButtonText()}
                   </button>
                 </form>
@@ -1320,7 +1397,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               <div className="footer-links">
                 <h4>Resources</h4>
                 <ul>
-                  <li><a href="#">Documentation</a></li>
+                  <li><a href="#" >Documentation</a></li>
                   
                 </ul>
               </div>
