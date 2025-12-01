@@ -1254,6 +1254,7 @@ export default function App() {
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
   const selectedElementRef = useRef<SelectedElement | null>(null);
   useEffect(() => { selectedElementRef.current = selectedElement; }, [selectedElement]);
+  const [hoveredElement, setHoveredElement] = useState<{ element: SelectedElement; rect: { top: number; left: number; width: number; height: number } } | null>(null);
   const [screenshotElement, setScreenshotElement] = useState<SelectedElement | null>(null);
   const [capturedScreenshot, setCapturedScreenshot] = useState<string | null>(null);
   const [showScreenshotPreview, setShowScreenshotPreview] = useState(false);
@@ -3074,7 +3075,12 @@ export default function App() {
     const handleIpcMessage = (event: { channel: string; args: unknown[] }) => {
       const { channel, args } = event;
 
-      if (channel === 'inspector-select') {
+      if (channel === 'inspector-hover') {
+        const data = args[0] as { element: SelectedElement; rect: { top: number; left: number; width: number; height: number } };
+        setHoveredElement({ element: data.element, rect: data.rect });
+      } else if (channel === 'inspector-hover-end') {
+        setHoveredElement(null);
+      } else if (channel === 'inspector-select') {
         const data = args[0] as { element: SelectedElement; x: number; y: number; rect: unknown };
         setSelectedElement({
           ...data.element,
@@ -3082,6 +3088,7 @@ export default function App() {
           y: data.y,
           rect: data.rect as SelectedElement['rect']
         });
+        setHoveredElement(null); // Clear hover on selection
       } else if (channel === 'screenshot-select') {
         const data = args[0] as { element: SelectedElement; rect: { top: number; left: number; width: number; height: number } };
         setScreenshotElement(data.element);
@@ -6038,6 +6045,40 @@ If you're not sure what the user wants, ask for clarification.
                         )}
                     </button>
                 </div>
+            )}
+
+            {/* Element Info Label - shows during inspector hover */}
+            {(isInspectorActive || isScreenshotActive) && hoveredElement && (
+              <div
+                className="fixed z-[60] pointer-events-none"
+                style={{
+                  top: Math.max(8, (webviewRefs.current.get(activeTabId)?.getBoundingClientRect().top || 0) + hoveredElement.rect.top - 32),
+                  left: Math.max(8, (webviewRefs.current.get(activeTabId)?.getBoundingClientRect().left || 0) + hoveredElement.rect.left),
+                }}
+              >
+                <div
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-mono shadow-lg ${
+                    isScreenshotActive
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-blue-600 text-white'
+                  }`}
+                  style={{
+                    backdropFilter: 'blur(8px)',
+                    WebkitBackdropFilter: 'blur(8px)',
+                  }}
+                >
+                  <span className="font-semibold">{hoveredElement.element.tagName?.toLowerCase()}</span>
+                  {hoveredElement.element.id && (
+                    <span className="opacity-80">#{hoveredElement.element.id}</span>
+                  )}
+                  {hoveredElement.element.className && (
+                    <span className="opacity-60 max-w-[200px] truncate">.{hoveredElement.element.className.split(' ')[0]}</span>
+                  )}
+                  <span className="opacity-50 text-[10px] ml-1">
+                    {Math.round(hoveredElement.rect.width)}×{Math.round(hoveredElement.rect.height)}
+                  </span>
+                </div>
+              </div>
             )}
 
             {/* Popup Chat Button/Input when element selected and sidebar collapsed */}
