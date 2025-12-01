@@ -10,6 +10,54 @@ const aiSdkWrapper = require('./ai-sdk-wrapper.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
+// Simple rate limiter for file operations
+class RateLimiter {
+  constructor(maxConcurrent = 2, minIntervalMs = 500) {
+    this.maxConcurrent = maxConcurrent
+    this.minIntervalMs = minIntervalMs
+    this.activeCount = 0
+    this.queue = []
+    this.lastCallTime = 0
+  }
+
+  async execute(fn) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ fn, resolve, reject })
+      this.processQueue()
+    })
+  }
+
+  async processQueue() {
+    if (this.activeCount >= this.maxConcurrent || this.queue.length === 0) {
+      return
+    }
+
+    const now = Date.now()
+    const timeSinceLast = now - this.lastCallTime
+    if (timeSinceLast < this.minIntervalMs) {
+      setTimeout(() => this.processQueue(), this.minIntervalMs - timeSinceLast)
+      return
+    }
+
+    const { fn, resolve, reject } = this.queue.shift()
+    this.activeCount++
+    this.lastCallTime = Date.now()
+
+    try {
+      const result = await fn()
+      resolve(result)
+    } catch (error) {
+      reject(error)
+    } finally {
+      this.activeCount--
+      this.processQueue()
+    }
+  }
+}
+
+// Rate limiter for file search operations (max 2 concurrent, 500ms between starts)
+const fileSearchLimiter = new RateLimiter(2, 500)
+
 // Track the main window for sending events
 let mainWindow = null
 
@@ -867,13 +915,14 @@ function registerGitHandlers() {
     }
   })
 
-  // Search in files (grep-like)
+  // Search in files (grep-like) - rate limited to prevent excessive disk I/O
   ipcMain.handle('files:searchInFiles', async (event, searchPattern, dirPath, options = {}) => {
-    try {
-      const { filePattern = '*', maxResults = 100, caseSensitive = false } = options
-      const results = []
-      const searchDir = dirPath || process.cwd()
-      const regex = new RegExp(searchPattern, caseSensitive ? 'g' : 'gi')
+    return fileSearchLimiter.execute(async () => {
+      try {
+        const { filePattern = '*', maxResults = 100, caseSensitive = false } = options
+        const results = []
+        const searchDir = dirPath || process.cwd()
+        const regex = new RegExp(searchPattern, caseSensitive ? 'g' : 'gi')
 
       // Recursive search function
       async function searchDirectory(dir, depth = 0) {
@@ -927,16 +976,18 @@ function registerGitHandlers() {
 
       await searchDirectory(searchDir)
       return { success: true, data: results }
-    } catch (error) {
-      return { success: false, error: error.message }
-    }
+      } catch (error) {
+        return { success: false, error: error.message }
+      }
+    })
   })
 
-  // Glob pattern matching for finding files
+  // Glob pattern matching for finding files - rate limited
   ipcMain.handle('files:glob', async (event, pattern, dirPath) => {
-    try {
-      const searchDir = dirPath || process.cwd()
-      const results = []
+    return fileSearchLimiter.execute(async () => {
+      try {
+        const searchDir = dirPath || process.cwd()
+        const results = []
 
       // Simple glob matching (supports *, **, and ?)
       function matchGlob(filename, pattern) {
@@ -989,9 +1040,10 @@ function registerGitHandlers() {
 
       await searchDirectory(searchDir)
       return { success: true, data: results }
-    } catch (error) {
-      return { success: false, error: error.message }
-    }
+      } catch (error) {
+        return { success: false, error: error.message }
+      }
+    })
   })
 
   // Read multiple files at once
