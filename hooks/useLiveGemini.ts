@@ -728,89 +728,69 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         const path = (call.args as any).path || '.';
                         console.log("AI listing files:", path);
 
-                        if (onListFiles) {
-                            onListFiles(path).then(result => {
-                                sessionPromiseRef.current?.then(session => {
-                                    session.sendToolResponse({
-                                        functionResponses: {
-                                            id: call.id,
-                                            name: call.name,
-                                            response: { result }
-                                        }
-                                    });
-                                });
-                            }).catch(err => {
-                                sessionPromiseRef.current?.then(session => {
-                                    session.sendToolResponse({
-                                        functionResponses: {
-                                            id: call.id,
-                                            name: call.name,
-                                            response: { error: err.message || 'Failed to list files' }
-                                        }
-                                    });
-                                });
-                            });
-                        } else {
-                            sessionPromiseRef.current?.then(session => {
+                        const sendListFilesResponse = (responseData: { result?: string; error?: string }) => {
+                            withSession(session => {
                                 session.sendToolResponse({
                                     functionResponses: {
                                         id: call.id,
                                         name: call.name,
-                                        response: { error: 'list_files not available' }
+                                        response: responseData
                                     }
                                 });
                             });
+                        };
+
+                        if (onListFiles) {
+                            onListFiles(path).then(result => {
+                                if (result === undefined || result === null) {
+                                    sendListFilesResponse({ error: 'Directory listing returned no content' });
+                                } else {
+                                    sendListFilesResponse({ result: String(result) });
+                                }
+                            }).catch(err => {
+                                console.error('[useLiveGemini] list_files error:', err);
+                                sendListFilesResponse({ error: err.message || 'Failed to list files' });
+                            });
+                        } else {
+                            sendListFilesResponse({ error: 'list_files not available' });
                         }
                     }
                     else if (call.name === 'read_file') {
                         const filePath = (call.args as any).path ?? (call.args as any).filePath;
                         console.log("AI reading file:", filePath);
 
-                        if (!filePath) {
-                            sessionPromiseRef.current?.then(session => {
+                        const sendReadFileResponse = (responseData: { result?: string; error?: string }) => {
+                            withSession(session => {
                                 session.sendToolResponse({
                                     functionResponses: {
                                         id: call.id,
                                         name: call.name,
-                                        response: { error: 'read_file requires a "path" argument' }
+                                        response: responseData
                                     }
                                 });
                             });
+                        };
+
+                        if (!filePath) {
+                            sendReadFileResponse({ error: 'read_file requires a "path" argument' });
                             return;
                         }
 
                         if (onReadFile) {
                             onReadFile(filePath).then(result => {
-                                sessionPromiseRef.current?.then(session => {
-                                    session.sendToolResponse({
-                                        functionResponses: {
-                                            id: call.id,
-                                            name: call.name,
-                                            response: { result }
-                                        }
-                                    });
-                                });
+                                // Check for undefined/null result
+                                if (result === undefined || result === null) {
+                                    console.error('[useLiveGemini] read_file returned undefined for:', filePath);
+                                    sendReadFileResponse({ error: 'File read returned no content' });
+                                } else {
+                                    sendReadFileResponse({ result: String(result) });
+                                }
                             }).catch(err => {
-                                sessionPromiseRef.current?.then(session => {
-                                    session.sendToolResponse({
-                                        functionResponses: {
-                                            id: call.id,
-                                            name: call.name,
-                                            response: { error: err.message || 'Failed to read file' }
-                                        }
-                                    });
-                                });
+                                console.error('[useLiveGemini] read_file error:', err);
+                                sendReadFileResponse({ error: err.message || 'Failed to read file' });
                             });
                         } else {
-                            sessionPromiseRef.current?.then(session => {
-                                session.sendToolResponse({
-                                    functionResponses: {
-                                        id: call.id,
-                                        name: call.name,
-                                        response: { error: 'read_file not available' }
-                                    }
-                                });
-                            });
+                            sendReadFileResponse({ error: 'read_file not available' });
                         }
                     }
                     else if (call.name === 'click_element') {
@@ -908,28 +888,22 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         const itemNumber = (call.args as any).itemNumber;
                         console.log("AI opening item:", itemNumber);
 
+                        const sendOpenItemResponse = (responseData: { result?: string; error?: string }) => {
+                            withSession(session => {
+                                session.sendToolResponse({
+                                    functionResponses: { id: call.id, name: call.name, response: responseData }
+                                });
+                            });
+                        };
+
                         if (onOpenItem) {
                             onOpenItem(itemNumber).then(result => {
-                                sessionPromiseRef.current?.then(session => {
-                                    session.sendToolResponse({
-                                        functionResponses: {
-                                            id: call.id,
-                                            name: call.name,
-                                            response: { result }
-                                        }
-                                    });
-                                });
+                                sendOpenItemResponse({ result: result ?? 'Item opened' });
+                            }).catch(err => {
+                                sendOpenItemResponse({ error: err.message || 'Failed to open item' });
                             });
                         } else {
-                            sessionPromiseRef.current?.then(session => {
-                                session.sendToolResponse({
-                                    functionResponses: {
-                                        id: call.id,
-                                        name: call.name,
-                                        response: { error: 'open_item not available' }
-                                    }
-                                });
-                            });
+                            sendOpenItemResponse({ error: 'open_item not available' });
                         }
                     }
                     else if (call.name === 'open_file') {
@@ -937,28 +911,22 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         const path = (call.args as any).path;
                         console.log("AI opening file:", name || path);
 
+                        const sendOpenFileResponse = (responseData: { result?: string; error?: string }) => {
+                            withSession(session => {
+                                session.sendToolResponse({
+                                    functionResponses: { id: call.id, name: call.name, response: responseData }
+                                });
+                            });
+                        };
+
                         if (onOpenFile) {
                             onOpenFile(name, path).then(result => {
-                                sessionPromiseRef.current?.then(session => {
-                                    session.sendToolResponse({
-                                        functionResponses: {
-                                            id: call.id,
-                                            name: call.name,
-                                            response: { result }
-                                        }
-                                    });
-                                });
+                                sendOpenFileResponse({ result: result ?? 'File opened' });
+                            }).catch(err => {
+                                sendOpenFileResponse({ error: err.message || 'Failed to open file' });
                             });
                         } else {
-                            sessionPromiseRef.current?.then(session => {
-                                session.sendToolResponse({
-                                    functionResponses: {
-                                        id: call.id,
-                                        name: call.name,
-                                        response: { error: 'open_file not available' }
-                                    }
-                                });
-                            });
+                            sendOpenFileResponse({ error: 'open_file not available' });
                         }
                     }
                     else if (call.name === 'open_folder') {
@@ -966,80 +934,66 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         const itemNumber = (call.args as any).itemNumber;
                         console.log("AI opening folder:", name || `item #${itemNumber}`);
 
+                        const sendOpenFolderResponse = (responseData: { result?: string; error?: string }) => {
+                            withSession(session => {
+                                session.sendToolResponse({
+                                    functionResponses: { id: call.id, name: call.name, response: responseData }
+                                });
+                            });
+                        };
+
                         if (onOpenFolder) {
                             onOpenFolder(name, itemNumber).then(result => {
-                                sessionPromiseRef.current?.then(session => {
-                                    session.sendToolResponse({
-                                        functionResponses: {
-                                            id: call.id,
-                                            name: call.name,
-                                            response: { result }
-                                        }
-                                    });
-                                });
+                                sendOpenFolderResponse({ result: result ?? 'Folder opened' });
+                            }).catch(err => {
+                                sendOpenFolderResponse({ error: err.message || 'Failed to open folder' });
                             });
                         } else {
-                            sessionPromiseRef.current?.then(session => {
-                                session.sendToolResponse({
-                                    functionResponses: {
-                                        id: call.id,
-                                        name: call.name,
-                                        response: { error: 'open_folder not available' }
-                                    }
-                                });
-                            });
+                            sendOpenFolderResponse({ error: 'open_folder not available' });
                         }
                     }
                     else if (call.name === 'browser_back') {
                         console.log("AI going back in file browser");
 
+                        const sendBrowserBackResponse = (responseData: { result?: string; error?: string }) => {
+                            withSession(session => {
+                                session.sendToolResponse({
+                                    functionResponses: { id: call.id, name: call.name, response: responseData }
+                                });
+                            });
+                        };
+
                         if (onBrowserBack) {
-                            const result = onBrowserBack();
-                            sessionPromiseRef.current?.then(session => {
-                                session.sendToolResponse({
-                                    functionResponses: {
-                                        id: call.id,
-                                        name: call.name,
-                                        response: { result }
-                                    }
-                                });
-                            });
+                            try {
+                                const result = onBrowserBack();
+                                sendBrowserBackResponse({ result: result ?? 'Navigated back' });
+                            } catch (err: any) {
+                                sendBrowserBackResponse({ error: err.message || 'Failed to go back' });
+                            }
                         } else {
-                            sessionPromiseRef.current?.then(session => {
-                                session.sendToolResponse({
-                                    functionResponses: {
-                                        id: call.id,
-                                        name: call.name,
-                                        response: { error: 'browser_back not available' }
-                                    }
-                                });
-                            });
+                            sendBrowserBackResponse({ error: 'browser_back not available' });
                         }
                     }
                     else if (call.name === 'close_browser') {
                         console.log("AI closing file browser");
 
+                        const sendCloseBrowserResponse = (responseData: { result?: string; error?: string }) => {
+                            withSession(session => {
+                                session.sendToolResponse({
+                                    functionResponses: { id: call.id, name: call.name, response: responseData }
+                                });
+                            });
+                        };
+
                         if (onCloseBrowser) {
-                            const result = onCloseBrowser();
-                            sessionPromiseRef.current?.then(session => {
-                                session.sendToolResponse({
-                                    functionResponses: {
-                                        id: call.id,
-                                        name: call.name,
-                                        response: { result }
-                                    }
-                                });
-                            });
+                            try {
+                                const result = onCloseBrowser();
+                                sendCloseBrowserResponse({ result: result ?? 'Browser closed' });
+                            } catch (err: any) {
+                                sendCloseBrowserResponse({ error: err.message || 'Failed to close browser' });
+                            }
                         } else {
-                            sessionPromiseRef.current?.then(session => {
-                                session.sendToolResponse({
-                                    functionResponses: {
-                                        id: call.id,
-                                        name: call.name,
-                                        response: { error: 'close_browser not available' }
-                                    }
-                                });
-                            });
+                            sendCloseBrowserResponse({ error: 'close_browser not available' });
                         }
                     }
                 }
