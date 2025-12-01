@@ -775,7 +775,8 @@ export default function App() {
 
   const [logs, setLogs] = useState<string[]>([]);
   const [attachLogs, setAttachLogs] = useState(false);
-  const [attachedImage, setAttachedImage] = useState<string | null>(null);
+  const [attachedImages, setAttachedImages] = useState<string[]>([]);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -2983,18 +2984,68 @@ export default function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
-  // Handle Image Upload
+  // Handle Image Upload (supports multiple files)
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-              const base64 = reader.result as string;
-              setAttachedImage(base64);
-          };
-          reader.readAsDataURL(file);
-      }
+    const files = e.target.files;
+    if (!files) return;
+
+    const filesToProcess = Array.from(files).slice(0, 5 - attachedImages.length);
+
+    filesToProcess.forEach(file => {
+      if (!file.type.startsWith('image/')) return;
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result as string;
+        setAttachedImages(prev => {
+          if (prev.length >= 5) return prev;
+          return [...prev, base64];
+        });
+      };
+      reader.readAsDataURL(file);
+    });
   };
+
+  // Handle drag and drop for images
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDraggingOver(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    const imageFiles = files.filter(f => f.type.startsWith('image/'));
+    const filesToProcess = imageFiles.slice(0, 5 - attachedImages.length);
+
+    filesToProcess.forEach(file => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result as string;
+        setAttachedImages(prev => {
+          if (prev.length >= 5) return prev;
+          return [...prev, base64];
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+  }, [attachedImages.length]);
+
+  const removeAttachedImage = useCallback((index: number) => {
+    setAttachedImages(prev => prev.filter((_, i) => i !== index));
+  }, []);
 
   // Built-in slash command definitions
   const BUILT_IN_COMMANDS = [
@@ -3106,7 +3157,7 @@ Keep the summary brief but comprehensive enough to continue the conversation eff
       return;
     }
 
-    if (!promptText.trim() && !selectedElement && !attachedImage && !screenshotElement) return;
+    if (!promptText.trim() && !selectedElement && attachedImages.length === 0 && !screenshotElement) return;
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -3219,9 +3270,10 @@ If you're not sure what the user wants, ask for clarification.
       { type: 'text', text: fullPromptText },
     ];
 
-    if (attachedImage) {
-      const base64Data = attachedImage.split(',')[1];
-      const mimeType = attachedImage.split(';')[0].split(':')[1];
+    // Add all attached images
+    attachedImages.forEach(img => {
+      const base64Data = img.split(',')[1];
+      const mimeType = img.split(';')[0].split(':')[1] || 'image/png';
       userContentParts.push({
         type: 'image',
         image: {
@@ -3229,10 +3281,10 @@ If you're not sure what the user wants, ask for clarification.
           mimeType,
         },
       });
-    }
+    });
 
     setAttachLogs(false);
-    setAttachedImage(null);
+    setAttachedImages([]);
     setScreenshotElement(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
 
@@ -5370,7 +5422,22 @@ If you're not sure what the user wants, ask for clarification.
 
           {/* Input Area */}
           <div className={`p-4 ${editedFiles.length > 0 ? 'pt-0' : ''}`} style={{ overflow: 'visible' }}>
-              <div className={`rounded-2xl border ${editedFiles.length > 0 ? 'rounded-t-none border-t-0' : ''} ${isDarkMode ? 'bg-neutral-700 border-neutral-600' : 'bg-stone-50 border-stone-200'}`} style={{ overflow: 'visible' }}>
+              <div
+                className={`rounded-2xl border relative ${editedFiles.length > 0 ? 'rounded-t-none border-t-0' : ''} ${isDarkMode ? 'bg-neutral-700 border-neutral-600' : 'bg-stone-50 border-stone-200'} ${isDraggingOver ? 'ring-2 ring-blue-400 ring-opacity-50' : ''}`}
+                style={{ overflow: 'visible' }}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                  {/* Drop zone overlay */}
+                  {isDraggingOver && (
+                    <div className="absolute inset-0 bg-blue-500/10 rounded-2xl flex items-center justify-center z-10 pointer-events-none">
+                      <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${isDarkMode ? 'bg-blue-500/20 text-blue-300' : 'bg-blue-100 text-blue-600'}`}>
+                        <Image size={20} />
+                        <span className="font-medium">Drop images here (max 5)</span>
+                      </div>
+                    </div>
+                  )}
                   {/* Selection Chips */}
                   {(selectedElement || screenshotElement || attachLogs || selectedLogs) && (
                       <div className="px-3 pt-3 flex flex-wrap gap-2">
@@ -5497,6 +5564,35 @@ If you're not sure what the user wants, ask for clarification.
                                   </button>
                               </div>
                           ))}
+                      </div>
+                  )}
+
+                  {/* Attached Images Preview */}
+                  {attachedImages.length > 0 && (
+                      <div className="px-3 pt-2 flex flex-wrap gap-2">
+                          {attachedImages.map((img, idx) => (
+                              <div
+                                key={idx}
+                                className={`relative group rounded-lg overflow-hidden border ${isDarkMode ? 'border-neutral-500' : 'border-stone-300'}`}
+                              >
+                                <img
+                                  src={img}
+                                  alt={`Attachment ${idx + 1}`}
+                                  className="h-16 w-16 object-cover"
+                                />
+                                <button
+                                  onClick={() => removeAttachedImage(idx)}
+                                  className="absolute top-0.5 right-0.5 p-0.5 rounded-full bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                          ))}
+                          {attachedImages.length < 5 && (
+                            <div className={`text-xs self-center ${isDarkMode ? 'text-neutral-400' : 'text-stone-400'}`}>
+                              {5 - attachedImages.length} more
+                            </div>
+                          )}
                       </div>
                   )}
 
@@ -5823,6 +5919,7 @@ If you're not sure what the user wants, ask for clarification.
                               ref={fileInputRef}
                               className="hidden"
                               accept="image/*"
+                              multiple
                               onChange={handleImageUpload}
                           />
 
