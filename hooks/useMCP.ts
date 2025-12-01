@@ -11,6 +11,7 @@ import type {
   MCPConnectionStatus,
   MCPServerCapabilities,
 } from '../types/mcp'
+import { jsonSchemaToZod as sharedJsonSchemaToZod } from '../utils/zodSchema'
 
 /**
  * Hook options
@@ -431,9 +432,8 @@ export function mcpToolsToAISDK(
   }> = {}
 
   for (const tool of tools) {
-    // Convert JSON Schema to Zod schema (simplified)
-    // For complex schemas, you may need a more sophisticated converter
-    const parameters = jsonSchemaToZod(tool.inputSchema, z)
+    // Convert JSON Schema to Zod schema using shared utility
+    const parameters = sharedJsonSchemaToZod(tool.inputSchema, z)
 
     // Create unique tool name with server prefix to avoid collisions
     const uniqueName = `mcp_${tool.serverId}_${tool.name}`
@@ -463,67 +463,6 @@ export function mcpToolsToAISDK(
   return result
 }
 
-/**
- * Simple JSON Schema to Zod converter
- * Handles common cases - extend as needed for more complex schemas
- */
-function jsonSchemaToZod(schema: MCPTool['inputSchema'], z: typeof import('zod').z): unknown {
-  if (!schema.properties) {
-    return z.object({})
-  }
-
-  const shape: Record<string, unknown> = {}
-
-  for (const [key, prop] of Object.entries(schema.properties)) {
-    let zodType: unknown
-
-    switch (prop.type) {
-      case 'string':
-        zodType = z.string()
-        if (prop.enum) {
-          zodType = z.enum(prop.enum as [string, ...string[]])
-        }
-        break
-      case 'number':
-      case 'integer':
-        zodType = z.number()
-        break
-      case 'boolean':
-        zodType = z.boolean()
-        break
-      case 'array':
-        if (prop.items) {
-          const itemType = jsonSchemaToZod({ type: 'object', properties: { item: prop.items } }, z)
-          zodType = z.array((itemType as Record<string, unknown>).item || z.unknown())
-        } else {
-          zodType = z.array(z.unknown())
-        }
-        break
-      case 'object':
-        if (prop.properties) {
-          zodType = jsonSchemaToZod(prop as MCPTool['inputSchema'], z)
-        } else {
-          zodType = z.record(z.unknown())
-        }
-        break
-      default:
-        zodType = z.unknown()
-    }
-
-    // Add description if present
-    if (prop.description && zodType && typeof zodType === 'object' && 'describe' in zodType) {
-      zodType = (zodType as { describe: (d: string) => unknown }).describe(prop.description)
-    }
-
-    // Make optional if not required
-    if (!schema.required?.includes(key) && zodType && typeof zodType === 'object' && 'optional' in zodType) {
-      zodType = (zodType as { optional: () => unknown }).optional()
-    }
-
-    shape[key] = zodType
-  }
-
-  return z.object(shape)
-}
+// jsonSchemaToZod moved to utils/zodSchema.ts
 
 export default useMCP
