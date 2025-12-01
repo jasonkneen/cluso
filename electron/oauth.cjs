@@ -41,6 +41,63 @@ function getConfigPath() {
 }
 
 /**
+ * Check if safeStorage encryption is available
+ */
+function isEncryptionAvailable() {
+  return safeStorage.isEncryptionAvailable()
+}
+
+/**
+ * Encrypt a string using OS-level secure storage
+ * Returns base64-encoded encrypted data, or original string if encryption unavailable
+ */
+function encryptString(plaintext) {
+  if (!plaintext) return null
+  if (!isEncryptionAvailable()) {
+    console.warn('[OAuth] Encryption not available, storing unencrypted')
+    return { encrypted: false, data: plaintext }
+  }
+  try {
+    const buffer = safeStorage.encryptString(plaintext)
+    return { encrypted: true, data: buffer.toString('base64') }
+  } catch (error) {
+    console.error('[OAuth] Encryption failed:', error)
+    return { encrypted: false, data: plaintext }
+  }
+}
+
+/**
+ * Decrypt a string that was encrypted with encryptString
+ */
+function decryptString(encryptedData) {
+  if (!encryptedData) return null
+
+  // Handle both old unencrypted format and new encrypted format
+  if (typeof encryptedData === 'string') {
+    // Old format - plain string (backwards compatible)
+    return encryptedData
+  }
+
+  if (!encryptedData.encrypted) {
+    // Stored unencrypted
+    return encryptedData.data
+  }
+
+  if (!isEncryptionAvailable()) {
+    console.error('[OAuth] Cannot decrypt - encryption not available')
+    return null
+  }
+
+  try {
+    const buffer = Buffer.from(encryptedData.data, 'base64')
+    return safeStorage.decryptString(buffer)
+  } catch (error) {
+    console.error('[OAuth] Decryption failed:', error)
+    return null
+  }
+}
+
+/**
  * Load OAuth config from file
  */
 function loadOAuthConfig() {
@@ -227,20 +284,44 @@ async function createApiKey(accessToken) {
 }
 
 /**
- * Save OAuth tokens to config
+ * Save OAuth tokens to config with encryption
  */
 function saveOAuthTokens(tokens) {
   const config = loadOAuthConfig()
-  config.oauthTokens = tokens
+  // Encrypt sensitive token data
+  config.oauthTokens = {
+    type: tokens.type,
+    refresh: encryptString(tokens.refresh),
+    access: encryptString(tokens.access),
+    expires: tokens.expires
+  }
   saveOAuthConfig(config)
 }
 
 /**
- * Get OAuth tokens from config
+ * Get OAuth tokens from config with decryption
  */
 function getOAuthTokens() {
   const config = loadOAuthConfig()
-  return config.oauthTokens || null
+  const tokens = config.oauthTokens
+  if (!tokens) return null
+
+  // Decrypt sensitive token data
+  const refresh = decryptString(tokens.refresh)
+  const access = decryptString(tokens.access)
+
+  // If decryption failed, tokens are invalid
+  if (!refresh || !access) {
+    console.error('[OAuth] Failed to decrypt tokens')
+    return null
+  }
+
+  return {
+    type: tokens.type,
+    refresh,
+    access,
+    expires: tokens.expires
+  }
 }
 
 /**
@@ -253,20 +334,20 @@ function clearOAuthTokens() {
 }
 
 /**
- * Save Claude Code API key to config
+ * Save Claude Code API key to config with encryption
  */
 function saveClaudeCodeApiKey(apiKey) {
   const config = loadOAuthConfig()
-  config.claudeCodeApiKey = apiKey
+  config.claudeCodeApiKey = encryptString(apiKey)
   saveOAuthConfig(config)
 }
 
 /**
- * Get Claude Code API key from config
+ * Get Claude Code API key from config with decryption
  */
 function getClaudeCodeApiKey() {
   const config = loadOAuthConfig()
-  return config.claudeCodeApiKey || null
+  return decryptString(config.claudeCodeApiKey)
 }
 
 /**
@@ -544,4 +625,5 @@ module.exports = {
   stopCallbackServer,
   getRedirectPort,
   getLocalRedirectUri,
+  isEncryptionAvailable,
 }
