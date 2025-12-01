@@ -130,8 +130,10 @@ const INTENT_PATTERNS: Array<{
       /(?:change|set|update)\s+(?:it\s+)?to\s+/i,
       // Match text change patterns
       /(?:text|label|title|content)\s*(?:to|:|\=)\s*/i,
+      // Match element removal/deletion - "remove this", "delete this", "hide this"
+      /(?:remove|delete|hide)\s+(?:this|that|it|the\s+element)/i,
     ],
-    keywords: ['change', 'make it', 'make this', 'set', 'red', 'blue', 'green', 'black', 'white', 'bigger', 'smaller', 'larger', 'bold', 'italic', 'background', 'color', 'font', 'size', 'padding', 'margin', 'border', 'style', 'update', 'modify', 'change to', 'set to'],
+    keywords: ['change', 'make it', 'make this', 'set', 'red', 'blue', 'green', 'black', 'white', 'bigger', 'smaller', 'larger', 'bold', 'italic', 'background', 'color', 'font', 'size', 'padding', 'margin', 'border', 'style', 'update', 'modify', 'change to', 'set to', 'remove this', 'delete this', 'hide this', 'remove', 'delete', 'hide'],
   },
   {
     type: 'debug',
@@ -155,39 +157,53 @@ const INTENT_PATTERNS: Array<{
 function classifyIntent(message: string, context: CodingContext): ClassifiedIntent {
   const lowerMessage = message.toLowerCase()
   let bestMatch: { type: IntentType; score: number } = { type: 'unknown', score: 0 }
+  const scoreBreakdown: Record<string, { pattern: number; keyword: number; context: number; total: number }> = {}
 
   for (const pattern of INTENT_PATTERNS) {
     let score = 0
+    let patternScore = 0
+    let keywordScore = 0
+    let contextScore = 0
 
     // Check regex patterns
     for (const regex of pattern.patterns) {
       if (regex.test(message)) {
-        score += 3
+        patternScore += 3
       }
     }
+    score += patternScore
 
     // Check keywords
     for (const keyword of pattern.keywords) {
       if (lowerMessage.includes(keyword.toLowerCase())) {
-        score += 1
+        keywordScore += 1
       }
     }
+    score += keywordScore
 
     // Boost score based on context
     if (context.selectedElement && (pattern.type === 'ui_inspect' || pattern.type === 'ui_modify')) {
-      score += 2
+      contextScore += 2
     }
     if (context.selectedFiles.length > 0 && pattern.type.startsWith('code_')) {
-      score += 1
+      contextScore += 1
     }
     if (context.selectedLogs.length > 0 && pattern.type === 'debug') {
-      score += 2
+      contextScore += 2
     }
+    score += contextScore
+
+    scoreBreakdown[pattern.type] = { pattern: patternScore, keyword: keywordScore, context: contextScore, total: score }
 
     if (score > bestMatch.score) {
       bestMatch = { type: pattern.type, score }
     }
   }
+
+  // Log intent classification for debugging
+  console.log('[Intent] Classification for:', message.substring(0, 50))
+  console.log('[Intent] Scores:', scoreBreakdown)
+  console.log('[Intent] Winner:', bestMatch.type, 'with score', bestMatch.score)
 
   // Extract targets from message
   const targets: string[] = []
