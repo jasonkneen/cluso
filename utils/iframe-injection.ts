@@ -198,6 +198,8 @@ export const INJECTION_SCRIPT = `
 
     // Listen for messages from parent to toggle modes
     window.addEventListener('message', function(event) {
+        // Only accept messages from our parent window
+        if (event.source !== window.parent) return;
         if (event.data) {
             if (event.data.type === 'TOGGLE_INSPECTOR') {
                 isInspectorActive = event.data.active;

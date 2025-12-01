@@ -24,6 +24,8 @@ const SCOPES = 'org:create_api_key user:profile user:inference'
 
 // Store PKCE verifier temporarily during OAuth flow
 let currentPKCEVerifier = null
+// Store OAuth state for CSRF protection
+let currentState = null
 // Store callback server
 let callbackServer = null
 // Store callback promise resolver
@@ -82,7 +84,10 @@ function generatePKCEChallenge() {
     .replace(/\//g, '_')
     .replace(/=/g, '')
 
-  return { challenge, verifier }
+  // Generate separate state for CSRF protection (independent from PKCE)
+  const state = crypto.randomBytes(16).toString('hex')
+
+  return { challenge, verifier, state }
 }
 
 /**
@@ -103,7 +108,7 @@ function getAuthorizationUrl(mode, pkce, useLocalCallback = true) {
   url.searchParams.set('scope', SCOPES)
   url.searchParams.set('code_challenge', pkce.challenge)
   url.searchParams.set('code_challenge_method', 'S256')
-  url.searchParams.set('state', pkce.verifier)
+  url.searchParams.set('state', pkce.state)
 
   return url.toString()
 }
@@ -324,6 +329,27 @@ function clearPKCEVerifier() {
 }
 
 /**
+ * Get the current OAuth state
+ */
+function getState() {
+  return currentState
+}
+
+/**
+ * Set the current OAuth state
+ */
+function setState(state) {
+  currentState = state
+}
+
+/**
+ * Clear the current OAuth state
+ */
+function clearState() {
+  currentState = null
+}
+
+/**
  * Start local HTTP server to capture OAuth callback
  * Returns a promise that resolves with the authorization code
  */
@@ -481,6 +507,9 @@ module.exports = {
   getPKCEVerifier,
   setPKCEVerifier,
   clearPKCEVerifier,
+  getState,
+  setState,
+  clearState,
   startCallbackServer,
   stopCallbackServer,
   getRedirectPort,

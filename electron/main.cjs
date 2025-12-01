@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
 const path = require('path')
-const { execSync, exec } = require('child_process')
+const { execSync, exec, spawnSync } = require('child_process')
 const fs = require('fs').promises
 const oauth = require('./oauth.cjs')
 const codex = require('./codex-oauth.cjs')
@@ -24,6 +24,36 @@ function gitExec(command) {
   }
 }
 
+// Safe git exec with args array - prevents command injection
+function gitExecSafe(args) {
+  try {
+    const cwd = process.cwd()
+    const result = spawnSync('git', args, { cwd, encoding: 'utf-8' })
+    if (result.status !== 0) {
+      return { success: false, error: result.stderr || 'Git command failed' }
+    }
+    return { success: true, data: (result.stdout || '').trim() }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
+// Path validation - prevents directory traversal attacks
+const os = require('os')
+function validatePath(filePath) {
+  if (!filePath || typeof filePath !== 'string') {
+    return { valid: false, error: 'Invalid path' }
+  }
+  const resolved = path.resolve(filePath)
+  const projectRoot = path.resolve(process.cwd())
+  const homeDir = os.homedir()
+  // Allow paths within project root or user home directory
+  if (resolved.startsWith(projectRoot) || resolved.startsWith(homeDir)) {
+    return { valid: true, path: resolved }
+  }
+  return { valid: false, error: 'Path outside allowed directories' }
+}
+
 // Register all IPC handlers
 function registerHandlers() {
   // Webview preload path
@@ -37,9 +67,10 @@ function registerOAuthHandlers() {
   // Start OAuth login flow with automatic callback capture
   ipcMain.handle('oauth:start-login', async (_event, mode) => {
     try {
-      // Generate PKCE challenge
+      // Generate PKCE challenge and state
       const pkce = oauth.generatePKCEChallenge()
       oauth.setPKCEVerifier(pkce.verifier)
+      oauth.setState(pkce.state)
 
       // Get authorization URL with local callback
       const authUrl = oauth.getAuthorizationUrl(mode, pkce, true)
@@ -59,20 +90,34 @@ function registerOAuthHandlers() {
         console.log('[OAuth] Received code from callback server')
         console.log('[OAuth] State from callback:', state ? state.substring(0, 20) + '...' : 'none')
 
+        // Validate state matches what we sent (CSRF protection)
+        const expectedState = oauth.getState()
+        if (state !== expectedState) {
+          console.error('[OAuth] State mismatch - possible CSRF attack')
+          oauth.clearPKCEVerifier()
+          oauth.clearState()
+          return {
+            success: false,
+            error: 'OAuth state mismatch - authentication failed'
+          }
+        }
+
         // Automatically exchange code for tokens
         const verifier = oauth.getPKCEVerifier()
         const tokens = await oauth.exchangeCodeForTokens(code, verifier, state, true)
 
         if (!tokens) {
           oauth.clearPKCEVerifier()
+          oauth.clearState()
           return {
             success: false,
             error: 'Failed to exchange authorization code for tokens'
           }
         }
 
-        // Clear the temporary verifier
+        // Clear the temporary verifier and state
         oauth.clearPKCEVerifier()
+        oauth.clearState()
 
         // Save OAuth tokens
         oauth.saveOAuthTokens(tokens)
@@ -265,7 +310,7 @@ function registerOAuthHandlers() {
       // CRITICAL: The system prompt "You are Claude Code..." is what makes the server
       // accept the OAuth token as a valid Claude Code request!
       const testBody = {
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-opus-4-5-20251101',
         max_tokens: 10,
         system: "You are Claude Code, Anthropic's official CLI for Claude.",
         messages: [
@@ -561,7 +606,7 @@ function registerGitHandlers() {
     const addResult = gitExec('add -A')
     if (!addResult.success) return addResult
 
-    return gitExec(`commit -m "${message.replace(/"/g, '\\"')}"`)
+    return gitExecSafe(['commit', '-m', message])
   })
 
   ipcMain.handle('git:push', async () => {
@@ -577,7 +622,7 @@ function registerGitHandlers() {
   })
 
   ipcMain.handle('git:stashWithMessage', async (event, message) => {
-    return gitExec(`stash push -m "${message.replace(/"/g, '\\"')}"`)
+    return gitExecSafe(['stash', 'push', '-m', message])
   })
 
   ipcMain.handle('git:stashPop', async () => {
@@ -662,9 +707,13 @@ function registerGitHandlers() {
 
   // Write file
   ipcMain.handle('files:writeFile', async (event, filePath, content) => {
+    const validation = validatePath(filePath)
+    if (!validation.valid) {
+      return { success: false, error: validation.error }
+    }
     try {
-      await fs.writeFile(filePath, content, 'utf-8')
-      console.log('[Files] Wrote file:', filePath)
+      await fs.writeFile(validation.path, content, 'utf-8')
+      console.log('[Files] Wrote file:', validation.path)
       return { success: true }
     } catch (error) {
       console.error('[Files] Error writing file:', error.message)
@@ -674,16 +723,20 @@ function registerGitHandlers() {
 
   // Create file (fails if exists)
   ipcMain.handle('files:createFile', async (event, filePath, content = '') => {
+    const validation = validatePath(filePath)
+    if (!validation.valid) {
+      return { success: false, error: validation.error }
+    }
     try {
       // Check if file exists
       try {
-        await fs.access(filePath)
+        await fs.access(validation.path)
         return { success: false, error: 'File already exists' }
       } catch {
         // File doesn't exist, good to create
       }
-      await fs.writeFile(filePath, content, 'utf-8')
-      console.log('[Files] Created file:', filePath)
+      await fs.writeFile(validation.path, content, 'utf-8')
+      console.log('[Files] Created file:', validation.path)
       return { success: true }
     } catch (error) {
       console.error('[Files] Error creating file:', error.message)
@@ -693,9 +746,13 @@ function registerGitHandlers() {
 
   // Delete file
   ipcMain.handle('files:deleteFile', async (event, filePath) => {
+    const validation = validatePath(filePath)
+    if (!validation.valid) {
+      return { success: false, error: validation.error }
+    }
     try {
-      await fs.unlink(filePath)
-      console.log('[Files] Deleted file:', filePath)
+      await fs.unlink(validation.path)
+      console.log('[Files] Deleted file:', validation.path)
       return { success: true }
     } catch (error) {
       console.error('[Files] Error deleting file:', error.message)
@@ -705,9 +762,17 @@ function registerGitHandlers() {
 
   // Rename/move file
   ipcMain.handle('files:renameFile', async (event, oldPath, newPath) => {
+    const oldValidation = validatePath(oldPath)
+    const newValidation = validatePath(newPath)
+    if (!oldValidation.valid) {
+      return { success: false, error: oldValidation.error }
+    }
+    if (!newValidation.valid) {
+      return { success: false, error: newValidation.error }
+    }
     try {
-      await fs.rename(oldPath, newPath)
-      console.log('[Files] Renamed file:', oldPath, '->', newPath)
+      await fs.rename(oldValidation.path, newValidation.path)
+      console.log('[Files] Renamed file:', oldValidation.path, '->', newValidation.path)
       return { success: true }
     } catch (error) {
       console.error('[Files] Error renaming file:', error.message)
@@ -717,9 +782,13 @@ function registerGitHandlers() {
 
   // Create directory
   ipcMain.handle('files:createDirectory', async (event, dirPath) => {
+    const validation = validatePath(dirPath)
+    if (!validation.valid) {
+      return { success: false, error: validation.error }
+    }
     try {
-      await fs.mkdir(dirPath, { recursive: true })
-      console.log('[Files] Created directory:', dirPath)
+      await fs.mkdir(validation.path, { recursive: true })
+      console.log('[Files] Created directory:', validation.path)
       return { success: true }
     } catch (error) {
       console.error('[Files] Error creating directory:', error.message)
@@ -729,9 +798,13 @@ function registerGitHandlers() {
 
   // Delete directory
   ipcMain.handle('files:deleteDirectory', async (event, dirPath) => {
+    const validation = validatePath(dirPath)
+    if (!validation.valid) {
+      return { success: false, error: validation.error }
+    }
     try {
-      await fs.rm(dirPath, { recursive: true, force: true })
-      console.log('[Files] Deleted directory:', dirPath)
+      await fs.rm(validation.path, { recursive: true, force: true })
+      console.log('[Files] Deleted directory:', validation.path)
       return { success: true }
     } catch (error) {
       console.error('[Files] Error deleting directory:', error.message)
@@ -1531,13 +1604,16 @@ function createWindow() {
     },
   })
 
-  // Allow webview to use node integration for preload script
+  // Configure webview security for preload script
+  // Note: Preload scripts always have Node access regardless of nodeIntegration setting
   mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
     console.log('will-attach-webview called')
     console.log('params.preload:', params.preload)
 
-    // Enable node integration in webview preload
-    webPreferences.nodeIntegration = true
+    // Prevent guest page from accessing Node APIs directly
+    webPreferences.nodeIntegration = false
+    // contextIsolation: false allows preload to manipulate page DOM for inspector
+    // TODO: Migrate to contextBridge for full isolation (requires preload rewrite)
     webPreferences.contextIsolation = false
     webPreferences.sandbox = false
 
