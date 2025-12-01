@@ -1528,37 +1528,40 @@ function registerMCPHandlers() {
       return await mcp.disconnect(serverId)
     } catch (error) {
       console.error('[MCP] Disconnect error:', error)
-      return { success: false }
+      return { success: false, error: error instanceof Error ? error.message : 'Disconnect failed' }
     }
   })
 
   // List tools from a connected server
   ipcMain.handle('mcp:list-tools', async (_event, serverId) => {
     try {
-      return await mcp.listTools(serverId)
+      const result = await mcp.listTools(serverId)
+      return { success: true, tools: result.tools || [] }
     } catch (error) {
       console.error('[MCP] List tools error:', error)
-      return { tools: [], error: error.message }
+      return { success: false, tools: [], error: error instanceof Error ? error.message : 'Failed to list tools' }
     }
   })
 
   // List resources from a connected server
   ipcMain.handle('mcp:list-resources', async (_event, serverId) => {
     try {
-      return await mcp.listResources(serverId)
+      const result = await mcp.listResources(serverId)
+      return { success: true, resources: result.resources || [] }
     } catch (error) {
       console.error('[MCP] List resources error:', error)
-      return { resources: [], error: error.message }
+      return { success: false, resources: [], error: error instanceof Error ? error.message : 'Failed to list resources' }
     }
   })
 
   // List prompts from a connected server
   ipcMain.handle('mcp:list-prompts', async (_event, serverId) => {
     try {
-      return await mcp.listPrompts(serverId)
+      const result = await mcp.listPrompts(serverId)
+      return { success: true, prompts: result.prompts || [] }
     } catch (error) {
       console.error('[MCP] List prompts error:', error)
-      return { prompts: [], error: error.message }
+      return { success: false, prompts: [], error: error instanceof Error ? error.message : 'Failed to list prompts' }
     }
   })
 
@@ -1566,40 +1569,44 @@ function registerMCPHandlers() {
   ipcMain.handle('mcp:call-tool', async (_event, { serverId, toolName, arguments: args }) => {
     try {
       console.log('[MCP] Calling tool:', toolName, 'on server:', serverId)
-      return await mcp.callTool({ serverId, toolName, arguments: args })
+      const result = await mcp.callTool({ serverId, toolName, arguments: args })
+      return { success: true, ...result }
     } catch (error) {
       console.error('[MCP] Call tool error:', error)
-      return { success: false, error: error.message }
+      return { success: false, error: error instanceof Error ? error.message : 'Tool call failed' }
     }
   })
 
   // Read a resource from a connected server
   ipcMain.handle('mcp:read-resource', async (_event, { serverId, uri }) => {
     try {
-      return await mcp.readResource(serverId, uri)
+      const result = await mcp.readResource(serverId, uri)
+      return { success: true, ...result }
     } catch (error) {
       console.error('[MCP] Read resource error:', error)
-      return { error: error.message }
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to read resource' }
     }
   })
 
   // Get a prompt from a connected server
   ipcMain.handle('mcp:get-prompt', async (_event, { serverId, name, arguments: args }) => {
     try {
-      return await mcp.getPrompt(serverId, name, args)
+      const result = await mcp.getPrompt(serverId, name, args)
+      return { success: true, ...result }
     } catch (error) {
       console.error('[MCP] Get prompt error:', error)
-      return { error: error.message }
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to get prompt' }
     }
   })
 
   // Get status of all connections
   ipcMain.handle('mcp:get-status', async () => {
     try {
-      return mcp.getStatus()
+      const status = mcp.getStatus()
+      return { success: true, status }
     } catch (error) {
       console.error('[MCP] Get status error:', error)
-      return {}
+      return { success: false, status: {}, error: error instanceof Error ? error.message : 'Failed to get status' }
     }
   })
 }
