@@ -377,6 +377,13 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
   // Using any for session promise type as LiveSession is not exported
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const aiRef = useRef<GoogleGenAI | null>(null);
+
+  // Helper to safely interact with session (handles errors silently)
+  const withSession = useCallback((fn: (session: any) => void) => {
+    sessionPromiseRef.current?.then(fn).catch(err => {
+      console.error('[useLiveGemini] Session error:', err);
+    });
+  }, []);
   
   const inputAudioContextRef = useRef<AudioContext | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
@@ -415,7 +422,9 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
     }
 
     if (sessionPromiseRef.current) {
-       sessionPromiseRef.current.then(session => session.close());
+       sessionPromiseRef.current.then(session => session.close()).catch(err => {
+         console.error('[useLiveGemini] Error closing session:', err);
+       });
        sessionPromiseRef.current = null;
     }
 
@@ -520,8 +529,8 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
             processor.onaudioprocess = (e) => {
                const inputData = e.inputBuffer.getChannelData(0);
                const blob = createAudioBlob(inputData);
-               
-               sessionPromiseRef.current?.then(session => {
+
+               withSession(session => {
                  session.sendRealtimeInput({ media: blob });
                });
             };
