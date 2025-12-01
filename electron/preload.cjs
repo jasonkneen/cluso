@@ -80,6 +80,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createDirectory: (path) => ipcRenderer.invoke('files:createDirectory', path),
     deleteDirectory: (path) => ipcRenderer.invoke('files:deleteDirectory', path),
     getTree: (path, options) => ipcRenderer.invoke('files:getTree', path, options),
+    // Get current working directory
+    getCwd: () => ipcRenderer.invoke('files:getCwd'),
     // Search operations
     searchInFiles: (pattern, dirPath, options) => ipcRenderer.invoke('files:searchInFiles', pattern, dirPath, options),
     glob: (pattern, dirPath) => ipcRenderer.invoke('files:glob', pattern, dirPath),

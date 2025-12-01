@@ -1,9 +1,11 @@
 ---
-status: pending
+status: resolved
 priority: p1
 issue_id: "001"
 tags: ["code-review", "bug", "patch-system", "critical"]
 dependencies: []
+resolved_date: "2025-12-01"
+resolution: "Added getCwd IPC method as fallback when projectPath is undefined"
 ---
 
 # Path Resolution Fails - Patches Not Working
