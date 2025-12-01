@@ -5,7 +5,7 @@
 
 const crypto = require('crypto')
 const http = require('http')
-const { app } = require('electron')
+const { app, safeStorage } = require('electron')
 const fs = require('fs')
 const path = require('path')
 
