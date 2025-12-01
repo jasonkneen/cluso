@@ -126,31 +126,8 @@ export function parseOutput(output: string): string | null {
     .replace(/<\|im_start\|>[\s\S]*$/g, '')
     .trim()
 
-  // Primary path: FastApply outputs code directly, check if it looks like code
-  // Match common code patterns at the start (multiline flag for flexibility)
-  const codePatterns = /^(<[\w!]|import\s|export\s|const\s|let\s|var\s|function\s|class\s|interface\s|type\s|enum\s|\/\/|\/\*|\{|#|package\s|using\s|public\s|private\s|protected\s|def\s|async\s|await\s)/m
-
-  if (cleanedOutput.length > 0 && codePatterns.test(cleanedOutput)) {
-    console.log('[FastApply Parse] ✅ Output recognized as code')
-    return cleanedOutput
-  }
-
-  // Secondary: Check for markdown code fences (model might still use them)
-  const codeBlockMatch = cleanedOutput.match(/```[\w]*\n?([\s\S]*?)\n?```/)
-  if (codeBlockMatch) {
-    console.log('[FastApply Parse] ✅ Found code in markdown fences')
-    return codeBlockMatch[1].trim()
-  }
-
-  // Tertiary: Check for legacy <updated-code> tags (backwards compat)
-  const legacyMatch = cleanedOutput.match(/<updated[-_]?code>([\s\S]*?)<\/updated[-_]?code>/i)
-  if (legacyMatch) {
-    console.log('[FastApply Parse] ✅ Found legacy <updated-code> tags')
-    return legacyMatch[1].trim()
-  }
-
-  // Detect prose fallback - model failed to produce code
-  // These patterns match common ways LLMs start explanatory text
+  // CRITICAL: Check for prose FIRST before anything else
+  // Model sometimes outputs explanations before/instead of code
   const proseIndicators = [
     /^I\s/i,               // "I "
     /^I['']/i,             // "I'll", "I've", "I'd" (contractions)
@@ -169,13 +146,40 @@ export function parseOutput(output: string): string | null {
     /^Below/i,             // "Below is"
     /^Great/i,             // "Great!"
     /^Happy/i,             // "Happy to help"
+    /^In\s/i,              // "In this", "In order to"
+    /^Note/i,              // "Note:", "Note that"
   ]
 
   for (const pattern of proseIndicators) {
     if (pattern.test(cleanedOutput)) {
-      console.log('[FastApply Parse] ❌ Output is prose explanation - model failed')
+      console.log('[FastApply Parse] ❌ Output STARTS with prose - rejecting entirely')
+      console.log('[FastApply Parse] First 100 chars:', cleanedOutput.substring(0, 100))
       return null
     }
+  }
+
+  // Primary path: FastApply outputs code directly, check if it looks like code at START
+  // NO multiline flag - must start with code pattern
+  const codePatterns = /^(<[\w!]|import\s|export\s|const\s|let\s|var\s|function\s|class\s|interface\s|type\s|enum\s|\/\/|\/\*|\{|#|package\s|using\s|public\s|private\s|protected\s|def\s|async\s|await\s|\s)/
+
+  if (cleanedOutput.length > 0 && codePatterns.test(cleanedOutput)) {
+    console.log('[FastApply Parse] ✅ Output recognized as code')
+    return cleanedOutput
+  }
+
+  // Secondary: Check for markdown code fences (model might still use them)
+  // But ONLY if output doesn't start with prose
+  const codeBlockMatch = cleanedOutput.match(/```[\w]*\n?([\s\S]*?)\n?```/)
+  if (codeBlockMatch) {
+    console.log('[FastApply Parse] ✅ Found code in markdown fences')
+    return codeBlockMatch[1].trim()
+  }
+
+  // Tertiary: Check for legacy <updated-code> tags (backwards compat)
+  const legacyMatch = cleanedOutput.match(/<updated[-_]?code>([\s\S]*?)<\/updated[-_]?code>/i)
+  if (legacyMatch) {
+    console.log('[FastApply Parse] ✅ Found legacy <updated-code> tags')
+    return legacyMatch[1].trim()
   }
 
   // If output is substantial and doesn't look like prose, use it
