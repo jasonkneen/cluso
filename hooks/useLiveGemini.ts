@@ -1017,8 +1017,8 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                             try {
                                 const result = onBrowserBack();
                                 sendBrowserBackResponse({ result: result ?? 'Navigated back' });
-                            } catch (err: any) {
-                                sendBrowserBackResponse({ error: err.message || 'Failed to go back' });
+                            } catch (err: unknown) {
+                                sendBrowserBackResponse({ error: err instanceof Error ? err.message : 'Failed to go back' });
                             }
                         } else {
                             sendBrowserBackResponse({ error: 'browser_back not available' });
@@ -1039,8 +1039,8 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                             try {
                                 const result = onCloseBrowser();
                                 sendCloseBrowserResponse({ result: result ?? 'Browser closed' });
-                            } catch (err: any) {
-                                sendCloseBrowserResponse({ error: err.message || 'Failed to close browser' });
+                            } catch (err: unknown) {
+                                sendCloseBrowserResponse({ error: err instanceof Error ? err.message : 'Failed to close browser' });
                             }
                         } else {
                             sendCloseBrowserResponse({ error: 'close_browser not available' });
@@ -1123,9 +1123,9 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
 
       sessionPromiseRef.current = sessionPromise;
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
-      setStreamState(prev => ({ ...prev, error: error.message || "Failed to connect" }));
+      setStreamState(prev => ({ ...prev, error: error instanceof Error ? error.message : "Failed to connect" }));
       cleanup();
     }
   }, [cleanup, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, selectedElement]);
