@@ -29,6 +29,32 @@ interface UseLiveGeminiParams {
   currentUrl?: string;
 }
 
+// Tool args type definitions to replace 'as any' casts
+interface ToolArgs {
+  html?: string;
+  selector?: string;
+  reasoning?: string;
+  code?: string;
+  description?: string;
+  confirmed?: boolean;
+  elementNumber?: number;
+  category?: string;
+  filePath?: string;
+  path?: string;
+  searchCode?: string;
+  replaceCode?: string;
+  action?: string;
+  url?: string;
+  target?: string;
+  itemNumber?: number;
+  name?: string;
+}
+
+// Extended window type for webkit audio
+interface WindowWithWebkit extends Window {
+  webkitAudioContext?: typeof AudioContext;
+}
+
 const updateUiTool: FunctionDeclaration = {
   name: 'update_ui',
   description: 'Update the user interface code (HTML/CSS/JS) based on the users request. Return the FULL updated HTML file content.',
@@ -455,8 +481,10 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
       if (!apiKey) throw new Error("API_KEY not found in environment");
       aiRef.current = new GoogleGenAI({ apiKey });
 
-      inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      const AudioContextClass = window.AudioContext || (window as WindowWithWebkit).webkitAudioContext;
+      if (!AudioContextClass) throw new Error('AudioContext not supported');
+      inputAudioContextRef.current = new AudioContextClass({ sampleRate: 16000 });
+      outputAudioContextRef.current = new AudioContextClass({ sampleRate: 24000 });
       analyserRef.current = outputAudioContextRef.current.createAnalyser();
       analyserRef.current.fftSize = 256;
 
@@ -563,7 +591,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                 if (functionCalls && functionCalls.length > 0) {
                     const call = functionCalls[0];
                     if (call.name === 'update_ui') {
-                        const newHtml = (call.args as any).html;
+                        const newHtml = (call.args as ToolArgs).html;
                         console.log("Updating UI with new code");
                         if (onCodeUpdate && newHtml) {
                             onCodeUpdate(newHtml);
@@ -581,8 +609,8 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         });
                     }
                     else if (call.name === 'select_element') {
-                        const selector = (call.args as any).selector;
-                        const reasoning = (call.args as any).reasoning;
+                        const selector = (call.args as ToolArgs).selector;
+                        const reasoning = (call.args as ToolArgs).reasoning;
                         console.log("AI requesting element selection:", selector, reasoning);
 
                         if (onElementSelect && selector) {
@@ -605,8 +633,8 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         });
                     }
                     else if (call.name === 'execute_code') {
-                        const code = (call.args as any).code;
-                        const description = (call.args as any).description;
+                        const code = (call.args as ToolArgs).code;
+                        const description = (call.args as ToolArgs).description;
                         console.log("AI requesting code execution:", description, code);
 
                         if (onExecuteCode && code) {
@@ -628,8 +656,8 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         });
                     }
                     else if (call.name === 'confirm_selection') {
-                        const confirmed = (call.args as any).confirmed;
-                        const elementNumber = (call.args as any).elementNumber;
+                        const confirmed = (call.args as ToolArgs).confirmed;
+                        const elementNumber = (call.args as ToolArgs).elementNumber;
                         console.log("AI confirming selection:", confirmed, "element number:", elementNumber);
 
                         if (onConfirmSelection) {
@@ -650,7 +678,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         });
                     }
                     else if (call.name === 'get_page_elements') {
-                        const category = (call.args as any).category || 'all';
+                        const category = (call.args as ToolArgs).category || 'all';
                         console.log("AI requesting page elements:", category);
 
                         if (onGetPageElements) {
@@ -694,10 +722,10 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         }
                     }
                     else if (call.name === 'patch_source_file') {
-                        const filePath = (call.args as any).filePath;
-                        const searchCode = (call.args as any).searchCode;
-                        const replaceCode = (call.args as any).replaceCode;
-                        const description = (call.args as any).description;
+                        const filePath = (call.args as ToolArgs).filePath;
+                        const searchCode = (call.args as ToolArgs).searchCode;
+                        const replaceCode = (call.args as ToolArgs).replaceCode;
+                        const description = (call.args as ToolArgs).description;
                         console.log("AI requesting source file patch:", filePath, description);
 
                         if (onPatchSourceFile) {
@@ -741,7 +769,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         }
                     }
                     else if (call.name === 'list_files') {
-                        const path = (call.args as any).path || '.';
+                        const path = (call.args as ToolArgs).path || '.';
                         console.log("AI listing files:", path);
 
                         const sendListFilesResponse = (responseData: { result?: string; error?: string }) => {
@@ -772,7 +800,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         }
                     }
                     else if (call.name === 'read_file') {
-                        const filePath = (call.args as any).path ?? (call.args as any).filePath;
+                        const filePath = (call.args as ToolArgs).path ?? (call.args as ToolArgs).filePath;
                         console.log("AI reading file:", filePath);
 
                         const sendReadFileResponse = (responseData: { result?: string; error?: string }) => {
@@ -810,7 +838,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         }
                     }
                     else if (call.name === 'click_element') {
-                        const selector = (call.args as any).selector;
+                        const selector = (call.args as ToolArgs).selector;
                         console.log("AI clicking element:", selector);
 
                         if (onClickElement) {
@@ -840,8 +868,8 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         }
                     }
                     else if (call.name === 'navigate') {
-                        const action = (call.args as any).action;
-                        const url = (call.args as any).url;
+                        const action = (call.args as ToolArgs).action;
+                        const url = (call.args as ToolArgs).url;
                         console.log("AI navigating:", action, url);
 
                         if (onNavigate) {
@@ -871,7 +899,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         }
                     }
                     else if (call.name === 'scroll') {
-                        const target = (call.args as any).target;
+                        const target = (call.args as ToolArgs).target;
                         console.log("AI scrolling to:", target);
 
                         if (onScroll) {
@@ -901,7 +929,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         }
                     }
                     else if (call.name === 'open_item') {
-                        const itemNumber = (call.args as any).itemNumber;
+                        const itemNumber = (call.args as ToolArgs).itemNumber;
                         console.log("AI opening item:", itemNumber);
 
                         const sendOpenItemResponse = (responseData: { result?: string; error?: string }) => {
@@ -923,8 +951,8 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         }
                     }
                     else if (call.name === 'open_file') {
-                        const name = (call.args as any).name;
-                        const path = (call.args as any).path;
+                        const name = (call.args as ToolArgs).name;
+                        const path = (call.args as ToolArgs).path;
                         console.log("AI opening file:", name || path);
 
                         const sendOpenFileResponse = (responseData: { result?: string; error?: string }) => {
@@ -946,8 +974,8 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                         }
                     }
                     else if (call.name === 'open_folder') {
-                        const name = (call.args as any).name;
-                        const itemNumber = (call.args as any).itemNumber;
+                        const name = (call.args as ToolArgs).name;
+                        const itemNumber = (call.args as ToolArgs).itemNumber;
                         console.log("AI opening folder:", name || `item #${itemNumber}`);
 
                         const sendOpenFolderResponse = (responseData: { result?: string; error?: string }) => {
