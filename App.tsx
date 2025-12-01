@@ -437,6 +437,12 @@ async function generateSourcePatch(
     // Try to find the element by tag name AND class/id (must match both for specificity)
     const tagName = element.tagName?.toLowerCase();
     const className = element.className?.split(' ')[0]; // First class
+
+    console.log('[Source Patch] ⚡ CSS Fast Path searching for:');
+    console.log('[Source Patch]   tagName:', tagName);
+    console.log('[Source Patch]   className:', className);
+    console.log('[Source Patch]   targetLine:', targetLine);
+    console.log('[Source Patch]   searchRange:', startSearch + 1, 'to', endSearch);
     const elementId = element.id;
 
     for (let i = startSearch; i < endSearch && !replaced; i++) {
@@ -455,6 +461,11 @@ async function generateSourcePatch(
       const hasId = idPattern && idPattern.test(line);
 
       // Must match: (tag + class) OR (tag + id) OR (just id if no tag on same line)
+      // If no class/id provided, we CANNOT use fast path (too ambiguous)
+      if (!className && !elementId) {
+        console.log('[Source Patch] ⚡ No class or id - skipping fast path (too ambiguous)');
+        break;
+      }
       const isMatch = (hasTag && hasClass) || (hasTag && hasId) || (hasId && !hasTag);
 
       if (isMatch) {
