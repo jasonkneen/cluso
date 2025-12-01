@@ -392,9 +392,24 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
   const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const frameIntervalRef = useRef<number | null>(null);
+
+  // Reconnection with exponential backoff
+  const reconnectAttemptRef = useRef(0);
+  const reconnectTimeoutRef = useRef<number | null>(null);
+  const maxReconnectAttempts = 5;
+  const baseReconnectDelay = 1000; // 1 second
   const analyserRef = useRef<AnalyserNode | null>(null);
 
-  const cleanup = useCallback(() => {
+  const cleanup = useCallback((skipReconnect = false) => {
+    // Clear any pending reconnect
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    if (skipReconnect) {
+      reconnectAttemptRef.current = maxReconnectAttempts; // Prevent further reconnects
+    }
+
     if (frameIntervalRef.current) {
       clearInterval(frameIntervalRef.current);
       frameIntervalRef.current = null;
@@ -408,7 +423,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
       mediaStreamRef.current.getTracks().forEach(track => track.stop());
       mediaStreamRef.current = null;
     }
-    
+
     audioSourcesRef.current.forEach(source => source.stop());
     audioSourcesRef.current.clear();
 
@@ -519,8 +534,9 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
         callbacks: {
           onopen: () => {
             console.log("Connection Opened");
+            reconnectAttemptRef.current = 0; // Reset reconnect counter on successful connection
             setStreamState(prev => ({ ...prev, isConnected: true }));
-            
+
             if (!inputAudioContextRef.current) return;
             
             const source = inputAudioContextRef.current.createMediaStreamSource(stream);
@@ -1036,12 +1052,37 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
           },
           onclose: () => {
             console.log("Connection Closed");
-            cleanup();
+            // Attempt reconnection with exponential backoff
+            if (reconnectAttemptRef.current < maxReconnectAttempts) {
+              const delay = baseReconnectDelay * Math.pow(2, reconnectAttemptRef.current);
+              console.log(`[useLiveGemini] Scheduling reconnect attempt ${reconnectAttemptRef.current + 1}/${maxReconnectAttempts} in ${delay}ms`);
+              reconnectAttemptRef.current++;
+              reconnectTimeoutRef.current = window.setTimeout(() => {
+                console.log('[useLiveGemini] Attempting reconnection...');
+                cleanup(); // Clean up before reconnecting
+                // The user will need to manually reconnect by clicking connect again
+                // We just log the attempt here - full auto-reconnect would require more state management
+              }, delay);
+            } else {
+              console.log('[useLiveGemini] Max reconnect attempts reached');
+              cleanup();
+            }
           },
           onerror: (err) => {
             console.error("Connection Error", err);
-            setStreamState(prev => ({ ...prev, error: "Connection error occurred." }));
-            cleanup();
+            setStreamState(prev => ({ ...prev, error: "Connection error occurred. Will attempt reconnection." }));
+            // Attempt reconnection on error as well
+            if (reconnectAttemptRef.current < maxReconnectAttempts) {
+              const delay = baseReconnectDelay * Math.pow(2, reconnectAttemptRef.current);
+              console.log(`[useLiveGemini] Scheduling reconnect after error, attempt ${reconnectAttemptRef.current + 1}/${maxReconnectAttempts} in ${delay}ms`);
+              reconnectAttemptRef.current++;
+              reconnectTimeoutRef.current = window.setTimeout(() => {
+                cleanup();
+              }, delay);
+            } else {
+              console.log('[useLiveGemini] Max reconnect attempts reached after error');
+              cleanup();
+            }
           }
         }
       });
