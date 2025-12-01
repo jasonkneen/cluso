@@ -426,7 +426,8 @@ async function generateSourcePatch(
     const styleObjStr = `{ ${styleEntries} }`;
 
     // Search around the target line for the element's opening tag
-    const searchRadius = 10;
+    // Use larger radius since source maps can be inaccurate
+    const searchRadius = 30;
     const startSearch = Math.max(0, targetLine - searchRadius - 1);
     const endSearch = Math.min(lines.length, targetLine + searchRadius);
 
@@ -779,24 +780,21 @@ Output the modified code snippet:`;
         // Check if this is a removal/deletion request - provide specific code guidance
         const isRemoveRequest = userRequest && /(?:remove|delete|hide)\s+(?:this|that|it|the|element)?/i.test(userRequest);
 
-        // Build the update description for Fast Apply
+        // Build the update for Fast Apply - must be CODE, not instructions
+        // The model is trained on code diffs, not natural language instructions
         let updateDescription = '';
         if (isRemoveRequest) {
-          // For removal requests, provide explicit guidance on how to remove the element
-          updateDescription = `Remove/delete this element by either:
-1. Wrapping it in {false && <element>...</element>} to hide it
-2. Or simply deleting the entire JSX element from the code
-Target: <${element.tagName}>${element.text ? ` containing "${element.text.substring(0, 30)}"` : ''}${element.className ? ` with class="${element.className.split(' ')[0]}"` : ''}`;
+          // For removal, show wrapping the element with {false && ...}
+          updateDescription = `{false && <${element.tagName}${element.className ? ` className="${element.className.split(' ')[0]}"` : ''}>...</${element.tagName}>}`;
         } else if (hasCssChanges) {
-          // Build React style object string
+          // Build React style object string - provide a CODE snippet showing the change
           const styleObjEntries = Object.entries(cssChanges)
             .map(([prop, val]) => `${prop}: '${val}'`)
             .join(', ');
-          updateDescription = `MODIFY the existing <${element.tagName}>${element.className ? ` with className="${element.className.split(' ')[0]}"` : ''} element to add a style prop.
-DO NOT add a new element - modify the existing opening tag.
-Change: <${element.tagName} className="...">
-To: <${element.tagName} style={{ ${styleObjEntries} }} className="...">
-${userRequest ? `\nUser request: ${userRequest}` : ''}`;
+          // Show the target element pattern with the style prop added
+          // The model will find the matching element and apply this change
+          const classAttr = element.className ? ` className="${element.className.split(' ')[0]}"` : '';
+          updateDescription = `<${element.tagName} style={{ ${styleObjEntries} }}${classAttr}>`;
         } else {
           updateDescription = userRequest || '';
         }
