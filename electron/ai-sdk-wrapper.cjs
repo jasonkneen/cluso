@@ -499,15 +499,19 @@ function getProjectRoot(context) {
 }
 
 /**
- * Run a git command and return { success, data? , error? }
+ * Safe git exec with args array - prevents command injection
  */
-function gitExec(command) {
+function gitExecSafe(args) {
   try {
-    const result = execSync(`git ${command}`, {
+    const { spawnSync } = require('child_process')
+    const result = spawnSync('git', args, {
       cwd: process.cwd(),
       encoding: 'utf-8',
     })
-    return { success: true, data: result.trim() }
+    if (result.status !== 0) {
+      return { success: false, error: result.stderr || 'Git command failed' }
+    }
+    return { success: true, data: (result.stdout || '').trim() }
   } catch (error) {
     return { success: false, error: error.message }
   }
@@ -674,7 +678,7 @@ const BUILT_IN_TOOL_EXECUTORS = {
   },
 
   async git_status() {
-    const result = gitExec('status --porcelain')
+    const result = gitExecSafe(['status', '--porcelain'])
     if (!result.success) {
       return { error: result.error || 'Failed to get git status' }
     }
@@ -689,11 +693,12 @@ const BUILT_IN_TOOL_EXECUTORS = {
   },
 
   async git_commit({ message }) {
-    const addResult = gitExec('add -A')
+    const addResult = gitExecSafe(['add', '-A'])
     if (!addResult.success) {
       return { error: addResult.error || 'Failed to stage changes' }
     }
-    const commitResult = gitExec(`commit -m "${message.replace(/"/g, '\\"')}"`)
+    // Message is passed as array element, safe from injection
+    const commitResult = gitExecSafe(['commit', '-m', message])
     if (!commitResult.success) {
       return { error: commitResult.error || 'Failed to commit changes' }
     }

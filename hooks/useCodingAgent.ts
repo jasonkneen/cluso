@@ -3,11 +3,7 @@ import { z } from 'zod'
 import { ToolsMap, ToolDefinition, mcpToolsToAISDKFormat, MCPToolDefinition, MCPToolCaller, mergeTools } from './useAIChat'
 import { SelectedElement, Message } from '../types'
 import { getSystemPrompt, getPromptModeForIntent, type PromptMode } from '../utils/systemPrompts'
-
-// Helper to safely access electronAPI (fixes TS errors)
-const getElectronAPI = () => {
-  return (window as any).electronAPI
-}
+import { getElectronAPI } from './useElectronAPI'
 
 // Intent classification types
 export type IntentType =
@@ -407,7 +403,7 @@ export function createCodingAgentTools(): ToolsMap {
         if (!resolvedPath) {
           return { error: 'read_file requires a "path" argument' }
         }
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.files?.readFile) {
           return { error: 'File operations not available (not in Electron)' }
         }
@@ -427,7 +423,7 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { path, content } = args as { path: string; content: string }
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.files?.writeFile) {
           return { error: 'File operations not available (not in Electron)' }
         }
@@ -447,7 +443,7 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { path, content } = args as { path: string; content?: string }
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.files?.createFile) {
           return { error: 'File operations not available (not in Electron)' }
         }
@@ -466,7 +462,7 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path: string }
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.files?.deleteFile) {
           return { error: 'File operations not available (not in Electron)' }
         }
@@ -486,7 +482,7 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { oldPath, newPath } = args as { oldPath: string; newPath: string }
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.files?.renameFile) {
           return { error: 'File operations not available (not in Electron)' }
         }
@@ -505,7 +501,7 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path?: string }
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.files?.listDirectory) {
           return { error: 'File operations not available (not in Electron)' }
         }
@@ -524,7 +520,7 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path: string }
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.files?.createDirectory) {
           return { error: 'File operations not available (not in Electron)' }
         }
@@ -543,7 +539,7 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path: string }
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.files?.exists) {
           return { error: 'File operations not available (not in Electron)' }
         }
@@ -559,7 +555,7 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path: string }
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.files?.stat) {
           return { error: 'File operations not available (not in Electron)' }
         }
@@ -578,7 +574,7 @@ export function createCodingAgentTools(): ToolsMap {
         includeUntracked: z.boolean().optional().describe('Include untracked files (default: true)'),
       }),
       execute: async () => {
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.git?.getStatus) {
           return { error: 'Git operations not available (not in Electron)' }
         }
@@ -597,7 +593,7 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { message } = args as { message: string }
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.git?.commit) {
           return { error: 'Git operations not available (not in Electron)' }
         }
@@ -627,7 +623,7 @@ export function createCodingAgentTools(): ToolsMap {
           caseSensitive?: boolean
           maxResults?: number
         }
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.files?.searchInFiles) {
           return { error: 'Search not available (not in Electron)' }
         }
@@ -652,7 +648,7 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { pattern, directory } = args as { pattern: string; directory?: string }
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.files?.glob) {
           return { error: 'Glob not available (not in Electron)' }
         }
@@ -673,7 +669,7 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { sourcePath, destPath } = args as { sourcePath: string; destPath: string }
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.files?.copyFile) {
           return { error: 'Copy not available (not in Electron)' }
         }
@@ -693,7 +689,7 @@ export function createCodingAgentTools(): ToolsMap {
       }),
       execute: async (args: unknown) => {
         const { paths } = args as { paths: string[] }
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.files?.readMultiple) {
           return { error: 'Read multiple not available (not in Electron)' }
         }
@@ -719,7 +715,7 @@ export function createCodingAgentTools(): ToolsMap {
           maxDepth?: number
           includeHidden?: boolean
         }
-        const electronAPI = getElectronAPI()
+        const { api: electronAPI } = getElectronAPI()
         if (!electronAPI?.files?.getTree) {
           return { error: 'Get tree not available (not in Electron)' }
         }

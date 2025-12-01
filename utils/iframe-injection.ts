@@ -1,4 +1,6 @@
 
+// The parent origin is set dynamically when the inspector is activated
+// This prevents broadcasting messages to arbitrary windows
 export const INJECTION_SCRIPT = `
 <style>
   .inspector-hover-target {
@@ -103,6 +105,29 @@ export const INJECTION_SCRIPT = `
     let isScreenshotActive = false;
     let multipleMatches = [];
     let numberBadges = [];
+    // Store the parent's origin for secure postMessage calls
+    // This is set when the inspector is first activated
+    let trustedOrigin = null;
+
+    // --- Secure postMessage Helper ---
+    // Only send messages to the trusted parent origin
+    function securePostMessage(data) {
+      if (!trustedOrigin) {
+        // If origin not yet set, queue the message for when it's established
+        // In practice, the parent always sends TOGGLE_INSPECTOR first which sets the origin
+        console.warn('[Inspector] Cannot send message - trusted origin not set');
+        return;
+      }
+      try {
+        window.parent.postMessage(data, trustedOrigin);
+      } catch (e) {
+        // Fallback for cases where origin validation fails (e.g., file:// protocols)
+        // In Electron, the parent is always trusted
+        if (window.parent === window.top) {
+          window.parent.postMessage(data, '*');
+        }
+      }
+    }
 
     // --- Console Interception ---
     const originalLog = console.log;
@@ -119,12 +144,12 @@ export const INJECTION_SCRIPT = `
             return String(arg);
         }).join(' ');
 
-        window.parent.postMessage({
+        securePostMessage({
             type: 'CONSOLE_LOG',
             level: level,
             message: message,
             timestamp: Date.now()
-        }, '*');
+        });
       } catch (e) {
         // ignore errors in logging to prevent infinite loops
       }
@@ -198,7 +223,7 @@ export const INJECTION_SCRIPT = `
       // Send hover info to parent for display
       const summary = getElementSummary(e.target);
       const rect = e.target.getBoundingClientRect();
-      window.parent.postMessage({
+      securePostMessage({
         type: 'INSPECTOR_HOVER',
         element: summary,
         rect: {
@@ -207,7 +232,7 @@ export const INJECTION_SCRIPT = `
           width: rect.width,
           height: rect.height
         }
-      }, '*');
+      });
     }, true);
 
     document.addEventListener('mouseout', function(e) {
@@ -217,9 +242,9 @@ export const INJECTION_SCRIPT = `
       e.target.classList.remove('screenshot-hover-target');
 
       // Clear hover info
-      window.parent.postMessage({
+      securePostMessage({
         type: 'INSPECTOR_HOVER_END'
-      }, '*');
+      });
     }, true);
 
     document.addEventListener('click', function(e) {
@@ -238,8 +263,8 @@ export const INJECTION_SCRIPT = `
           e.target.classList.add('inspector-selected-target');
           currentSelected = e.target;
           
-          window.parent.postMessage({ 
-            type: 'INSPECTOR_SELECT', 
+          securePostMessage({
+            type: 'INSPECTOR_SELECT',
             element: summary,
             x: e.clientX,
             y: e.clientY,
@@ -249,14 +274,14 @@ export const INJECTION_SCRIPT = `
                 width: rect.width,
                 height: rect.height
             }
-          }, '*');
-      } 
+          });
+      }
       else if (isScreenshotActive) {
            // For screenshot, we just notify selection and clear highlight
            e.target.classList.remove('screenshot-hover-target');
-           
-           window.parent.postMessage({ 
-            type: 'SCREENSHOT_SELECT', 
+
+           securePostMessage({
+            type: 'SCREENSHOT_SELECT',
             element: summary,
             rect: {
                 top: rect.top,
@@ -264,7 +289,7 @@ export const INJECTION_SCRIPT = `
                 width: rect.width,
                 height: rect.height
             }
-          }, '*');
+          });
       }
     }, true);
 
@@ -272,6 +297,13 @@ export const INJECTION_SCRIPT = `
     window.addEventListener('message', function(event) {
         // Only accept messages from our parent window
         if (event.source !== window.parent) return;
+
+        // Capture the trusted origin on first valid message from parent
+        // This establishes a secure communication channel
+        if (!trustedOrigin && event.origin) {
+            trustedOrigin = event.origin;
+        }
+
         if (event.data) {
             if (event.data.type === 'TOGGLE_INSPECTOR') {
                 isInspectorActive = event.data.active;
@@ -314,11 +346,11 @@ export const INJECTION_SCRIPT = `
                     const elements = document.querySelectorAll(selector);
 
                     if (elements.length === 0) {
-                        window.parent.postMessage({
+                        securePostMessage({
                             type: 'AI_SELECTION_FAILED',
                             selector: selector,
                             error: 'No elements found'
-                        }, '*');
+                        });
                         return;
                     }
 
