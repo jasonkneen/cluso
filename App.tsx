@@ -716,8 +716,9 @@ async function generateSourcePatch(
 
   if (hasCssChanges) {
     instructions += `
-2. Add or modify the style prop to include the CSS changes
-3. If using Tailwind, convert to Tailwind classes where appropriate`;
+2. MODIFY the existing element's opening tag to add/merge a style prop - DO NOT create a duplicate element
+3. If using Tailwind, convert to Tailwind classes where appropriate
+4. The result should have the SAME NUMBER of elements - only the style prop changes`;
   }
   if (userRequest) {
     // Check if this looks like a text change (quoted text or explicit text change)
@@ -737,8 +738,9 @@ async function generateSourcePatch(
     }
   }
   instructions += `
-${hasCssChanges ? '4' : '3'}. Output ONLY the modified snippet (lines ${startLine + 1} to ${endLine}), no explanations
-${hasCssChanges ? '5' : '4'}. Preserve exact indentation and formatting`;
+${hasCssChanges ? '5' : '3'}. Output ONLY the modified snippet (lines ${startLine + 1} to ${endLine}), no explanations
+${hasCssChanges ? '6' : '4'}. Preserve exact indentation and formatting
+${hasCssChanges ? '7' : '5'}. CRITICAL: Do NOT duplicate elements - modify in-place`;
 
   const prompt = `You are a React/TypeScript code modifier. Given a code snippet and requested changes, output ONLY the modified snippet.
 
@@ -786,7 +788,15 @@ Output the modified code snippet:`;
 2. Or simply deleting the entire JSX element from the code
 Target: <${element.tagName}>${element.text ? ` containing "${element.text.substring(0, 30)}"` : ''}${element.className ? ` with class="${element.className.split(' ')[0]}"` : ''}`;
         } else if (hasCssChanges) {
-          updateDescription = `Apply these CSS changes: ${cssString}${userRequest ? `\n\nUser request: ${userRequest}` : ''}`;
+          // Build React style object string
+          const styleObjEntries = Object.entries(cssChanges)
+            .map(([prop, val]) => `${prop}: '${val}'`)
+            .join(', ');
+          updateDescription = `MODIFY the existing <${element.tagName}>${element.className ? ` with className="${element.className.split(' ')[0]}"` : ''} element to add a style prop.
+DO NOT add a new element - modify the existing opening tag.
+Change: <${element.tagName} className="...">
+To: <${element.tagName} style={{ ${styleObjEntries} }} className="...">
+${userRequest ? `\nUser request: ${userRequest}` : ''}`;
         } else {
           updateDescription = userRequest || '';
         }
