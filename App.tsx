@@ -806,34 +806,57 @@ ${userRequest ? `\nUser request: ${userRequest}` : ''}`;
         if (fastResult.success && fastResult.code) {
           console.log('[Source Patch] ⚡ Fast Apply SUCCESS! Duration:', fastResult.durationMs, 'ms');
 
-          // Reconstruct the full file with the patched snippet
-          const patchedLines = fastResult.code.split('\n');
-          const beforeLines = lines.slice(0, startLine);
-          const afterLines = lines.slice(endLine);
-          const fullPatchedContent = [...beforeLines, ...patchedLines, ...afterLines].join('\n');
+          // CRITICAL: Validate that Fast Apply returned actual code, not prose explanation
+          // The model sometimes falls back to explaining instead of modifying
+          const proseIndicators = [
+            /^The provided/i,
+            /^I cannot/i,
+            /^I apologize/i,
+            /^Unfortunately/i,
+            /^This (code|update|change)/i,
+            /^Here'?s (how|an example)/i,
+            /does not make sense/i,
+            /is not (a )?valid/i,
+            /you (should|can|need to)/i,
+          ];
 
-          // Validate the patched content
-          if (fullPatchedContent !== originalContent) {
-            console.log('='.repeat(60));
-            console.log('[Source Patch] ⚡ === FAST APPLY PATCH GENERATED ===');
-            console.log('[Source Patch] Output:', {
-              filePath,
-              originalLength: originalContent.length,
-              patchedLength: fullPatchedContent.length,
-              lineNumber: source.line,
-              durationMs: fastResult.durationMs,
-            });
-            console.log('='.repeat(60));
-            return {
-              filePath,
-              originalContent,
-              patchedContent: fullPatchedContent,
-              lineNumber: source.line,
-              generatedBy: 'fast-apply',
-              durationMs: fastResult.durationMs,
-            };
+          const firstLine = fastResult.code.trim().split('\n')[0];
+          const isProse = proseIndicators.some(p => p.test(firstLine));
+
+          if (isProse) {
+            console.log('[Source Patch] ⚡ Fast Apply returned PROSE instead of code - rejecting');
+            console.log('[Source Patch] First line:', firstLine.substring(0, 100));
+            console.log('[Source Patch] Falling back to Gemini...');
           } else {
-            console.log('[Source Patch] ⚡ Fast Apply returned unchanged content, falling back to Gemini');
+            // Reconstruct the full file with the patched snippet
+            const patchedLines = fastResult.code.split('\n');
+            const beforeLines = lines.slice(0, startLine);
+            const afterLines = lines.slice(endLine);
+            const fullPatchedContent = [...beforeLines, ...patchedLines, ...afterLines].join('\n');
+
+            // Validate the patched content
+            if (fullPatchedContent !== originalContent) {
+              console.log('='.repeat(60));
+              console.log('[Source Patch] ⚡ === FAST APPLY PATCH GENERATED ===');
+              console.log('[Source Patch] Output:', {
+                filePath,
+                originalLength: originalContent.length,
+                patchedLength: fullPatchedContent.length,
+                lineNumber: source.line,
+                durationMs: fastResult.durationMs,
+              });
+              console.log('='.repeat(60));
+              return {
+                filePath,
+                originalContent,
+                patchedContent: fullPatchedContent,
+                lineNumber: source.line,
+                generatedBy: 'fast-apply',
+                durationMs: fastResult.durationMs,
+              };
+            } else {
+              console.log('[Source Patch] ⚡ Fast Apply returned unchanged content, falling back to Gemini');
+            }
           }
         } else {
           console.log('[Source Patch] ⚡ Fast Apply failed:', fastResult.error || 'Unknown error');
@@ -863,6 +886,28 @@ ${userRequest ? `\nUser request: ${userRequest}` : ''}`;
     if (codeMatch) {
       patchedSnippet = codeMatch[1].trim();
       console.log('[Source Patch] Extracted code from markdown block');
+    }
+
+    // Validate that Gemini returned actual code, not prose explanation
+    const proseIndicators = [
+      /^The provided/i,
+      /^I cannot/i,
+      /^I apologize/i,
+      /^Unfortunately/i,
+      /^This (code|update|change)/i,
+      /^Here'?s (how|an example)/i,
+      /does not make sense/i,
+      /is not (a )?valid/i,
+      /you (should|can|need to)/i,
+    ];
+
+    const firstLine = patchedSnippet.split('\n')[0];
+    const isProse = proseIndicators.some(p => p.test(firstLine));
+
+    if (isProse) {
+      console.log('[Source Patch] ❌ Gemini returned PROSE instead of code - aborting');
+      console.log('[Source Patch] First line:', firstLine.substring(0, 100));
+      return null;
     }
 
     // Reconstruct the full file with the patched snippet
