@@ -434,7 +434,7 @@ async function generateSourcePatch(
     let patchedContent = originalContent;
     let replaced = false;
 
-    // Try to find the element by tag name, class, or id
+    // Try to find the element by tag name AND class/id (must match both for specificity)
     const tagName = element.tagName?.toLowerCase();
     const className = element.className?.split(' ')[0]; // First class
     const elementId = element.id;
@@ -448,9 +448,14 @@ async function generateSourcePatch(
       const classPattern = className ? new RegExp(`className=["'\`][^"'\`]*\\b${className}\\b`) : null;
       const idPattern = elementId ? new RegExp(`id=["'\`]${elementId}["'\`]`) : null;
 
-      const isMatch = tagPattern.test(line) ||
-                      (classPattern && classPattern.test(line)) ||
-                      (idPattern && idPattern.test(line));
+      // REQUIRE tag name match PLUS class or id for specificity
+      // This prevents matching wrong elements with same tag
+      const hasTag = tagPattern.test(line);
+      const hasClass = classPattern && classPattern.test(line);
+      const hasId = idPattern && idPattern.test(line);
+
+      // Must match: (tag + class) OR (tag + id) OR (just id if no tag on same line)
+      const isMatch = (hasTag && hasClass) || (hasTag && hasId) || (hasId && !hasTag);
 
       if (isMatch) {
         console.log('[Source Patch] ⚡ Found element at line', i + 1, ':', line.substring(0, 60));
@@ -462,12 +467,23 @@ async function generateSourcePatch(
         if (styleExistsMatch) {
           // Merge into existing style object: style={{ existing }} -> style={{ existing, new }}
           const existingStyle = styleExistsMatch[1];
-          // Remove trailing } and add our new properties
-          const mergedStyle = existingStyle.replace(/\s*\}$/, '') + ', ' + styleEntries + ' }';
-          const newLine = line.replace(styleExistsMatch[0], `style={${mergedStyle}}`);
-          lines[i] = newLine;
-          replaced = true;
-          console.log('[Source Patch] ⚡ Merged into existing style prop');
+
+          // Check if properties already exist - only add new ones
+          const newEntries = Object.entries(cssChanges)
+            .filter(([prop]) => !existingStyle.includes(prop))
+            .map(([prop, val]) => `${prop}: '${val}'`)
+            .join(', ');
+
+          if (newEntries) {
+            const mergedStyle = existingStyle.replace(/\s*\}$/, '') + ', ' + newEntries + ' }';
+            const newLine = line.replace(styleExistsMatch[0], `style={${mergedStyle}}`);
+            lines[i] = newLine;
+            replaced = true;
+            console.log('[Source Patch] ⚡ Merged into existing style prop');
+          } else {
+            console.log('[Source Patch] ⚡ Style properties already exist - no change needed');
+            replaced = true; // Mark as handled to skip AI
+          }
         } else if (styleStringMatch) {
           // Convert string style to object and merge: style="color: red" -> style={{ color: 'red', new }}
           const existingCss = styleStringMatch[1];
