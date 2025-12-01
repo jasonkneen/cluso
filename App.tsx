@@ -175,7 +175,8 @@ async function generateSourcePatch(
   cssChanges: Record<string, string>,
   providerConfig: { modelId: string; providers: ProviderConfig[] },
   projectPath?: string,
-  userRequest?: string
+  userRequest?: string,
+  textChange?: { oldText: string; newText: string }
 ): Promise<SourcePatch | null> {
   console.log('='.repeat(60));
   console.log('[Source Patch] === STARTING PATCH GENERATION ===');
@@ -283,7 +284,55 @@ async function generateSourcePatch(
   console.log('[Source Patch] ✓ File read successfully, length:', fileResult.data.length);
   const originalContent = fileResult.data;
 
-  // Get the appropriate provider for the model
+  // ⚡ FAST PATH: For simple text changes, skip AI and do direct replacement
+  const hasCssChanges = Object.keys(cssChanges).length > 0;
+  if (textChange && textChange.oldText && textChange.newText && !hasCssChanges) {
+    console.log('[Source Patch] ⚡ FAST PATH: Simple text change detected');
+    console.log('[Source Patch] Old text:', textChange.oldText.substring(0, 50));
+    console.log('[Source Patch] New text:', textChange.newText.substring(0, 50));
+
+    // Try to find and replace the text in JSX context
+    // Look for patterns like >OldText< or ">OldText" or 'OldText'
+    const escapedOld = textChange.oldText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const patterns = [
+      // JSX text content: >OldText< or >{`OldText`}< or >{oldText}<
+      new RegExp(`(>\\s*)${escapedOld}(\\s*<)`, 'g'),
+      // String literals in JSX: "OldText" or 'OldText'
+      new RegExp(`(['"])${escapedOld}\\1`, 'g'),
+      // Template literals: \`OldText\`
+      new RegExp(`(\`)${escapedOld}(\`)`, 'g'),
+    ];
+
+    let patchedContent = originalContent;
+    let replaced = false;
+
+    for (const pattern of patterns) {
+      if (pattern.test(patchedContent)) {
+        patchedContent = patchedContent.replace(pattern, (match, p1, p2) => {
+          console.log('[Source Patch] ⚡ Found match:', match.substring(0, 50));
+          return `${p1}${textChange.newText}${p2 || p1}`;
+        });
+        replaced = true;
+        break;
+      }
+    }
+
+    if (replaced && patchedContent !== originalContent) {
+      console.log('[Source Patch] ⚡ FAST PATH SUCCESS - replaced text directly');
+      console.log('[Source Patch] Original length:', originalContent.length);
+      console.log('[Source Patch] Patched length:', patchedContent.length);
+      return {
+        filePath,
+        originalContent,
+        patchedContent,
+        lineNumber: source.line,
+      };
+    } else {
+      console.log('[Source Patch] ⚡ Fast path failed - falling back to AI');
+    }
+  }
+
+  // Get the appropriate provider for the model (for AI-based patching)
   const providerType = getProviderForModel(providerConfig.modelId);
   const provider = providerConfig.providers.find(p => p.id === providerType);
 
@@ -295,7 +344,6 @@ async function generateSourcePatch(
   const google = createGoogleGenerativeAI({ apiKey: provider.apiKey });
 
   // Convert CSS changes to inline style or className changes
-  const hasCssChanges = Object.keys(cssChanges).length > 0;
   const cssString = hasCssChanges
     ? Object.entries(cssChanges)
         .map(([prop, val]) => {
@@ -3548,6 +3596,10 @@ If you're not sure what the user wants, ask for clarification.
               };
               console.log('[Instant UI] Pending DOM approval created:', approvalId);
               setPendingDOMApproval(approvalPayload);
+              // Pass textChange for fast path (skips AI for simple text replacements)
+              const textChangePayload = hasTextChange
+                ? { oldText: original.textContent, newText: uiResult.textChange }
+                : undefined;
               prepareDomPatch(
                 approvalId,
                 selectedElement,
@@ -3556,7 +3608,8 @@ If you're not sure what the user wants, ask for clarification.
                 storedUndoCode,
                 storedApplyCode,
                 userMessage.content,
-                activeTab?.projectPath
+                activeTab?.projectPath,
+                textChangePayload
               );
             }
 
@@ -3984,7 +4037,8 @@ If you're not sure what the user wants, ask for clarification.
     undoCode: string,
     applyCode: string,
     userRequest: string,
-    projectPath?: string
+    projectPath?: string,
+    textChange?: { oldText: string; newText: string }
   ) => {
     console.log('='.repeat(60));
     console.log('[DOM Approval] === PREPARING SOURCE PATCH ===');
@@ -4001,7 +4055,7 @@ If you're not sure what the user wants, ask for clarification.
     console.log('='.repeat(60));
     // Use refs to get current values (prevents stale closures during async operations)
     const providerConfig = { modelId: selectedModelRef.current.id, providers: providerConfigsRef.current };
-    generateSourcePatch(element, cssChanges, providerConfig, projectPath || undefined, userRequest)
+    generateSourcePatch(element, cssChanges, providerConfig, projectPath || undefined, userRequest, textChange)
       .then(patch => {
         console.log('[DOM Approval] Patch generation completed:', { approvalId, success: !!patch });
         setPendingDOMApproval(prev => {
