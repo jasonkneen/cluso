@@ -468,6 +468,59 @@ interface ElectronAISdkAPI {
   }) => Promise<{ success: boolean; error?: string }>
 }
 
+// Fast Apply types (Local LLM for instant code merging) - Pro Feature
+type FastApplyModelVariant = 'Q4_K_M' | 'Q5_K_M' | 'Q8_0' | 'F16'
+
+interface FastApplyModelInfo {
+  variant: FastApplyModelVariant
+  file: string
+  size: number
+  quality: string
+  memory: number
+  description: string
+  downloaded: boolean
+  path?: string
+}
+
+interface FastApplyStatus {
+  ready: boolean
+  activeModel: FastApplyModelVariant | null
+  modelLoaded: boolean
+  downloadedModels: FastApplyModelVariant[]
+  storageDir: string
+}
+
+interface FastApplyDownloadProgress {
+  variant: FastApplyModelVariant
+  downloaded: number
+  total: number
+  percent: number
+  speed: number
+  eta: number
+}
+
+interface FastApplyResult {
+  success: boolean
+  code?: string
+  error?: string
+  tokensUsed?: number
+  durationMs?: number
+}
+
+interface ElectronFastApplyAPI {
+  getStatus: () => Promise<FastApplyStatus>
+  listModels: () => Promise<FastApplyModelInfo[]>
+  download: (variant?: FastApplyModelVariant) => Promise<{ success: boolean; path?: string; error?: string }>
+  setModel: (variant: FastApplyModelVariant) => Promise<{ success: boolean; error?: string }>
+  apply: (code: string, update: string) => Promise<FastApplyResult>
+  cancel: () => Promise<{ success: boolean }>
+  delete: (variant: FastApplyModelVariant) => Promise<{ success: boolean; error?: string }>
+  unload: () => Promise<{ success: boolean }>
+  onProgress: (callback: (progress: FastApplyDownloadProgress) => void) => () => void
+  onModelLoaded: (callback: () => void) => () => void
+  onModelUnloaded: (callback: () => void) => () => void
+}
+
 interface ElectronAPI {
   git: ElectronGitAPI
   files: ElectronFilesAPI
@@ -479,6 +532,7 @@ interface ElectronAPI {
   mcp?: ElectronMCPAPI
   voice?: ElectronVoiceAPI
   tabdata?: ElectronTabDataAPI
+  fastApply?: ElectronFastApplyAPI
   getWebviewPreloadPath: () => Promise<string>
   isElectron: boolean
 }

@@ -233,6 +233,46 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // Fast Apply (Local LLM for instant code merging) - Pro Feature
+  fastApply: {
+    // Get current status of Fast Apply
+    getStatus: () => ipcRenderer.invoke('fast-apply:status'),
+    // List all available model variants
+    listModels: () => ipcRenderer.invoke('fast-apply:list-models'),
+    // Download a model variant (defaults to Q4_K_M)
+    download: (variant) => ipcRenderer.invoke('fast-apply:download', variant),
+    // Set the active model variant
+    setModel: (variant) => ipcRenderer.invoke('fast-apply:set-model', variant),
+    // Apply code changes using the local model
+    apply: (code, update) => ipcRenderer.invoke('fast-apply:apply', { code, update }),
+    // Cancel an ongoing download
+    cancel: () => ipcRenderer.invoke('fast-apply:cancel'),
+    // Delete a downloaded model
+    delete: (variant) => ipcRenderer.invoke('fast-apply:delete', variant),
+    // Load model into memory (pre-warm)
+    load: () => ipcRenderer.invoke('fast-apply:load'),
+    // Unload model from memory
+    unload: () => ipcRenderer.invoke('fast-apply:unload'),
+    // Listen for download progress events
+    onProgress: (callback) => {
+      const handler = (_event, progress) => callback(progress)
+      ipcRenderer.on('fast-apply:progress', handler)
+      return () => ipcRenderer.removeListener('fast-apply:progress', handler)
+    },
+    // Listen for model loaded events
+    onModelLoaded: (callback) => {
+      const handler = () => callback()
+      ipcRenderer.on('fast-apply:model-loaded', handler)
+      return () => ipcRenderer.removeListener('fast-apply:model-loaded', handler)
+    },
+    // Listen for model unloaded events
+    onModelUnloaded: (callback) => {
+      const handler = () => callback()
+      ipcRenderer.on('fast-apply:model-unloaded', handler)
+      return () => ipcRenderer.removeListener('fast-apply:model-unloaded', handler)
+    },
+  },
+
   // Check if running in Electron
   isElectron: true,
 })

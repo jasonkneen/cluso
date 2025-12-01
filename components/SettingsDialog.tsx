@@ -31,8 +31,9 @@ import {
   Square,
 } from 'lucide-react'
 import { debugLog } from '../utils/debug'
+import { FastApplySettings } from './FastApplySettings'
 
-type SettingsSection = 'general' | 'display' | 'providers' | 'models' | 'connections'
+type SettingsSection = 'general' | 'display' | 'providers' | 'models' | 'connections' | 'pro'
 
 export interface Provider {
   id: string
@@ -165,6 +166,7 @@ const SECTIONS: { id: SettingsSection; label: string; icon: React.ReactNode }[] 
   { id: 'providers', label: 'Providers', icon: <Cpu size={18} /> },
   { id: 'models', label: 'Models', icon: <Brain size={18} /> },
   { id: 'connections', label: 'Connections', icon: <Plug size={18} /> },
+  { id: 'pro', label: 'Pro Features', icon: <Zap size={18} /> },
 ]
 
 const FONT_SIZE_MAP: Record<FontSize, string> = {
@@ -1675,6 +1677,11 @@ export function SettingsDialog({
               </p>
             </div>
           </div>
+        )
+
+      case 'pro':
+        return (
+          <FastApplySettings isDarkMode={isDarkMode} isPro={true} />
         )
 
       default:

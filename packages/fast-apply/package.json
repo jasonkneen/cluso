@@ -1,0 +1,35 @@
+{
+  "name": "@ai-cluso/fast-apply",
+  "version": "1.0.0",
+  "description": "Local AI model for instant code merging using Kortix Fast Apply",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "ai",
+    "code-merge",
+    "llm",
+    "fast-apply",
+    "llama-cpp"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "node-llama-cpp": "^3.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
+}
