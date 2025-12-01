@@ -1210,7 +1210,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                     <li>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12"/>
-                      </svg>
+                    </svg>
                       Advanced code generation
                     </li>
                     <li>
@@ -1322,7 +1322,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                 <ul>
                   <li><a href="#">Documentation</a></li>
                   
-                  <li><a href="https://github.com/jkneen/cluso" target="_blank" rel="noopener noreferrer">GitHub</a></li>
                 </ul>
               </div>
 

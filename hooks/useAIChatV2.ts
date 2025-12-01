@@ -700,9 +700,30 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     }
   }, [providersToMap])
 
+  /**
+   * Cancel the current streaming request
+   */
+  const cancel = useCallback(() => {
+    // Clean up listeners
+    cleanupFnsRef.current.forEach(fn => fn())
+    cleanupFnsRef.current = []
+
+    // Clear request tracking
+    currentRequestIdRef.current = null
+
+    // Reset loading state
+    setIsLoading(false)
+
+    // Notify via callback
+    optionsRef.current.onFinish?.()
+
+    console.log('[useAIChatV2] Request cancelled')
+  }, [])
+
   return {
     stream,
     generate,
+    cancel,
     isLoading,
     error,
     isInitialized,
