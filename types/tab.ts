@@ -96,9 +96,12 @@ const TAB_TITLES: Record<TabType, string> = {
   notes: 'Notes',
 }
 
+// Counter to ensure unique IDs even when created in same millisecond
+let tabIdCounter = 0
+
 export function createNewTab(id?: string, type: TabType = 'browser'): TabState {
   const baseTab = {
-    id: id || `tab-${Date.now()}`,
+    id: id || `tab-${Date.now()}-${++tabIdCounter}`,
     title: TAB_TITLES[type],
     url: '',
     favicon: undefined,
@@ -121,7 +124,7 @@ export function createNewTab(id?: string, type: TabType = 'browser'): TabState {
 
   // Add type-specific data
   if (type === 'kanban') {
-    const boardId = `kanban-${Date.now()}`
+    const boardId = `kanban-${Date.now()}-${tabIdCounter}`
     return {
       ...baseTab,
       title: 'New Board',

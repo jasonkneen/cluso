@@ -534,6 +534,10 @@ export default function App() {
   // Load existing tab data from disk on startup
   useEffect(() => {
     async function loadTabData() {
+      // Guard against double-loading in React StrictMode
+      if (tabDataLoadedRef.current) return;
+      tabDataLoadedRef.current = true;
+
       if (!window.electronAPI?.tabdata) return;
 
       try {
@@ -613,6 +617,7 @@ export default function App() {
   // Use refs to avoid stale closures in debounced callbacks
   const tabsRef = useRef(tabs);
   const activeTabIdRef = useRef(activeTabId);
+  const tabDataLoadedRef = useRef(false); // Prevent double-loading in StrictMode
   useEffect(() => { tabsRef.current = tabs; }, [tabs]);
   useEffect(() => { activeTabIdRef.current = activeTabId; }, [activeTabId]);
 
