@@ -286,6 +286,9 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
       return { text: null }
     }
 
+    // Store reference after null check to avoid repeated non-null assertions
+    const aiSdk = window.electronAPI.aiSdk
+
     setIsLoading(true)
     setError(null)
 
@@ -299,7 +302,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
       const allToolResults: ToolResultPart[] = []
 
       // Set up event listeners
-      const removeTextChunk = window.electronAPI!.aiSdk.onTextChunk((data: { requestId: string; chunk: string }) => {
+      const removeTextChunk = aiSdk.onTextChunk((data: { requestId: string; chunk: string }) => {
         if (data.requestId !== requestId) return
         fullText += data.chunk
         onChunk?.(data.chunk)
@@ -311,7 +314,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
         })
       })
 
-      const removeStepFinish = window.electronAPI!.aiSdk.onStepFinish((data: {
+      const removeStepFinish = aiSdk.onStepFinish((data: {
         requestId: string
         text: string
         toolCalls: Array<{ toolCallId: string; toolName: string; args: unknown }>
@@ -342,7 +345,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
         })
       })
 
-      const removeComplete = window.electronAPI!.aiSdk.onComplete((data: {
+      const removeComplete = aiSdk.onComplete((data: {
         requestId: string
         text: string
         reasoning?: string
@@ -409,7 +412,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
         })
       })
 
-      const removeError = window.electronAPI!.aiSdk.onError((data: { requestId: string; error: string }) => {
+      const removeError = aiSdk.onError((data: { requestId: string; error: string }) => {
         if (data.requestId !== requestId) return
 
         // Cleanup listeners
@@ -521,7 +524,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
       }
 
       // Start the stream
-      window.electronAPI!.aiSdk.stream({
+      aiSdk.stream({
         requestId,
         modelId,
         messages,
@@ -573,6 +576,9 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
       optionsRef.current.onError?.(err)
       return { text: null }
     }
+
+    // Store reference after null check to avoid repeated non-null assertions
+    const aiSdk = window.electronAPI.aiSdk
 
     setIsLoading(true)
     setError(null)
@@ -634,7 +640,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
         }
       }
 
-      const result = await window.electronAPI.aiSdk.generate({
+      const result = await aiSdk.generate({
         modelId,
         messages,
         providers: providersToMap(providers),

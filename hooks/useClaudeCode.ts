@@ -59,12 +59,12 @@ export function useClaudeCode(options: UseClaudeCodeOptions = {}): UseClaudeCode
     const available = !!(window.electronAPI?.claudeCode)
     setIsAvailable(available)
 
-    if (!available) {
+    if (!available || !window.electronAPI?.claudeCode) {
       return
     }
 
-    // Set up event listeners
-    const claudeCode = window.electronAPI!.claudeCode
+    // Set up event listeners (null check passed above)
+    const claudeCode = window.electronAPI.claudeCode
 
     const unsubTextChunk = claudeCode.onTextChunk((text) => {
       optionsRef.current.onTextChunk?.(text)

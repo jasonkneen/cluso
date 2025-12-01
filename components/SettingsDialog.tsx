@@ -1370,9 +1370,12 @@ export function SettingsDialog({
                         {window.electronAPI?.mcp && (
                           <button
                             onClick={async () => {
+                              const mcp = window.electronAPI?.mcp
+                              if (!mcp) return
+
                               if (mcpConn.status === 'connected' || mcpConn.status === 'connecting') {
                                 // Disconnect or Cancel
-                                await window.electronAPI!.mcp!.disconnect(mcpConn.id)
+                                await mcp.disconnect(mcpConn.id)
                                 updateSettings({
                                   connections: settings.connections.map(c =>
                                     c.id === mcpConn.id ? { ...c, status: 'disconnected', toolCount: undefined, error: undefined } : c
@@ -1386,14 +1389,14 @@ export function SettingsDialog({
                                   ) as Connection[],
                                 })
                                 try {
-                                  const result = await window.electronAPI!.mcp!.connect({
+                                  const result = await mcp.connect({
                                     id: mcpConn.id,
                                     name: mcpConn.name,
                                     transport: mcpConn.transport,
                                     enabled: true,
                                   })
                                   if (result.success) {
-                                    const toolsResult = await window.electronAPI!.mcp!.listTools(mcpConn.id)
+                                    const toolsResult = await mcp.listTools(mcpConn.id)
                                     updateSettings({
                                       connections: settings.connections.map(c =>
                                         c.id === mcpConn.id
