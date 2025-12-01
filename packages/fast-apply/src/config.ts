@@ -69,14 +69,14 @@ export const MAX_TOKENS = 8192
  * System prompt for the FastApply model
  * Note: Must be specific about the model's task - vague prompts cause prose fallback
  */
-export const SYSTEM_PROMPT = `You are a coding assistant specialized in applying code changes and merging updates. Your task is to integrate the provided update into the existing code while preserving structure, comments, formatting, and all original content. Return only the complete, updated code.`
+export const SYSTEM_PROMPT = `You are a coding assistant that applies code updates by REPLACING matching elements in-place. When given an update snippet, find the matching element in the original code and REPLACE it - do NOT insert a duplicate. Preserve all other code exactly. Return only the complete updated code.`
 
 /**
  * User prompt template for the FastApply model
  * Uses {original_code} and {update_snippet} placeholders
  * Note: Model outputs code directly, not wrapped in tags - it wasn't trained for that
  */
-export const USER_PROMPT_TEMPLATE = `Apply this update to the code below. Return the complete updated file only - no explanations, no tags, no code fences.
+export const USER_PROMPT_TEMPLATE = `Apply the update to the code. If the update shows "FIND: X" and "REPLACE WITH: Y", find X in the code and replace it with Y. Do NOT insert duplicates - replace in-place.
 
 <code>
 {original_code}
@@ -84,7 +84,9 @@ export const USER_PROMPT_TEMPLATE = `Apply this update to the code below. Return
 
 <update>
 {update_snippet}
-</update>`
+</update>
+
+Return the complete updated code with the change applied.`
 
 /**
  * Build the full chat prompt for inference
