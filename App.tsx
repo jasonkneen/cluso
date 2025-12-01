@@ -3189,7 +3189,8 @@ When the user asks you to change, modify, or update something on the page:
 1. Output a JSON code block with BOTH forward and undo JavaScript for IMMEDIATE PREVIEW
 2. Use the format: \`\`\`json-exec {"code": "...", "undo": "..."}\`\`\`
 3. The "code" will be executed immediately, "undo" restores the original
-4. CRITICAL: You MUST ALSO use the 'write_file' tool to save the changes to the source code permanently. The json-exec is ONLY for preview.
+4. For QUICK edits: Just provide the json-exec preview. Don't call tools.
+5. Only use 'write_file' to save to source code if user explicitly says "save", "commit", or "make permanent".
 
 Examples:
 - Change text: \`\`\`json-exec {"code": "document.querySelector('#myId').textContent = 'New'", "undo": "document.querySelector('#myId').textContent = 'Old'"}\`\`\`
@@ -3536,7 +3537,7 @@ If you're not sure what the user wants, ask for clarification.
           providers: providerConfigs,
           system: shouldUseTools ? agentSystemPrompt : undefined,
           tools: shouldUseTools ? tools : undefined,
-          maxSteps: 15, // Allow more steps for complex operations
+          maxSteps: 6, // Reduced for faster responses
           enableReasoning: thinkingLevel !== 'off',
           mcpTools: mcpToolDefinitions, // Pass MCP tools separately
           projectFolder: activeTab?.projectPath || undefined,
