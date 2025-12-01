@@ -3143,8 +3143,14 @@ export default function App() {
       } else if (channel === 'drop-image-on-element') {
         // Handle image dropped on selected element - SMART insertion
         const data = args[0] as { imageData: string; element: SelectedElement; rect: unknown };
+        // Use selectedElementRef for sourceLocation since the drop event doesn't include it
+        const currentSelectedElement = selectedElementRef.current;
+        const elementWithSource = {
+          ...data.element,
+          sourceLocation: currentSelectedElement?.sourceLocation
+        };
         const tagName = data.element.tagName?.toLowerCase() || '';
-        console.log('[Drop] Image dropped on element:', tagName, 'classes:', data.element.className);
+        console.log('[Drop] Image dropped on element:', tagName, 'classes:', data.element.className, 'hasSource:', !!elementWithSource.sourceLocation);
 
         // Get project path from the current tab (use ref for current state)
         const currentTab = tabsRef.current.find(t => t.id === tabId);
@@ -3227,11 +3233,11 @@ export default function App() {
               description = `Set image src to ${filename}`;
 
               // Trigger source patch for img src change
-              if (data.element.sourceLocation?.sources?.[0]) {
+              if (elementWithSource.sourceLocation?.sources?.[0]) {
                 const approvalId = `dom-drop-${Date.now()}`;
                 const approvalPayload: PendingDOMApproval = {
                   id: approvalId,
-                  element: data.element,
+                  element: elementWithSource,
                   cssChanges: {},
                   srcChange: { oldSrc: captureOriginal || '', newSrc: relativePath },
                   description,
@@ -3243,7 +3249,7 @@ export default function App() {
                 setPendingDOMApproval(approvalPayload);
                 prepareDomPatch(
                   approvalId,
-                  data.element,
+                  elementWithSource,
                   {},
                   description,
                   undoCode,
@@ -3299,6 +3305,35 @@ export default function App() {
                   })();
                 `;
                 description = `Set child image src to ${filename}`;
+
+                // Trigger source patch for child img src change
+                if (elementWithSource.sourceLocation?.sources?.[0]) {
+                  const approvalId = `dom-drop-${Date.now()}`;
+                  const approvalPayload: PendingDOMApproval = {
+                    id: approvalId,
+                    element: elementWithSource,
+                    cssChanges: {},
+                    srcChange: { oldSrc: childImgInfo.childSrc || '', newSrc: relativePath },
+                    description,
+                    undoCode,
+                    applyCode,
+                    userRequest: 'Drop image on child img element',
+                    patchStatus: 'preparing',
+                  };
+                  setPendingDOMApproval(approvalPayload);
+                  prepareDomPatch(
+                    approvalId,
+                    elementWithSource,
+                    {},
+                    description,
+                    undoCode,
+                    applyCode,
+                    'Drop image on child img element',
+                    projectPath,
+                    undefined,
+                    { oldSrc: childImgInfo.childSrc || '', newSrc: relativePath }
+                  );
+                }
               } else {
                 // Strategy 2b: Use background-image and clear text content
                 insertionMethod = 'background';
@@ -3338,11 +3373,11 @@ export default function App() {
                 description = `Set background-image to ${filename}`;
 
                 // Trigger source patch with CSS changes
-                if (data.element.sourceLocation?.sources?.[0]) {
+                if (elementWithSource.sourceLocation?.sources?.[0]) {
                   const approvalId = `dom-drop-${Date.now()}`;
                   const approvalPayload: PendingDOMApproval = {
                     id: approvalId,
-                    element: data.element,
+                    element: elementWithSource,
                     cssChanges: {
                       backgroundImage: `url(${relativePath})`,
                       backgroundSize: 'cover',
@@ -3357,7 +3392,7 @@ export default function App() {
                   setPendingDOMApproval(approvalPayload);
                   prepareDomPatch(
                     approvalId,
-                    data.element,
+                    elementWithSource,
                     {
                       backgroundImage: `url(${relativePath})`,
                       backgroundSize: 'cover',
@@ -3374,6 +3409,15 @@ export default function App() {
             } else {
               // Fallback: Try setting src anyway (for video, iframe, etc.)
               insertionMethod = 'src';
+
+              // Capture original src for undo
+              const captureOriginal = await webview.executeJavaScript(`
+                (function() {
+                  const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  return el ? el.src : '';
+                })();
+              `);
+
               applyCode = `
                 (function() {
                   const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
@@ -3384,8 +3428,46 @@ export default function App() {
                   return 'Element not found';
                 })();
               `;
-              undoCode = 'location.reload()';
+              undoCode = `
+                (function() {
+                  const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  if (el) {
+                    el.src = '${captureOriginal}';
+                    return 'Reverted';
+                  }
+                  return 'Element not found';
+                })();
+              `;
               description = `Set ${tagName} src to ${filename}`;
+
+              // Trigger source patch for src change
+              if (elementWithSource.sourceLocation?.sources?.[0]) {
+                const approvalId = `dom-drop-${Date.now()}`;
+                const approvalPayload: PendingDOMApproval = {
+                  id: approvalId,
+                  element: elementWithSource,
+                  cssChanges: {},
+                  srcChange: { oldSrc: captureOriginal || '', newSrc: relativePath },
+                  description,
+                  undoCode,
+                  applyCode,
+                  userRequest: `Drop image on ${tagName} element`,
+                  patchStatus: 'preparing',
+                };
+                setPendingDOMApproval(approvalPayload);
+                prepareDomPatch(
+                  approvalId,
+                  elementWithSource,
+                  {},
+                  description,
+                  undoCode,
+                  applyCode,
+                  `Drop image on ${tagName} element`,
+                  projectPath,
+                  undefined,
+                  { oldSrc: captureOriginal || '', newSrc: relativePath }
+                );
+              }
             }
 
             // Execute the DOM change
