@@ -22,24 +22,26 @@ export function useGit() {
   const isElectron = typeof window !== 'undefined' && window.electronAPI?.git
 
   const refresh = useCallback(async () => {
-    if (!isElectron) {
+    if (!isElectron || !window.electronAPI?.git) {
       setState(prev => ({ ...prev, isLoading: false }))
       return
     }
 
+    const git = window.electronAPI.git
+
     try {
       const [branchResult, branchesResult, statusResult] = await Promise.all([
-        window.electronAPI!.git.getCurrentBranch(),
-        window.electronAPI!.git.getBranches(),
-        window.electronAPI!.git.getStatus(),
+        git.getCurrentBranch(),
+        git.getBranches(),
+        git.getStatus(),
       ])
 
       setState(prev => ({
         ...prev,
-        currentBranch: branchResult.success ? branchResult.data! : prev.currentBranch,
-        branches: branchesResult.success ? branchesResult.data! : prev.branches,
-        hasChanges: statusResult.success ? statusResult.data!.hasChanges : false,
-        changedFiles: statusResult.success ? statusResult.data!.files : [],
+        currentBranch: branchResult.success && branchResult.data ? branchResult.data : prev.currentBranch,
+        branches: branchesResult.success && branchesResult.data ? branchesResult.data : prev.branches,
+        hasChanges: statusResult.success && statusResult.data ? statusResult.data.hasChanges : false,
+        changedFiles: statusResult.success && statusResult.data ? statusResult.data.files : [],
         isLoading: false,
         error: null,
       }))
@@ -60,55 +62,63 @@ export function useGit() {
   }, [refresh])
 
   const checkout = useCallback(async (branch: string) => {
-    if (!isElectron) return { success: false, error: 'Not in Electron' }
-    const result = await window.electronAPI!.git.checkout(branch)
+    const git = window.electronAPI?.git
+    if (!isElectron || !git) return { success: false, error: 'Not in Electron' }
+    const result = await git.checkout(branch)
     if (result.success) await refresh()
     return result
   }, [isElectron, refresh])
 
   const createBranch = useCallback(async (name: string) => {
-    if (!isElectron) return { success: false, error: 'Not in Electron' }
-    const result = await window.electronAPI!.git.createBranch(name)
+    const git = window.electronAPI?.git
+    if (!isElectron || !git) return { success: false, error: 'Not in Electron' }
+    const result = await git.createBranch(name)
     if (result.success) await refresh()
     return result
   }, [isElectron, refresh])
 
   const commit = useCallback(async (message: string) => {
-    if (!isElectron) return { success: false, error: 'Not in Electron' }
-    const result = await window.electronAPI!.git.commit(message)
+    const git = window.electronAPI?.git
+    if (!isElectron || !git) return { success: false, error: 'Not in Electron' }
+    const result = await git.commit(message)
     if (result.success) await refresh()
     return result
   }, [isElectron, refresh])
 
   const push = useCallback(async () => {
-    if (!isElectron) return { success: false, error: 'Not in Electron' }
-    return await window.electronAPI!.git.push()
+    const git = window.electronAPI?.git
+    if (!isElectron || !git) return { success: false, error: 'Not in Electron' }
+    return await git.push()
   }, [isElectron])
 
   const pull = useCallback(async () => {
-    if (!isElectron) return { success: false, error: 'Not in Electron' }
-    const result = await window.electronAPI!.git.pull()
+    const git = window.electronAPI?.git
+    if (!isElectron || !git) return { success: false, error: 'Not in Electron' }
+    const result = await git.pull()
     if (result.success) await refresh()
     return result
   }, [isElectron, refresh])
 
   const stash = useCallback(async () => {
-    if (!isElectron) return { success: false, error: 'Not in Electron' }
-    const result = await window.electronAPI!.git.stash()
+    const git = window.electronAPI?.git
+    if (!isElectron || !git) return { success: false, error: 'Not in Electron' }
+    const result = await git.stash()
     if (result.success) await refresh()
     return result
   }, [isElectron, refresh])
 
   const stashWithMessage = useCallback(async (message: string) => {
-    if (!isElectron) return { success: false, error: 'Not in Electron' }
-    const result = await window.electronAPI!.git.stashWithMessage(message)
+    const git = window.electronAPI?.git
+    if (!isElectron || !git) return { success: false, error: 'Not in Electron' }
+    const result = await git.stashWithMessage(message)
     if (result.success) await refresh()
     return result
   }, [isElectron, refresh])
 
   const stashPop = useCallback(async () => {
-    if (!isElectron) return { success: false, error: 'Not in Electron' }
-    const result = await window.electronAPI!.git.stashPop()
+    const git = window.electronAPI?.git
+    if (!isElectron || !git) return { success: false, error: 'Not in Electron' }
+    const result = await git.stashPop()
     if (result.success) await refresh()
     return result
   }, [isElectron, refresh])

@@ -2063,7 +2063,7 @@ export default function App() {
       const items: FileBrowserItem[] = result.data.map(f => ({
         name: f.name,
         isDirectory: f.isDirectory,
-        path: `${targetItem!.path}/${f.name}`.replace(/\/\//g, '/')
+        path: `${targetItem.path}/${f.name}`.replace(/\/\//g, '/')
       }));
 
       const panel: FileBrowserPanel = {
