@@ -1170,6 +1170,8 @@ export default function App() {
 
   // Selection States
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
+  const selectedElementRef = useRef<SelectedElement | null>(null);
+  useEffect(() => { selectedElementRef.current = selectedElement; }, [selectedElement]);
   const [screenshotElement, setScreenshotElement] = useState<SelectedElement | null>(null);
   const [capturedScreenshot, setCapturedScreenshot] = useState<string | null>(null);
   const [showScreenshotPreview, setShowScreenshotPreview] = useState(false);
@@ -1730,8 +1732,8 @@ export default function App() {
 
     const handleMouseMove = (e: MouseEvent) => {
       const newWidth = window.innerWidth - e.clientX;
-      // Clamp between 300 and 800 pixels
-      setSidebarWidth(Math.max(300, Math.min(800, newWidth)));
+      // Clamp between 430 and 800 pixels
+      setSidebarWidth(Math.max(430, Math.min(800, newWidth)));
     };
 
     const handleMouseUp = () => {
@@ -3020,10 +3022,17 @@ export default function App() {
         const data = args[0] as { imageData: string; element: SelectedElement; rect: unknown };
         console.log('[Drop] Image dropped on element:', data.element.tagName);
 
-        // Trigger the image replacement flow
-        const projectPath = activeTab?.projectPath;
+        // Get project path from the current tab (use ref for current state)
+        const currentTab = tabsRef.current.find(t => t.id === tabId);
+        const projectPath = currentTab?.projectPath;
         if (!projectPath) {
-          console.error('[Drop] No project path set');
+          console.error('[Drop] No project path set for tab:', tabId, 'tab:', currentTab);
+          setMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            role: 'system',
+            content: 'Cannot save dropped image: no project folder selected. Please set a project folder first.',
+            timestamp: new Date()
+          }]);
           return;
         }
 
@@ -3119,14 +3128,19 @@ export default function App() {
         const data = args[0] as { oldText: string; newText: string; element: SelectedElement };
         console.log('[Inline Edit] Accepted:', { old: data.oldText?.substring(0, 30), new: data.newText?.substring(0, 30) });
 
+        // Get current selected element and project path from refs
+        const currentSelectedElement = selectedElementRef.current;
+        const currentTab = tabsRef.current.find(t => t.id === tabId);
+        const projectPath = currentTab?.projectPath;
+
         // Trigger source patch with the text change
-        if (selectedElement?.sourceLocation?.sources?.[0] && activeTab?.projectPath) {
+        if (currentSelectedElement?.sourceLocation?.sources?.[0] && projectPath) {
           const textChangePayload = { oldText: data.oldText, newText: data.newText };
 
           const approvalId = `inline-${Date.now()}`;
           setPendingDOMApproval({
             id: approvalId,
-            element: selectedElement,
+            element: currentSelectedElement,
             cssChanges: {},
             textChange: data.newText,
             description: `Change text: "${data.oldText?.substring(0, 20)}..." → "${data.newText?.substring(0, 20)}..."`,
@@ -3138,15 +3152,21 @@ export default function App() {
 
           prepareDomPatch(
             approvalId,
-            selectedElement,
+            currentSelectedElement,
             {},
             `Change text to "${data.newText?.substring(0, 30)}..."`,
             '',
             '',
             'Inline text edit',
-            activeTab.projectPath,
+            projectPath,
             textChangePayload
           );
+        } else {
+          console.log('[Inline Edit] Cannot create source patch - missing source location or project path', {
+            hasSourceLocation: !!currentSelectedElement?.sourceLocation?.sources?.[0],
+            projectPath,
+            element: currentSelectedElement?.tagName
+          });
         }
 
         setMessages(prev => [...prev, {
@@ -5557,7 +5577,7 @@ If you're not sure what the user wants, ask for clarification.
 
         {/* --- Right Pane: Chat --- */}
       {isSidebarOpen && (
-      <div className={`flex flex-col rounded-xl shadow-sm flex-shrink-0 border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`} style={{ width: sidebarWidth }}>
+      <div className={`flex flex-col rounded-xl shadow-sm flex-shrink-0 border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`} style={{ width: sidebarWidth, minWidth: 430 }}>
 
           {/* Git Header */}
           <div className={`h-12 border-b flex items-center justify-between px-3 flex-shrink-0 ${isDarkMode ? 'border-neutral-700' : 'border-stone-100'}`}>
