@@ -450,8 +450,12 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
       mediaStreamRef.current = null;
     }
 
-    audioSourcesRef.current.forEach(source => source.stop());
+    // Copy Set before iterating to prevent race condition if new sources are added during cleanup
+    const sourcesToStop = Array.from(audioSourcesRef.current);
     audioSourcesRef.current.clear();
+    sourcesToStop.forEach(source => {
+      try { source.stop(); } catch { /* ignore already stopped sources */ }
+    });
 
     if (inputAudioContextRef.current) {
       inputAudioContextRef.current.close();
@@ -462,11 +466,13 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
       outputAudioContextRef.current = null;
     }
 
-    if (sessionPromiseRef.current) {
-       sessionPromiseRef.current.then(session => session.close()).catch(err => {
+    // Store session reference before nulling to avoid race condition
+    const sessionToClose = sessionPromiseRef.current;
+    sessionPromiseRef.current = null;
+    if (sessionToClose) {
+       sessionToClose.then(session => session.close()).catch(err => {
          console.error('[useLiveGemini] Error closing session:', err);
        });
-       sessionPromiseRef.current = null;
     }
 
     setStreamState(prev => ({ ...prev, isConnected: false, isStreaming: false }));
