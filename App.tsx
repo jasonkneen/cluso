@@ -176,7 +176,8 @@ async function generateSourcePatch(
   providerConfig: { modelId: string; providers: ProviderConfig[] },
   projectPath?: string,
   userRequest?: string,
-  textChange?: { oldText: string; newText: string }
+  textChange?: { oldText: string; newText: string },
+  srcChange?: { oldSrc: string; newSrc: string }
 ): Promise<SourcePatch | null> {
   console.log('='.repeat(60));
   console.log('[Source Patch] === STARTING PATCH GENERATION ===');
@@ -189,6 +190,7 @@ async function generateSourcePatch(
     projectPath: projectPath || 'NOT SET',
     userRequest: userRequest?.substring(0, 50) || 'none',
     modelId: providerConfig.modelId,
+    hasSrcChange: !!srcChange,
   });
   console.log('='.repeat(60));
 
@@ -287,6 +289,70 @@ async function generateSourcePatch(
   // ⚡ FAST PATH: For simple changes, skip AI and do direct replacement
   const hasCssChanges = Object.keys(cssChanges).length > 0;
   const hasTextChange = textChange && textChange.oldText && textChange.newText;
+  const hasSrcChange = srcChange && srcChange.newSrc;
+
+  // ⚡ FAST PATH: For src attribute changes (image replacement)
+  if (hasSrcChange && !hasCssChanges && !hasTextChange) {
+    console.log('[Source Patch] ⚡ FAST PATH: Image src change detected');
+    console.log('[Source Patch] New src:', srcChange.newSrc);
+
+    const lines = originalContent.split('\n');
+    let targetLine = source.line;
+    if (targetLine > lines.length) targetLine = lines.length;
+
+    // Search around the target line for the img element
+    const searchRadius = 15;
+    const startSearch = Math.max(0, targetLine - searchRadius - 1);
+    const endSearch = Math.min(lines.length, targetLine + searchRadius);
+
+    let patchedContent = originalContent;
+    let replaced = false;
+
+    for (let i = startSearch; i < endSearch && !replaced; i++) {
+      const line = lines[i];
+
+      // Look for <img with src attribute
+      if (/<img\s/i.test(line) || /src\s*=/i.test(line)) {
+        console.log('[Source Patch] ⚡ Found potential img at line', i + 1, ':', line.substring(0, 60));
+
+        // Try to replace src attribute
+        // Pattern 1: src="..." or src='...'
+        const srcQuoteMatch = line.match(/src\s*=\s*(['"])([^'"]*)\1/);
+        // Pattern 2: src={...} (JSX expression)
+        const srcJsxMatch = line.match(/src\s*=\s*\{([^}]*)\}/);
+
+        if (srcQuoteMatch) {
+          const quote = srcQuoteMatch[1];
+          const newLine = line.replace(srcQuoteMatch[0], `src=${quote}${srcChange.newSrc}${quote}`);
+          lines[i] = newLine;
+          replaced = true;
+          console.log('[Source Patch] ⚡ Replaced quoted src attribute');
+        } else if (srcJsxMatch) {
+          // For JSX, wrap the new src in quotes
+          const newLine = line.replace(srcJsxMatch[0], `src="${srcChange.newSrc}"`);
+          lines[i] = newLine;
+          replaced = true;
+          console.log('[Source Patch] ⚡ Replaced JSX src expression');
+        }
+
+        if (replaced) {
+          patchedContent = lines.join('\n');
+        }
+      }
+    }
+
+    if (replaced && patchedContent !== originalContent) {
+      console.log('[Source Patch] ⚡ FAST PATH SUCCESS - replaced img src directly');
+      return {
+        filePath,
+        originalContent,
+        patchedContent,
+        lineNumber: source.line,
+      };
+    } else {
+      console.log('[Source Patch] ⚡ Src fast path failed - falling back to AI');
+    }
+  }
 
   // Fast path for text-only changes
   if (hasTextChange && !hasCssChanges) {
@@ -1320,6 +1386,7 @@ export default function App() {
     element: SelectedElement
     cssChanges: Record<string, string>
     textChange?: string
+    srcChange?: { oldSrc: string; newSrc: string }  // For image src replacement
     description: string
     undoCode: string
     applyCode: string
@@ -3680,6 +3747,171 @@ If you're not sure what the user wants, ask for clarification.
           xpath: selectedElement.xpath,
           sourceLocation: selectedElement.sourceLocation,
         });
+
+        // 🖼️ IMAGE REPLACEMENT: Special fast path for img elements with attached images
+        const isImageElement = selectedElement.tagName?.toLowerCase() === 'img';
+        const hasAttachedImage = attachedImages.length > 0;
+        const isImageReplaceIntent = /(?:use|replace|change|swap|set).*(?:image|photo|picture|attached)|(?:this|attached)\s*image/i.test(userMessage.content);
+
+        if (isImageElement && hasAttachedImage && (isImageReplaceIntent || userMessage.content.trim() === '')) {
+          console.log('[Image Replace] Detected image replacement request');
+
+          const projectPath = activeTab?.projectPath;
+          if (!projectPath) {
+            const errorMessage: ChatMessage = {
+              id: `msg-error-${Date.now()}`,
+              role: 'assistant',
+              content: 'Cannot replace image: No project folder is set. Please open a project first.',
+              timestamp: new Date(),
+              model: 'system',
+            };
+            setMessages(prev => [...prev, errorMessage]);
+            setAttachedImages([]);
+            return;
+          }
+
+          try {
+            // Generate unique filename based on timestamp
+            const timestamp = Date.now();
+            const attachedImage = attachedImages[0];
+            const mimeMatch = attachedImage.match(/^data:image\/(\w+);/);
+            const ext = mimeMatch ? mimeMatch[1].replace('jpeg', 'jpg') : 'png';
+            const filename = `uploaded-${timestamp}.${ext}`;
+            const publicPath = `${projectPath}/public/uploads`;
+            const fullPath = `${publicPath}/${filename}`;
+            const relativePath = `/uploads/${filename}`;
+
+            console.log('[Image Replace] Saving to:', fullPath);
+
+            // Save the image to the project's public folder
+            const saveResult = await window.electronAPI?.files.saveImage(attachedImage, fullPath);
+            if (!saveResult?.success) {
+              throw new Error(saveResult?.error || 'Failed to save image');
+            }
+
+            console.log('[Image Replace] Image saved successfully:', saveResult.data);
+
+            // Get the webview and update the DOM
+            const webview = webviewRefs.current.get(activeTabId);
+            if (webview) {
+              // Capture original src for undo
+              const captureOriginalScript = `
+                (function() {
+                  const element = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  if (element && element.tagName === 'IMG') {
+                    return element.src;
+                  }
+                  return null;
+                })();
+              `;
+              const originalSrc = await (webview as Electron.WebviewTag).executeJavaScript(captureOriginalScript);
+
+              // Apply the new src
+              const applyScript = `
+                (function() {
+                  const element = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  if (element && element.tagName === 'IMG') {
+                    element.src = '${relativePath}';
+                    return 'Applied';
+                  }
+                  return 'Element not found';
+                })();
+              `;
+              await (webview as Electron.WebviewTag).executeJavaScript(applyScript);
+
+              // Create undo/apply code
+              const undoCode = `
+                (function() {
+                  const element = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  if (element) {
+                    element.src = '${originalSrc}';
+                    return 'Reverted';
+                  }
+                  return 'Element not found';
+                })();
+              `;
+              const applyCode = `
+                (function() {
+                  const element = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                  if (element) {
+                    element.src = '${relativePath}';
+                    return 'Applied';
+                  }
+                  return 'Element not found';
+                })();
+              `;
+
+              // Add success message
+              const successMessage: ChatMessage = {
+                id: `msg-img-${Date.now()}`,
+                role: 'assistant',
+                content: `Preview: Replaced image with uploaded file (${filename})`,
+                timestamp: new Date(),
+                model: 'gemini-2.0-flash',
+                intent: 'ui_modify',
+              };
+              setMessages(prev => [...prev, successMessage]);
+
+              // Set pending change for approval
+              setPendingChange({
+                code: applyCode,
+                undoCode: undoCode,
+                description: `Replace image with ${filename}`,
+                additions: 1,
+                deletions: 1,
+                source: 'dom',
+              });
+
+              // Prepare source patch if source location available
+              if (selectedElement.sourceLocation?.sources?.[0]) {
+                const approvalId = `dom-img-${Date.now()}`;
+                const approvalPayload: PendingDOMApproval = {
+                  id: approvalId,
+                  element: selectedElement,
+                  cssChanges: {},
+                  textChange: undefined,
+                  description: `Replace image with ${filename}`,
+                  undoCode: undoCode,
+                  applyCode: applyCode,
+                  userRequest: userMessage.content || 'Replace image',
+                  patchStatus: 'preparing',
+                  // Store srcChange for fast path
+                  srcChange: { oldSrc: originalSrc, newSrc: relativePath },
+                };
+                setPendingDOMApproval(approvalPayload);
+
+                // Trigger source patch generation with srcChange
+                prepareDomPatch(
+                  approvalId,
+                  selectedElement,
+                  {},
+                  `Replace image with ${filename}`,
+                  undoCode,
+                  applyCode,
+                  userMessage.content || 'Replace image',
+                  projectPath,
+                  undefined, // no textChange
+                  { oldSrc: originalSrc, newSrc: relativePath } // srcChange
+                );
+              }
+            }
+
+            // Clear attached images
+            setAttachedImages([]);
+            return;
+          } catch (error) {
+            console.error('[Image Replace] Error:', error);
+            const errorMessage: ChatMessage = {
+              id: `msg-error-${Date.now()}`,
+              role: 'assistant',
+              content: `Failed to replace image: ${error instanceof Error ? error.message : 'Unknown error'}`,
+              timestamp: new Date(),
+              model: 'system',
+            };
+            setMessages(prev => [...prev, errorMessage]);
+            return;
+          }
+        }
         // Debug: Log full source location details
         if (selectedElement.sourceLocation) {
           console.log('[Instant UI] sourceLocation.sources:', selectedElement.sourceLocation.sources);
@@ -4258,7 +4490,8 @@ If you're not sure what the user wants, ask for clarification.
     applyCode: string,
     userRequest: string,
     projectPath?: string,
-    textChange?: { oldText: string; newText: string }
+    textChange?: { oldText: string; newText: string },
+    srcChange?: { oldSrc: string; newSrc: string }
   ) => {
     console.log('='.repeat(60));
     console.log('[DOM Approval] === PREPARING SOURCE PATCH ===');
@@ -4271,11 +4504,12 @@ If you're not sure what the user wants, ask for clarification.
       sourceFile: element.sourceLocation?.sources?.[0]?.file || 'NONE',
       sourceLine: element.sourceLocation?.sources?.[0]?.line || 'NONE',
       userRequest: userRequest?.substring(0, 50),
+      hasSrcChange: !!srcChange,
     });
     console.log('='.repeat(60));
     // Use refs to get current values (prevents stale closures during async operations)
     const providerConfig = { modelId: selectedModelRef.current.id, providers: providerConfigsRef.current };
-    generateSourcePatch(element, cssChanges, providerConfig, projectPath || undefined, userRequest, textChange)
+    generateSourcePatch(element, cssChanges, providerConfig, projectPath || undefined, userRequest, textChange, srcChange)
       .then(patch => {
         console.log('[DOM Approval] Patch generation completed:', { approvalId, success: !!patch });
         setPendingDOMApproval(prev => {

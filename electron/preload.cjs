@@ -76,6 +76,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteFile: (path) => ipcRenderer.invoke('files:deleteFile', path),
     renameFile: (oldPath, newPath) => ipcRenderer.invoke('files:renameFile', oldPath, newPath),
     copyFile: (srcPath, destPath) => ipcRenderer.invoke('files:copyFile', srcPath, destPath),
+    // Save base64 image to file
+    saveImage: (base64DataUrl, destPath) => ipcRenderer.invoke('files:saveImage', base64DataUrl, destPath),
     // Directory operations
     createDirectory: (path) => ipcRenderer.invoke('files:createDirectory', path),
     deleteDirectory: (path) => ipcRenderer.invoke('files:deleteDirectory', path),

@@ -79,6 +79,12 @@ interface TreeOptions {
   includeHidden?: boolean
 }
 
+interface SaveImageResult {
+  path: string
+  size: number
+  mimeType: string
+}
+
 interface ElectronFilesAPI {
   // Read operations
   readFile: (path: string) => Promise<GitResult>
@@ -93,6 +99,8 @@ interface ElectronFilesAPI {
   deleteFile: (path: string) => Promise<GitResult>
   renameFile: (oldPath: string, newPath: string) => Promise<GitResult>
   copyFile: (srcPath: string, destPath: string) => Promise<GitResult>
+  // Save base64 image to file (for image uploads)
+  saveImage: (base64DataUrl: string, destPath: string) => Promise<GitResult<SaveImageResult>>
   // Directory operations
   createDirectory: (path: string) => Promise<GitResult>
   deleteDirectory: (path: string) => Promise<GitResult>

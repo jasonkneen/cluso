@@ -132,8 +132,12 @@ const INTENT_PATTERNS: Array<{
       /(?:text|label|title|content)\s*(?:to|:|\=)\s*/i,
       // Match element removal/deletion - "remove this", "delete this", "hide this"
       /(?:remove|delete|hide)\s+(?:this|that|it|the\s+element)/i,
+      // Match image replacement patterns - "use this image", "replace with attached", etc.
+      /(?:use|replace\s+with|change\s+to|swap\s+with)\s+(?:this\s+)?(?:image|photo|picture|attached)/i,
+      /(?:replace|change|update|swap)\s+(?:this\s+)?(?:image|photo|picture|img)/i,
+      /(?:set|use)\s+(?:the\s+)?attached\s+(?:image|photo|picture|file)?/i,
     ],
-    keywords: ['change', 'make it', 'make this', 'set', 'red', 'blue', 'green', 'black', 'white', 'bigger', 'smaller', 'larger', 'bold', 'italic', 'background', 'color', 'font', 'size', 'padding', 'margin', 'border', 'style', 'update', 'modify', 'change to', 'set to', 'remove this', 'delete this', 'hide this', 'remove', 'delete', 'hide'],
+    keywords: ['change', 'make it', 'make this', 'set', 'red', 'blue', 'green', 'black', 'white', 'bigger', 'smaller', 'larger', 'bold', 'italic', 'background', 'color', 'font', 'size', 'padding', 'margin', 'border', 'style', 'update', 'modify', 'change to', 'set to', 'remove this', 'delete this', 'hide this', 'remove', 'delete', 'hide', 'use this image', 'replace image', 'change image', 'swap image', 'use attached', 'replace with attached'],
   },
   {
     type: 'debug',
