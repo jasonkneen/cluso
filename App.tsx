@@ -220,13 +220,25 @@ async function generateSourcePatch(
 
   console.log('[Source Patch] Cleaned path:', relativePath);
 
-  if (!isAbsoluteFilesystemPath && projectPath) {
-    // Combine with project path
-    filePath = `${projectPath}/${relativePath}`;
-    console.log('[Source Patch] Full path with project:', filePath);
-  } else {
-    // Use the cleaned path as-is
-    filePath = relativePath;
+  if (!isAbsoluteFilesystemPath) {
+    if (projectPath) {
+      // Combine with project path
+      filePath = `${projectPath}/${relativePath}`;
+      console.log('[Source Patch] Full path with project:', filePath);
+    } else if (window.electronAPI?.files?.getCwd) {
+      // Fallback: try to get current working directory from Electron
+      const cwdResult = await window.electronAPI.files.getCwd();
+      if (cwdResult.success && cwdResult.data) {
+        filePath = `${cwdResult.data}/${relativePath}`;
+        console.log('[Source Patch] Full path with CWD fallback:', filePath);
+      } else {
+        console.log('[Source Patch] ERROR: Cannot resolve path - no project path and getCwd failed');
+        return null;
+      }
+    } else {
+      console.log('[Source Patch] ERROR: Cannot resolve relative path without project path:', relativePath);
+      return null;
+    }
   }
 
   // SAFETY: Prevent patching the app's own source files (ai-cluso directory)
@@ -924,6 +936,12 @@ export default function App() {
         apiKey: p.apiKey,
       }));
   }, [appSettings.providers]);
+
+  // Refs to track current values for async callbacks (prevents stale closures)
+  const providerConfigsRef = useRef(providerConfigs);
+  providerConfigsRef.current = providerConfigs;
+  const selectedModelRef = useRef(selectedModel);
+  selectedModelRef.current = selectedModel;
 
   // Streaming message state
   const [streamingMessage, setStreamingMessage] = useState<{
@@ -3895,7 +3913,8 @@ If you're not sure what the user wants, ask for clarification.
       projectPath,
       elementFile: element.sourceLocation?.sources?.[0]?.file,
     });
-    const providerConfig = { modelId: selectedModel.id, providers: providerConfigs };
+    // Use refs to get current values (prevents stale closures during async operations)
+    const providerConfig = { modelId: selectedModelRef.current.id, providers: providerConfigsRef.current };
     generateSourcePatch(element, cssChanges, providerConfig, projectPath || undefined, userRequest)
       .then(patch => {
         console.log('[DOM Approval] Patch generation completed:', { approvalId, success: !!patch });
@@ -3933,7 +3952,7 @@ If you're not sure what the user wants, ask for clarification.
           return { ...prev, patchStatus: 'error', patch: undefined, patchError: errorMessage };
         });
       });
-  }, [providerConfigs, selectedModel.id]);
+  }, []); // No dependencies - using refs for current values
 
   // Handle accepting DOM preview - generates source patch and auto-approves
   const handleAcceptDOMApproval = useCallback(async () => {

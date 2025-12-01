@@ -1,9 +1,11 @@
 ---
-status: pending
+status: resolved
 priority: p1
 issue_id: "002"
 tags: ["code-review", "bug", "react", "closure", "patch-system"]
 dependencies: []
+resolved_date: "2025-12-01"
+resolution: "Used refs (providerConfigsRef, selectedModelRef) to avoid stale closures in async callback"
 ---
 
 # prepareDomPatch Uses Stale Closure for Project Path

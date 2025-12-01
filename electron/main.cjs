@@ -1112,6 +1112,15 @@ function registerGitHandlers() {
     }
   })
 
+  // Get current working directory
+  ipcMain.handle('files:getCwd', async () => {
+    try {
+      return { success: true, data: process.cwd() }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
   // Folder picker dialog
   ipcMain.handle('dialog:openFolder', async () => {
     const result = await dialog.showOpenDialog({

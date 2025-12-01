@@ -97,6 +97,8 @@ interface ElectronFilesAPI {
   createDirectory: (path: string) => Promise<GitResult>
   deleteDirectory: (path: string) => Promise<GitResult>
   getTree: (path?: string, options?: TreeOptions) => Promise<GitResult<FileTreeNode[]>>
+  // Get current working directory
+  getCwd: () => Promise<GitResult>
   // Search operations
   searchInFiles: (pattern: string, dirPath?: string, options?: SearchOptions) => Promise<GitResult<SearchMatch[]>>
   glob: (pattern: string, dirPath?: string) => Promise<GitResult<GlobMatch[]>>
