@@ -10,6 +10,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { debugLog } from '../utils/debug'
+import { normalizeToJsonSchema } from '../utils/zodSchema'
 
 // ============================================================================
 // Types
@@ -442,83 +443,8 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
       const serializableTools: Record<string, { description: string; parameters: Record<string, unknown> }> = {}
       if (tools) {
         for (const [name, def] of Object.entries(tools)) {
-          // Check if parameters is a Zod schema (has _def property) and convert to JSON Schema
-          let jsonSchemaParams: Record<string, unknown>
-          if (def.parameters && typeof def.parameters === 'object' && '_def' in def.parameters) {
-            // It's a Zod schema - use zodToJsonSchema or extract manually
-            try {
-              // Try to use Zod's built-in JSON Schema generation if available
-              const zodSchema = def.parameters as { _def?: unknown }
-              if ('shape' in def.parameters) {
-                // ZodObject - extract shape and convert
-                const shape = (def.parameters as { shape: Record<string, unknown> }).shape
-                const properties: Record<string, unknown> = {}
-                const required: string[] = []
-
-                for (const [propName, propSchema] of Object.entries(shape)) {
-                  const originalDef = propSchema as any
-                  let propDef = originalDef
-
-                  // Unwrap wrappers to get inner type (handle Optional, Nullable, Default, Effects)
-                  while (propDef._def && (
-                    propDef._def.typeName === 'ZodOptional' ||
-                    propDef._def.typeName === 'ZodNullable' ||
-                    propDef._def.typeName === 'ZodDefault' ||
-                    propDef._def.typeName === 'ZodEffects'
-                  )) {
-                    propDef = propDef._def.innerType || propDef._def.schema
-                  }
-
-                  const typeName = propDef._def?.typeName || 'ZodString'
-                  const typeMap: Record<string, string> = {
-                    ZodString: 'string',
-                    ZodNumber: 'number',
-                    ZodBoolean: 'boolean',
-                    ZodArray: 'array',
-                    ZodObject: 'object',
-                    ZodEnum: 'string',
-                    ZodNativeEnum: 'string',
-                  }
-                  
-                  properties[propName] = {
-                    type: typeMap[typeName] || 'string',
-                    description: propDef._def?.description || propDef.description || originalDef.description || '',
-                  }
-                  
-                  // Check if required (use original definition)
-                  if (!originalDef.isOptional?.()) {
-                    required.push(propName)
-                  }
-                }
-
-                jsonSchemaParams = {
-                  type: 'object',
-                  properties,
-                  required: required.length > 0 ? required : undefined,
-                }
-              } else {
-                // Fallback for non-object Zod schemas
-                jsonSchemaParams = { type: 'object', properties: {} }
-              }
-            } catch {
-              // Fallback if Zod conversion fails
-              jsonSchemaParams = { type: 'object', properties: {} }
-            }
-          } else if (def.parameters && typeof def.parameters === 'object') {
-            // Already a plain object (JSON Schema format) - ensure type is present
-            const params = def.parameters as Record<string, unknown>
-            if (!params.type) {
-              jsonSchemaParams = { type: 'object', ...params }
-            } else {
-              jsonSchemaParams = params
-            }
-            // Ensure properties exists
-            if (!jsonSchemaParams.properties) {
-              jsonSchemaParams = { ...jsonSchemaParams, properties: {} }
-            }
-          } else {
-            jsonSchemaParams = { type: 'object', properties: {} }
-          }
+          // Use shared utility to convert Zod schemas or normalize plain objects to JSON Schema
+          const jsonSchemaParams = normalizeToJsonSchema(def.parameters)
 
           serializableTools[name] = {
             description: def.description,
