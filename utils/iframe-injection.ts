@@ -168,6 +168,23 @@ export const INJECTION_SCRIPT = `
       };
     }
 
+    // Get XPath of element
+    function getXPath(el) {
+      if (!el) return '';
+      if (el.id) return '//*[@id="' + el.id + '"]';
+
+      const parts = [];
+      while (el && el.nodeType === 1) {
+        let idx = 1;
+        for (let sib = el.previousSibling; sib; sib = sib.previousSibling) {
+          if (sib.nodeType === 1 && sib.tagName === el.tagName) idx++;
+        }
+        parts.unshift(el.tagName.toLowerCase() + '[' + idx + ']');
+        el = el.parentNode;
+      }
+      return '/' + parts.join('/');
+    }
+
     document.addEventListener('mouseover', function(e) {
       if (!isInspectorActive && !isScreenshotActive) return;
       e.stopPropagation();
@@ -261,9 +278,14 @@ export const INJECTION_SCRIPT = `
                 // clear previous screenshot mode if swapping
                 if(isInspectorActive) isScreenshotActive = false;
 
-                if (!isInspectorActive && currentSelected) {
-                    currentSelected.classList.remove('inspector-selected-target');
-                    currentSelected = null;
+                if (!isInspectorActive) {
+                    // Clean up all inspector UI when mode is off
+                    if (currentSelected) {
+                        currentSelected.classList.remove('inspector-selected-target');
+                        currentSelected.classList.remove('inspector-drag-over');
+                        currentSelected = null;
+                    }
+                    hideDropLabel();
                 }
             }
             else if (event.data.type === 'TOGGLE_SCREENSHOT') {
@@ -504,7 +526,7 @@ export const INJECTION_SCRIPT = `
 
     // Global drag event handlers
     document.addEventListener('dragover', function(e) {
-      if (!currentSelected) return;
+      if (!currentSelected || !isInspectorActive) return;
 
       const rect = currentSelected.getBoundingClientRect();
       const isOverSelected = (
@@ -525,7 +547,7 @@ export const INJECTION_SCRIPT = `
     }, true);
 
     document.addEventListener('dragleave', function(e) {
-      if (!currentSelected) return;
+      if (!currentSelected || !isInspectorActive) return;
 
       // Only hide if truly leaving the element
       const rect = currentSelected.getBoundingClientRect();
@@ -541,7 +563,7 @@ export const INJECTION_SCRIPT = `
     }, true);
 
     document.addEventListener('drop', function(e) {
-      if (!currentSelected) return;
+      if (!currentSelected || !isInspectorActive) return;
 
       const rect = currentSelected.getBoundingClientRect();
       const isOverSelected = (
@@ -559,6 +581,8 @@ export const INJECTION_SCRIPT = `
 
       const files = e.dataTransfer.files;
       const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+      const summary = getElementSummary(currentSelected);
+      const xpath = getXPath(currentSelected);
 
       if (files.length > 0 && files[0].type.startsWith('image/')) {
         // Read the file and send to parent
@@ -567,7 +591,7 @@ export const INJECTION_SCRIPT = `
           window.parent.postMessage({
             type: 'DROP_IMAGE_ON_ELEMENT',
             imageData: ev.target.result,
-            element: getElementSummary(currentSelected),
+            element: { ...summary, xpath },
             rect: {
               top: rect.top,
               left: rect.left,
@@ -581,7 +605,7 @@ export const INJECTION_SCRIPT = `
         window.parent.postMessage({
           type: 'DROP_URL_ON_ELEMENT',
           url: url,
-          element: getElementSummary(currentSelected),
+          element: { ...summary, xpath },
           rect: {
             top: rect.top,
             left: rect.left,
@@ -594,7 +618,7 @@ export const INJECTION_SCRIPT = `
 
     // Double-click to start inline editing
     document.addEventListener('dblclick', function(e) {
-      if (!currentSelected) return;
+      if (!currentSelected || !isInspectorActive) return;
       if (e.target !== currentSelected && !currentSelected.contains(e.target)) return;
 
       e.preventDefault();
