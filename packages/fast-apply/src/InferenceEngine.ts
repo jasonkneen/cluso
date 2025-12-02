@@ -137,6 +137,12 @@ export class InferenceEngine extends EventEmitter {
       console.log('[FastApply] Original code length:', originalCode.length)
       console.log('[FastApply] Update snippet length:', updateSnippet.length)
       console.log('[FastApply] Total prompt length:', prompt.length)
+      
+      // Warn if input is very large (likely to be slow)
+      if (originalCode.length > 10000) {
+        console.warn('[FastApply] ⚠️ Large input detected - inference may be slow')
+      }
+      
       console.log('[FastApply] Getting sequence...')
 
       // Get a sequence from context

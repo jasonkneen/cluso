@@ -796,10 +796,18 @@ export default function App() {
     onError: (err) => console.error('[AI SDK] Error:', err),
     onTextDelta: (delta) => {
       // Update streaming message content as chunks arrive
-      setStreamingMessage(prev => prev ? { ...prev, content: prev.content + delta } : null)
+      console.log('[Stream] Text delta:', delta.substring(0, 50));
+      setStreamingMessage(prev => {
+        if (!prev) {
+          console.warn('[Stream] No streaming message state!');
+          return null;
+        }
+        return { ...prev, content: prev.content + delta };
+      });
     },
     onReasoningDelta: (delta) => {
       // Update reasoning content as it arrives
+      console.log('[Stream] Reasoning delta:', delta.substring(0, 50));
       setStreamingMessage(prev => prev ? { ...prev, reasoning: prev.reasoning + delta } : null)
     },
     onToolCall: (toolCall) => {
@@ -3188,7 +3196,9 @@ export default function App() {
     originalContent?: string;
     isFileModification?: boolean;
   }) => {
-    const fileName = file.path.split('/').pop() || file.path;
+    // Extract filename without query strings (e.g., "?t=123456")
+    const rawFileName = file.path.split('/').pop() || file.path;
+    const fileName = rawFileName.split('?')[0];
     setEditedFiles(prev => {
       // Check if file already exists, update it
       const existing = prev.findIndex(f => f.path === file.path);
@@ -4059,6 +4069,15 @@ If you're not sure what the user wants, ask for clarification.
           sourceLocation: selectedElement.sourceLocation,
         });
 
+        // Show progress feedback for instant UI path
+        setIsStreaming(true);
+        setStreamingMessage({
+          id: `instant-ui-${Date.now()}`,
+          content: `🎯 Analyzing \`<${selectedElement.tagName.toLowerCase()}>\` element...`,
+          reasoning: '',
+          toolCalls: [],
+        });
+
         // 🖼️ SMART IMAGE INSERTION: Works with ANY element type
         const hasAttachedImage = attachedImages.length > 0;
         // Broad pattern to catch any image-related intent
@@ -4375,12 +4394,26 @@ If you're not sure what the user wants, ask for clarification.
         }
 
         // Phase 1: Instant DOM update with Gemini Flash
+        setStreamingMessage(prev => prev ? { ...prev, content: `🎯 Analyzing \`<${selectedElement.tagName.toLowerCase()}>\` element...\n\n⚡ Generating CSS changes with Gemini Flash...` } : null);
+        
         const uiResult = await generateUIUpdate(selectedElement, userMessage.content, googleProvider.apiKey);
         const hasCssChanges = Object.keys(uiResult.cssChanges).length > 0;
         const hasTextChange = !!uiResult.textChange;
         const hasAnyChange = hasCssChanges || hasTextChange;
 
         console.log('[Instant UI] Result:', { hasCssChanges, hasTextChange, textChange: uiResult.textChange, cssChanges: uiResult.cssChanges });
+        
+        // Update progress with what was generated
+        if (hasAnyChange) {
+          const changesList = [
+            ...Object.entries(uiResult.cssChanges).map(([prop, val]) => `  • \`${prop}\`: \`${val}\``),
+            ...(hasTextChange ? [`  • text: "${uiResult.textChange}"`] : [])
+          ].join('\n');
+          setStreamingMessage(prev => prev ? { 
+            ...prev, 
+            content: `🎯 Analyzing \`<${selectedElement.tagName.toLowerCase()}>\` element...\n\n⚡ Generated changes:\n${changesList}\n\n🔄 Applying to preview...` 
+          } : null);
+        }
 
         // Apply changes to the live DOM if present
         const webview = webviewRefs.current.get(activeTabId);
@@ -4497,6 +4530,13 @@ If you're not sure what the user wants, ask for clarification.
                 patchStatus: 'preparing',
               };
               console.log('[Instant UI] Pending DOM approval created:', approvalId);
+              
+              // Clear streaming and show final status
+              setStreamingMessage(prev => prev ? { 
+                ...prev, 
+                content: `✅ Preview applied!\n\n${uiResult.description}\n\n📝 Preparing source code patch...` 
+              } : null);
+              
               setPendingDOMApproval(approvalPayload);
               // Pass textChange for fast path (skips AI for simple text replacements)
               const textChangePayload = hasTextChange
@@ -4515,10 +4555,17 @@ If you're not sure what the user wants, ask for clarification.
               );
             }
 
+            // Clear streaming state - DOM approval UI takes over
+            setIsStreaming(false);
+            setStreamingMessage(null);
+            
             // Return early - wait for user to approve
             return;
           } catch (e) {
             console.error('[Instant UI] Failed to apply DOM changes:', e);
+            // Clear streaming state
+            setIsStreaming(false);
+            setStreamingMessage(null);
             // Add error message
             const errorMessage: ChatMessage = {
               id: `msg-error-${Date.now()}`,
@@ -4532,7 +4579,9 @@ If you're not sure what the user wants, ask for clarification.
             return;
           }
         } else if (!hasAnyChange) {
-          // No changes detected
+          // No changes detected - clear streaming state
+          setIsStreaming(false);
+          setStreamingMessage(null);
           const noChangeMessage: ChatMessage = {
             id: `msg-nochange-${Date.now()}`,
             role: 'assistant',
@@ -4734,7 +4783,7 @@ If you're not sure what the user wants, ask for clarification.
         console.log('[AI SDK] Stored pending reasoning:', resolvedReasoning ? `${resolvedReasoning.substring(0, 100)}...` : 'none');
       } else {
         // Fallback to GoogleGenAI for backwards compatibility or if no provider configured
-        console.log('[AI SDK] Falling back to GoogleGenAI');
+        console.log('[AI SDK] Falling back to GoogleGenAI with streaming');
         const apiKey = process.env.API_KEY;
         if (!apiKey) throw new Error("No API Key configured. Please add your API key in Settings.");
         const ai = new GoogleGenAI({ apiKey });
@@ -4750,12 +4799,30 @@ If you're not sure what the user wants, ask for clarification.
           },
         ];
 
-        const response = await ai.models.generateContent({
+        setIsStreaming(true);
+        setStreamingMessage({
+          id: `streaming-fallback-${Date.now()}`,
+          content: '',
+          reasoning: '',
+          toolCalls: [],
+        });
+
+        // Use streaming API for real-time response
+        const response = await ai.models.generateContentStream({
           model: selectedModel.id,
           contents: geminiContents
         });
 
-        text = response.text;
+        let streamedText = '';
+        for await (const chunk of response) {
+          const chunkText = chunk.text || '';
+          streamedText += chunkText;
+          setStreamingMessage(prev => prev ? { ...prev, content: prev.content + chunkText } : null);
+        }
+
+        setIsStreaming(false);
+        setStreamingMessage(null);
+        text = streamedText;
       }
 
       if (text) {
@@ -6572,15 +6639,15 @@ If you're not sure what the user wants, ask for clarification.
             )}
           </div>
 
-          {/* Edited Files Drawer */}
+          {/* Edited Files Drawer - slides up from behind chat */}
           {editedFiles.length > 0 && (
             <div className="px-4 pb-2">
               <div
-                className={`rounded-t-2xl border border-b-0 overflow-hidden transition-all duration-300 ${
+                className={`rounded-t-2xl border border-b-0 overflow-hidden transition-all duration-300 shadow-lg ${
                   isDarkMode ? 'bg-neutral-800 border-neutral-600' : 'bg-stone-100 border-stone-200'
                 }`}
               >
-                {/* Drawer Header - always visible */}
+                {/* Drawer Header - always visible, shows pending changes */}
                 <div
                   onClick={() => setIsEditedFilesDrawerOpen(!isEditedFilesDrawerOpen)}
                   className={`w-full flex items-center justify-between px-4 py-2.5 transition-colors cursor-pointer ${
@@ -6595,29 +6662,32 @@ If you're not sure what the user wants, ask for clarification.
                       }`}
                     />
                     <span className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`}>
-                      {editedFiles.length} File{editedFiles.length !== 1 ? 's' : ''}
+                      {editedFiles.length} File{editedFiles.length !== 1 ? 's' : ''} Changed
+                    </span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-100 text-amber-700'}`}>
+                      Pending
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={(e) => { e.stopPropagation(); undoAllEdits(); }}
-                      className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${
+                      className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
                         isDarkMode
-                          ? 'text-neutral-300 hover:bg-neutral-600'
-                          : 'text-stone-600 hover:bg-stone-300'
+                          ? 'text-red-400 hover:bg-red-500/20 border border-red-500/30'
+                          : 'text-red-600 hover:bg-red-50 border border-red-200'
                       }`}
                     >
-                      Undo All
+                      Reject
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); keepAllEdits(); }}
-                      className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${
+                      className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
                         isDarkMode
-                          ? 'text-neutral-300 hover:bg-neutral-600'
-                          : 'text-stone-600 hover:bg-stone-300'
+                          ? 'text-green-400 hover:bg-green-500/20 border border-green-500/30'
+                          : 'text-green-600 hover:bg-green-50 border border-green-200'
                       }`}
                     >
-                      Keep All
+                      Accept
                     </button>
                   </div>
                 </div>
@@ -6647,27 +6717,27 @@ If you're not sure what the user wants, ask for clarification.
                           </div>
                         </div>
                         <div className="flex items-center gap-1">
-                          {file.undoCode && (
+                          {(file.undoCode || file.isFileModification) && (
                             <button
                               onClick={() => undoFileEdit(file.path)}
                               className={`p-1.5 rounded-lg text-xs transition-colors ${
                                 isDarkMode
-                                  ? 'text-neutral-400 hover:bg-neutral-600 hover:text-neutral-200'
-                                  : 'text-stone-500 hover:bg-stone-300 hover:text-stone-700'
+                                  ? 'text-red-400 hover:bg-red-500/20'
+                                  : 'text-red-500 hover:bg-red-50'
                               }`}
-                              title="Undo this file"
+                              title="Reject this change"
                             >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+                              <X size={14} />
                             </button>
                           )}
                           <button
                             onClick={() => setEditedFiles(prev => prev.filter(f => f.path !== file.path))}
                             className={`p-1.5 rounded-lg text-xs transition-colors ${
                               isDarkMode
-                                ? 'text-neutral-400 hover:bg-neutral-600 hover:text-neutral-200'
-                                : 'text-stone-500 hover:bg-stone-300 hover:text-stone-700'
+                                ? 'text-green-400 hover:bg-green-500/20'
+                                : 'text-green-500 hover:bg-green-50'
                             }`}
-                            title="Keep this file"
+                            title="Accept this change"
                           >
                             <Check size={14} />
                           </button>
@@ -7048,8 +7118,8 @@ If you're not sure what the user wants, ask for clarification.
                                   }`}
                                   title={isInspectorActive ? 'Model locked while inspector is active' : ''}
                               >
-                                  <selectedModel.Icon size={16} />
-                                  <span>{selectedModel.name}</span>
+                                  <selectedModel.Icon size={16} className="flex-shrink-0" />
+                                  <span className="truncate max-w-[120px]">{selectedModel.name}</span>
                                   {isInspectorActive ? (
                                     <MousePointer2 size={12} className={isDarkMode ? 'text-blue-400' : 'text-blue-500'} />
                                   ) : (

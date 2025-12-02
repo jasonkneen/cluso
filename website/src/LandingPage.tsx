@@ -1367,7 +1367,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                   AI-powered browser dev tools that let you build UIs
                   with your voice. Open source and free forever.
                 </p>
-                <form className="email-form footer-email-form" onSubmit={handleSubmit}>
+                <form className="email-form footer-email-form" onSubmit={handleSubmit} style={{ width: '100%', marginLeft: 'auto', marginRight: 'auto' }}>
                   <div className="email-form-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
@@ -1399,8 +1399,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               <div className="footer-links">
                 <h4>Resources</h4>
                 <ul>
-                  <li><a href="#" >Documentation</a></li>
-                  <li><a href="https://github.com/jkneen/flows" target="_blank" rel="noopener noreferrer">Github</a></li>
+                  <li><a href="#" >Docs</a></li>
+                  <li style={{ display: 'none' }}><a href="https://github.com/jkneen/flows" target="_blank" rel="noopener noreferrer">Github</a></li>
                 </ul>
               </div>
 

@@ -50,9 +50,9 @@ export const MODEL_REPO = 'Kortix/FastApply-1.5B-v1.0_GGUF'
 export const DEFAULT_STORAGE_DIR = '.cluso/models/fast-apply'
 
 /**
- * Inference timeout in milliseconds (60s for large files)
+ * Inference timeout in milliseconds (30s - reduced from 60s for better UX)
  */
-export const INFERENCE_TIMEOUT = 60000
+export const INFERENCE_TIMEOUT = 30000
 
 /**
  * Temperature for inference
