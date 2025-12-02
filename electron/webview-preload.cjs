@@ -39,8 +39,19 @@ console.log('ipcRenderer available:', !!ipcRenderer)
 let currentSelected = null
 let isInspectorActive = false
 let isScreenshotActive = false
+let isMoveActive = false
 let multipleMatches = [] // Store multiple AI-selected elements
 let numberBadges = [] // Store number badge elements
+
+// Move mode state
+let moveOverlay = null
+let moveElement = null
+let moveOriginalRect = null
+let isMoveDragging = false
+let isResizing = false
+let resizeHandle = null
+let moveStartX = 0
+let moveStartY = 0
 
 // CSS injection for hover/selection effects
 // Inject CSS when DOM is ready
@@ -193,6 +204,62 @@ function injectStyles() {
     .inspector-edit-btn.reject:hover {
       background: #dc2626 !important;
     }
+
+    /* Move mode styles */
+    .move-hover-target {
+      outline: 2px dashed #f97316 !important;
+      outline-offset: -2px !important;
+      cursor: move !important;
+      background-color: rgba(249, 115, 22, 0.1) !important;
+      position: relative;
+      z-index: 10000;
+    }
+
+    .move-original-hidden {
+      visibility: hidden !important;
+    }
+
+    .move-floating-overlay {
+      position: fixed !important;
+      border: none !important;
+      outline: 2px solid #f97316 !important;
+      outline-offset: 2px !important;
+      background: transparent !important;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12) !important;
+      cursor: move !important;
+      z-index: 100000 !important;
+      overflow: visible !important;
+    }
+
+    .move-resize-handle {
+      position: absolute !important;
+      width: 12px !important;
+      height: 12px !important;
+      background: #f97316 !important;
+      border: 2px solid white !important;
+      border-radius: 50% !important;
+      z-index: 100001 !important;
+    }
+
+    .move-resize-handle.tl { top: -10px; left: -10px; cursor: nw-resize !important; }
+    .move-resize-handle.tr { top: -10px; right: -10px; cursor: ne-resize !important; }
+    .move-resize-handle.bl { bottom: -10px; left: -10px; cursor: sw-resize !important; }
+    .move-resize-handle.br { bottom: -10px; right: -10px; cursor: se-resize !important; }
+
+    .move-position-label {
+      position: fixed !important;
+      padding: 6px 12px !important;
+      background: rgba(249, 115, 22, 0.95) !important;
+      color: white !important;
+      border-radius: 6px !important;
+      font-size: 12px !important;
+      font-weight: 600 !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+      z-index: 100002 !important;
+      pointer-events: none !important;
+      white-space: nowrap !important;
+    }
   `
 
   // Append to head if available, otherwise body, otherwise documentElement
@@ -309,14 +376,17 @@ function getXPath(el) {
 
 // Mouse events for inspector
 document.addEventListener('mouseover', function(e) {
-  if (!isInspectorActive && !isScreenshotActive) return
+  if (!isInspectorActive && !isScreenshotActive && !isMoveActive) return
   if (isEditing) return // Don't highlight while inline editing
+  if (moveOverlay) return // Don't highlight while moving
   e.stopPropagation()
 
   if (isInspectorActive) {
     e.target.classList.add('inspector-hover-target')
   } else if (isScreenshotActive) {
     e.target.classList.add('screenshot-hover-target')
+  } else if (isMoveActive) {
+    e.target.classList.add('move-hover-target')
   }
 
   // Send hover info to host for element label display
@@ -334,20 +404,22 @@ document.addEventListener('mouseover', function(e) {
 }, true)
 
 document.addEventListener('mouseout', function(e) {
-  if (!isInspectorActive && !isScreenshotActive) return
+  if (!isInspectorActive && !isScreenshotActive && !isMoveActive) return
   if (isEditing) return // Don't process while inline editing
+  if (moveOverlay) return // Don't process while moving
   e.stopPropagation()
   e.target.classList.remove('inspector-hover-target')
   e.target.classList.remove('screenshot-hover-target')
+  e.target.classList.remove('move-hover-target')
 
   // Clear hover info
   ipcRenderer.sendToHost('inspector-hover-end')
 }, true)
 
 document.addEventListener('click', async function(e) {
-  console.log('[Inspector] Click detected, inspectorActive:', isInspectorActive, 'screenshotActive:', isScreenshotActive)
+  console.log('[Inspector] Click detected, inspectorActive:', isInspectorActive, 'screenshotActive:', isScreenshotActive, 'moveActive:', isMoveActive)
 
-  if (!isInspectorActive && !isScreenshotActive) return
+  if (!isInspectorActive && !isScreenshotActive && !isMoveActive) return
   if (isEditing) return // Don't select new elements while inline editing
 
   e.preventDefault()
@@ -397,6 +469,10 @@ document.addEventListener('click', async function(e) {
     }
     console.log('[Inspector] Sending screenshot-select:', payload.element.tagName)
     ipcRenderer.sendToHost('screenshot-select', payload)
+  } else if (isMoveActive) {
+    // Move mode - create floating replica
+    e.target.classList.remove('move-hover-target')
+    createMoveOverlay(e.target, summary, xpath, sourceLocation)
   }
 }, true)
 
@@ -422,10 +498,27 @@ ipcRenderer.on('set-screenshot-mode', (event, active) => {
   isScreenshotActive = active
   if (active) {
     isInspectorActive = false
+    isMoveActive = false
+    cleanupMoveOverlay()
     if (currentSelected) {
       currentSelected.classList.remove('inspector-selected-target')
       currentSelected = null
     }
+  }
+})
+
+ipcRenderer.on('set-move-mode', (event, active) => {
+  console.log('[Inspector] set-move-mode received:', active)
+  isMoveActive = active
+  if (active) {
+    isInspectorActive = false
+    isScreenshotActive = false
+    if (currentSelected) {
+      currentSelected.classList.remove('inspector-selected-target')
+      currentSelected = null
+    }
+  } else {
+    cleanupMoveOverlay()
   }
 })
 
@@ -981,13 +1074,288 @@ document.addEventListener('dblclick', function(e) {
   startEditing(currentSelected)
 }, true)
 
-// Escape to cancel editing
+// Escape to cancel editing or move mode
 document.addEventListener('keydown', function(e) {
-  if (!isEditing) return
   if (e.key === 'Escape') {
-    if (currentSelected) {
+    // Cancel inline editing
+    if (isEditing && currentSelected) {
       currentSelected.textContent = originalTextContent
       finishEditing(currentSelected)
+      return
+    }
+    // Cancel move mode
+    if (moveOverlay) {
+      cleanupMoveOverlay()
+      ipcRenderer.sendToHost('move-cancelled')
+      return
     }
   }
 }, true)
+
+// --- Move Mode Functions ---
+let movePositionLabel = null
+let moveElementData = null
+
+function createMoveOverlay(element, summary, xpath, sourceLocation) {
+  // Clean up any existing overlay
+  cleanupMoveOverlay()
+
+  const rect = element.getBoundingClientRect()
+  moveOriginalRect = {
+    top: rect.top,
+    left: rect.left,
+    width: rect.width,
+    height: rect.height
+  }
+
+  // Store element data for later
+  moveElementData = { summary, xpath, sourceLocation }
+  moveElement = element
+
+  // Hide the original element (keep layout space)
+  element.classList.add('move-original-hidden')
+
+  // Create floating overlay
+  moveOverlay = document.createElement('div')
+  moveOverlay.className = 'move-floating-overlay'
+  moveOverlay.style.left = rect.left + 'px'
+  moveOverlay.style.top = rect.top + 'px'
+  moveOverlay.style.width = rect.width + 'px'
+  moveOverlay.style.height = rect.height + 'px'
+
+  // Clone the element content into the overlay
+  const clone = element.cloneNode(true)
+  clone.classList.remove('move-original-hidden')
+
+  // Copy all computed styles from original element to clone
+  const computedStyle = window.getComputedStyle(element)
+
+  // Apply key visual styles to ensure seamless appearance
+  clone.style.cssText = ''
+  clone.style.visibility = 'visible'
+  clone.style.position = 'static'
+  clone.style.margin = '0'
+  clone.style.width = '100%'
+  clone.style.height = '100%'
+  clone.style.display = computedStyle.display
+  clone.style.background = computedStyle.background
+  clone.style.backgroundColor = computedStyle.backgroundColor
+  clone.style.backgroundImage = computedStyle.backgroundImage
+  clone.style.backgroundSize = computedStyle.backgroundSize
+  clone.style.backgroundPosition = computedStyle.backgroundPosition
+  clone.style.borderRadius = computedStyle.borderRadius
+  clone.style.padding = computedStyle.padding
+  clone.style.color = computedStyle.color
+  clone.style.fontFamily = computedStyle.fontFamily
+  clone.style.fontSize = computedStyle.fontSize
+  clone.style.fontWeight = computedStyle.fontWeight
+  clone.style.lineHeight = computedStyle.lineHeight
+  clone.style.textAlign = computedStyle.textAlign
+  clone.style.boxShadow = computedStyle.boxShadow
+  clone.style.border = computedStyle.border
+  clone.style.overflow = 'hidden'
+
+  // Copy border-radius to overlay as well for seamless look
+  moveOverlay.style.borderRadius = computedStyle.borderRadius
+
+  moveOverlay.appendChild(clone)
+
+  // Add resize handles
+  const handles = ['tl', 'tr', 'bl', 'br']
+  handles.forEach(pos => {
+    const handle = document.createElement('div')
+    handle.className = 'move-resize-handle ' + pos
+    handle.dataset.handle = pos
+    moveOverlay.appendChild(handle)
+  })
+
+  document.body.appendChild(moveOverlay)
+
+  // Create position label
+  movePositionLabel = document.createElement('div')
+  movePositionLabel.className = 'move-position-label'
+  updatePositionLabel()
+  document.body.appendChild(movePositionLabel)
+
+  // Add event listeners for dragging and resizing
+  moveOverlay.addEventListener('mousedown', handleMoveStart)
+
+  console.log('[Move] Created overlay for element:', summary.tagName)
+
+  // Send initial selection to host
+  ipcRenderer.sendToHost('move-select', {
+    element: { ...summary, xpath, sourceLocation },
+    rect: moveOriginalRect
+  })
+}
+
+function handleMoveStart(e) {
+  if (!moveOverlay) return
+
+  const handle = e.target.dataset?.handle
+  if (handle) {
+    // Start resizing
+    isResizing = true
+    resizeHandle = handle
+  } else {
+    // Start dragging
+    isMoveDragging = true
+  }
+
+  moveStartX = e.clientX
+  moveStartY = e.clientY
+
+  e.preventDefault()
+  e.stopPropagation()
+
+  document.addEventListener('mousemove', handleMoveMove)
+  document.addEventListener('mouseup', handleMoveEnd)
+}
+
+function handleMoveMove(e) {
+  if (!moveOverlay) return
+
+  const deltaX = e.clientX - moveStartX
+  const deltaY = e.clientY - moveStartY
+
+  if (isMoveDragging) {
+    // Move the overlay
+    const currentLeft = parseFloat(moveOverlay.style.left) || 0
+    const currentTop = parseFloat(moveOverlay.style.top) || 0
+    moveOverlay.style.left = (currentLeft + deltaX) + 'px'
+    moveOverlay.style.top = (currentTop + deltaY) + 'px'
+  } else if (isResizing) {
+    // Resize the overlay
+    const currentLeft = parseFloat(moveOverlay.style.left) || 0
+    const currentTop = parseFloat(moveOverlay.style.top) || 0
+    const currentWidth = parseFloat(moveOverlay.style.width) || 100
+    const currentHeight = parseFloat(moveOverlay.style.height) || 100
+
+    let newLeft = currentLeft
+    let newTop = currentTop
+    let newWidth = currentWidth
+    let newHeight = currentHeight
+
+    if (resizeHandle.includes('l')) {
+      newLeft = currentLeft + deltaX
+      newWidth = currentWidth - deltaX
+    }
+    if (resizeHandle.includes('r')) {
+      newWidth = currentWidth + deltaX
+    }
+    if (resizeHandle.includes('t')) {
+      newTop = currentTop + deltaY
+      newHeight = currentHeight - deltaY
+    }
+    if (resizeHandle.includes('b')) {
+      newHeight = currentHeight + deltaY
+    }
+
+    // Minimum size
+    if (newWidth >= 20 && newHeight >= 20) {
+      moveOverlay.style.left = newLeft + 'px'
+      moveOverlay.style.top = newTop + 'px'
+      moveOverlay.style.width = newWidth + 'px'
+      moveOverlay.style.height = newHeight + 'px'
+    }
+  }
+
+  moveStartX = e.clientX
+  moveStartY = e.clientY
+
+  updatePositionLabel()
+}
+
+function handleMoveEnd(e) {
+  isMoveDragging = false
+  isResizing = false
+  resizeHandle = null
+
+  document.removeEventListener('mousemove', handleMoveMove)
+  document.removeEventListener('mouseup', handleMoveEnd)
+
+  // Send updated position to host
+  if (moveOverlay && moveElementData) {
+    const newRect = {
+      x: parseFloat(moveOverlay.style.left) || 0,
+      y: parseFloat(moveOverlay.style.top) || 0,
+      width: parseFloat(moveOverlay.style.width) || 100,
+      height: parseFloat(moveOverlay.style.height) || 100
+    }
+
+    ipcRenderer.sendToHost('move-update', {
+      element: {
+        ...moveElementData.summary,
+        xpath: moveElementData.xpath,
+        sourceLocation: moveElementData.sourceLocation
+      },
+      originalRect: moveOriginalRect,
+      targetRect: newRect
+    })
+  }
+}
+
+function updatePositionLabel() {
+  if (!movePositionLabel || !moveOverlay) return
+
+  const x = Math.round(parseFloat(moveOverlay.style.left) || 0)
+  const y = Math.round(parseFloat(moveOverlay.style.top) || 0)
+  const w = Math.round(parseFloat(moveOverlay.style.width) || 0)
+  const h = Math.round(parseFloat(moveOverlay.style.height) || 0)
+
+  movePositionLabel.textContent = `${x}, ${y} • ${w} × ${h}`
+  movePositionLabel.style.left = (x + w / 2 - 50) + 'px'
+  movePositionLabel.style.top = (y - 30) + 'px'
+}
+
+function cleanupMoveOverlay() {
+  if (moveElement) {
+    moveElement.classList.remove('move-original-hidden')
+    moveElement = null
+  }
+
+  if (moveOverlay) {
+    moveOverlay.removeEventListener('mousedown', handleMoveStart)
+    moveOverlay.remove()
+    moveOverlay = null
+  }
+
+  if (movePositionLabel) {
+    movePositionLabel.remove()
+    movePositionLabel = null
+  }
+
+  moveOriginalRect = null
+  moveElementData = null
+  isMoveDragging = false
+  isResizing = false
+  resizeHandle = null
+}
+
+// Confirm move and send final position
+ipcRenderer.on('confirm-move', () => {
+  if (moveOverlay && moveElementData) {
+    const targetRect = {
+      x: parseFloat(moveOverlay.style.left) || 0,
+      y: parseFloat(moveOverlay.style.top) || 0,
+      width: parseFloat(moveOverlay.style.width) || 100,
+      height: parseFloat(moveOverlay.style.height) || 100
+    }
+
+    ipcRenderer.sendToHost('move-confirmed', {
+      element: {
+        ...moveElementData.summary,
+        xpath: moveElementData.xpath,
+        sourceLocation: moveElementData.sourceLocation
+      },
+      originalRect: moveOriginalRect,
+      targetRect: targetRect
+    })
+  }
+  cleanupMoveOverlay()
+})
+
+// Cancel move
+ipcRenderer.on('cancel-move', () => {
+  cleanupMoveOverlay()
+})

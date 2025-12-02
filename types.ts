@@ -65,6 +65,19 @@ export interface SelectedElement {
     width: number;
     height: number;
   };
+  // Move mode - target position for repositioning
+  targetPosition?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  originalPosition?: {
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+  };
 }
 
 export interface AppState {
