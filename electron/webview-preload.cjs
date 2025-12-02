@@ -230,6 +230,20 @@ function injectStyles() {
       overflow: visible !important;
     }
 
+    .move-floating-overlay.screenshot-mode {
+      outline: none !important;
+      outline-offset: 0 !important;
+      box-shadow: none !important;
+    }
+
+    .move-resize-handle.screenshot-mode {
+      display: none !important;
+    }
+
+    .move-position-label.screenshot-mode {
+      display: none !important;
+    }
+
     .move-resize-handle {
       position: absolute !important;
       width: 12px !important;
@@ -1385,20 +1399,19 @@ ipcRenderer.on('cancel-move', () => {
   cleanupAllMoveOverlays()
 })
 
-// Hide move handles for screenshot (keeps element visible)
+// Hide move handles for screenshot (keeps element visible, hides all chrome)
 ipcRenderer.on('hide-move-handles', () => {
   moveOverlays.forEach(overlayData => {
+    // Add screenshot-mode class to hide all chrome
+    overlayData.overlay.classList.add('screenshot-mode')
     // Hide handles
     const handles = overlayData.overlay.querySelectorAll('.move-resize-handle')
     handles.forEach(handle => {
-      handle.style.display = 'none'
+      handle.classList.add('screenshot-mode')
     })
-    // Hide outline
-    overlayData.overlay.style.outline = 'none'
-    overlayData.overlay.style.outlineOffset = '0'
     // Hide position label
     if (overlayData.positionLabel) {
-      overlayData.positionLabel.style.display = 'none'
+      overlayData.positionLabel.classList.add('screenshot-mode')
     }
   })
   console.log('[Move] Handles hidden for screenshot')
@@ -1407,17 +1420,16 @@ ipcRenderer.on('hide-move-handles', () => {
 // Show move handles after screenshot
 ipcRenderer.on('show-move-handles', () => {
   moveOverlays.forEach(overlayData => {
+    // Remove screenshot-mode class to restore all chrome
+    overlayData.overlay.classList.remove('screenshot-mode')
     // Show handles
     const handles = overlayData.overlay.querySelectorAll('.move-resize-handle')
     handles.forEach(handle => {
-      handle.style.display = ''
+      handle.classList.remove('screenshot-mode')
     })
-    // Restore outline
-    overlayData.overlay.style.outline = '2px solid #f97316'
-    overlayData.overlay.style.outlineOffset = '2px'
     // Show position label
     if (overlayData.positionLabel) {
-      overlayData.positionLabel.style.display = ''
+      overlayData.positionLabel.classList.remove('screenshot-mode')
     }
   })
   console.log('[Move] Handles restored after screenshot')
