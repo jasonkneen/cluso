@@ -16,8 +16,9 @@ import { Tool, ToolContent, ToolHeader, ToolOutput } from '@/components/ai-eleme
 import { MessageResponse } from '@/components/ai-elements/message';
 import { useAIChat, getProviderForModel, ProviderConfig, MCPToolDefinition, toCoreMessages } from './hooks/useAIChat';
 import type { CoreMessage } from './hooks/useAIChat';
-import { useCodingAgent, CodingContext } from './hooks/useCodingAgent';
+import { useCodingAgent, CodingContext, FileModificationEvent } from './hooks/useCodingAgent';
 import { useMCP } from './hooks/useMCP';
+import { getElectronAPI } from './hooks/useElectronAPI';
 import type { MCPServerConfig } from './types/mcp';
 import { GoogleGenAI } from '@google/genai'; // Keep for voice streaming
 import {
@@ -76,6 +77,7 @@ import {
 } from 'lucide-react';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
+import { generateSourcePatch, SourcePatch } from './utils/generateSourcePatch';
 
 // --- Helper Functions ---
 
@@ -162,811 +164,7 @@ Examples:
   }
 }
 
-// Generate source code patch for a UI change
-interface SourcePatch {
-  filePath: string;
-  originalContent: string;
-  patchedContent: string;
-  lineNumber: number;
-  // Metadata about how the patch was generated
-  generatedBy?: 'fast-apply' | 'gemini' | 'fast-path';
-  durationMs?: number;
-}
-
-async function generateSourcePatch(
-  element: SelectedElement,
-  cssChanges: Record<string, string>,
-  providerConfig: { modelId: string; providers: ProviderConfig[] },
-  projectPath?: string,
-  userRequest?: string,
-  textChange?: { oldText: string; newText: string },
-  srcChange?: { oldSrc: string; newSrc: string }
-): Promise<SourcePatch | null> {
-  console.log('='.repeat(60));
-  console.log('[Source Patch] === STARTING PATCH GENERATION ===');
-  console.log('[Source Patch] Input:', {
-    elementTag: element.tagName,
-    hasSourceLocation: !!element.sourceLocation,
-    sourceFile: element.sourceLocation?.sources?.[0]?.file,
-    sourceLine: element.sourceLocation?.sources?.[0]?.line,
-    cssChanges: Object.keys(cssChanges).length > 0 ? cssChanges : 'none',
-    projectPath: projectPath || 'NOT SET',
-    userRequest: userRequest?.substring(0, 50) || 'none',
-    modelId: providerConfig.modelId,
-    hasSrcChange: !!srcChange,
-  });
-  console.log('='.repeat(60));
-
-  if (!element.sourceLocation?.sources?.[0]) {
-    console.log('[Source Patch] ❌ ABORT: No source location available in element');
-    console.log('[Source Patch] element.sourceLocation =', JSON.stringify(element.sourceLocation, null, 2));
-    return null;
-  }
-
-  const source = element.sourceLocation.sources[0];
-  let filePath = source.file;
-  console.log('[Source Patch] Original source file:', filePath, 'line:', source.line);
-
-  // Convert URL-style or relative paths to actual file system paths
-  // Source maps can return:
-  // - "//localhost:3000/src/App.tsx" (protocol-relative URL)
-  // - "/src/App.tsx" (absolute path from server root)
-  // - "localhost:3000/src/App.tsx" (URL without protocol)
-  // - "/Users/.../src/App.tsx" (already absolute filesystem path)
-
-  // Path needs resolution if it's not already an absolute filesystem path
-  const isAbsoluteFilesystemPath = filePath.startsWith('/Users/') ||
-                                    filePath.startsWith('/home/') ||
-                                    filePath.startsWith('/var/') ||
-                                    /^[A-Z]:\\/.test(filePath); // Windows paths like C:\
-
-  // Always clean up the path, even if we don't have a project path to resolve against
-  let relativePath = filePath;
-
-  // Remove localhost URL prefix if present
-  const urlMatch = relativePath.match(/localhost:\d+\/(.+)$/);
-  if (urlMatch) {
-    relativePath = urlMatch[1];
-  }
-
-  // Remove leading slashes to get relative path
-  relativePath = relativePath.replace(/^\/+/, '');
-
-  // Remove query strings (Vite cache busting like ?t=1234567890)
-  relativePath = relativePath.split('?')[0];
-
-  console.log('[Source Patch] Cleaned path:', relativePath);
-
-  console.log('[Source Patch] Path analysis:', { isAbsoluteFilesystemPath, relativePath, projectPath: projectPath || 'NOT SET' });
-
-  if (!isAbsoluteFilesystemPath) {
-    if (projectPath) {
-      // Combine with project path
-      filePath = `${projectPath}/${relativePath}`;
-      console.log('[Source Patch] ✓ Full path with project:', filePath);
-    } else if (window.electronAPI?.files?.getCwd) {
-      // Fallback: try to get current working directory from Electron
-      console.log('[Source Patch] No projectPath, trying getCwd fallback...');
-      const cwdResult = await window.electronAPI.files.getCwd();
-      console.log('[Source Patch] getCwd result:', cwdResult);
-      if (cwdResult.success && cwdResult.data) {
-        filePath = `${cwdResult.data}/${relativePath}`;
-        console.log('[Source Patch] ✓ Full path with CWD fallback:', filePath);
-      } else {
-        console.log('[Source Patch] ❌ ABORT: getCwd failed:', cwdResult.error);
-        return null;
-      }
-    } else {
-      console.log('[Source Patch] ❌ ABORT: No projectPath AND no getCwd API');
-      return null;
-    }
-  } else {
-    console.log('[Source Patch] ✓ Path is already absolute:', filePath);
-  }
-
-  // SAFETY: Prevent patching the app's own source files (ai-cluso directory)
-  // This prevents corrupting the running application
-  if (filePath.includes('/ai-cluso/') && !filePath.includes('/ai-cluso/website/')) {
-    console.log('[Source Patch] ❌ ABORT: BLOCKED - Cannot patch app source files:', filePath);
-    return null;
-  }
-
-  // Read the source file
-  if (!window.electronAPI?.files?.readFile) {
-    console.log('[Source Patch] ❌ ABORT: File API (readFile) not available');
-    return null;
-  }
-
-  console.log('[Source Patch] Reading source file:', filePath);
-  const fileResult = await window.electronAPI.files.readFile(filePath);
-  if (!fileResult.success || !fileResult.data) {
-    console.log('[Source Patch] ❌ ABORT: Failed to read source file');
-    console.log('[Source Patch] Error:', fileResult.error);
-    console.log('[Source Patch] Result:', JSON.stringify(fileResult, null, 2));
-    return null;
-  }
-
-  console.log('[Source Patch] ✓ File read successfully, length:', fileResult.data.length);
-  const originalContent = fileResult.data;
-
-  // ⚡ FAST PATH: For simple changes, skip AI and do direct replacement
-  const hasCssChanges = Object.keys(cssChanges).length > 0;
-  const hasTextChange = textChange && textChange.oldText && textChange.newText;
-  const hasSrcChange = srcChange && srcChange.newSrc;
-
-  // ⚡ FAST PATH: For src attribute changes (image replacement)
-  if (hasSrcChange && !hasCssChanges && !hasTextChange) {
-    console.log('[Source Patch] ⚡ FAST PATH: Image src change detected');
-    console.log('[Source Patch] New src:', srcChange.newSrc);
-
-    const lines = originalContent.split('\n');
-    let targetLine = source.line;
-    if (targetLine > lines.length) targetLine = lines.length;
-
-    // Search around the target line for the img element
-    const searchRadius = 15;
-    const startSearch = Math.max(0, targetLine - searchRadius - 1);
-    const endSearch = Math.min(lines.length, targetLine + searchRadius);
-
-    let patchedContent = originalContent;
-    let replaced = false;
-
-    for (let i = startSearch; i < endSearch && !replaced; i++) {
-      const line = lines[i];
-
-      // Look for <img with src attribute
-      if (/<img\s/i.test(line) || /src\s*=/i.test(line)) {
-        console.log('[Source Patch] ⚡ Found potential img at line', i + 1, ':', line.substring(0, 60));
-
-        // Try to replace src attribute
-        // Pattern 1: src="..." or src='...'
-        const srcQuoteMatch = line.match(/src\s*=\s*(['"])([^'"]*)\1/);
-        // Pattern 2: src={...} (JSX expression)
-        const srcJsxMatch = line.match(/src\s*=\s*\{([^}]*)\}/);
-
-        if (srcQuoteMatch) {
-          const quote = srcQuoteMatch[1];
-          const newLine = line.replace(srcQuoteMatch[0], `src=${quote}${srcChange.newSrc}${quote}`);
-          lines[i] = newLine;
-          replaced = true;
-          console.log('[Source Patch] ⚡ Replaced quoted src attribute');
-        } else if (srcJsxMatch) {
-          // For JSX, wrap the new src in quotes
-          const newLine = line.replace(srcJsxMatch[0], `src="${srcChange.newSrc}"`);
-          lines[i] = newLine;
-          replaced = true;
-          console.log('[Source Patch] ⚡ Replaced JSX src expression');
-        }
-
-        if (replaced) {
-          patchedContent = lines.join('\n');
-        }
-      }
-    }
-
-    if (replaced && patchedContent !== originalContent) {
-      console.log('[Source Patch] ⚡ FAST PATH SUCCESS - replaced img src directly');
-      return {
-        filePath,
-        originalContent,
-        patchedContent,
-        lineNumber: source.line,
-        generatedBy: 'fast-path',
-      };
-    } else {
-      console.log('[Source Patch] ⚡ Src fast path failed - falling back to AI');
-    }
-  }
-
-  // Fast path for text-only changes
-  if (hasTextChange && !hasCssChanges) {
-    console.log('[Source Patch] ⚡ FAST PATH: Simple text change detected');
-    console.log('[Source Patch] Old text:', textChange.oldText.substring(0, 50));
-    console.log('[Source Patch] New text:', textChange.newText.substring(0, 50));
-
-    // Try to find and replace the text in JSX context
-    // Look for patterns like >OldText< or ">OldText" or 'OldText'
-    const escapedOld = textChange.oldText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const patterns = [
-      // JSX text content: >OldText< or >{`OldText`}< or >{oldText}<
-      new RegExp(`(>\\s*)${escapedOld}(\\s*<)`, 'g'),
-      // String literals in JSX: "OldText" or 'OldText'
-      new RegExp(`(['"])${escapedOld}\\1`, 'g'),
-      // Template literals: \`OldText\`
-      new RegExp(`(\`)${escapedOld}(\`)`, 'g'),
-    ];
-
-    let patchedContent = originalContent;
-    let replaced = false;
-
-    for (const pattern of patterns) {
-      if (pattern.test(patchedContent)) {
-        patchedContent = patchedContent.replace(pattern, (match, p1, p2) => {
-          console.log('[Source Patch] ⚡ Found match:', match.substring(0, 50));
-          return `${p1}${textChange.newText}${p2 || p1}`;
-        });
-        replaced = true;
-        break;
-      }
-    }
-
-    if (replaced && patchedContent !== originalContent) {
-      console.log('[Source Patch] ⚡ FAST PATH SUCCESS - replaced text directly');
-      console.log('[Source Patch] Original length:', originalContent.length);
-      console.log('[Source Patch] Patched length:', patchedContent.length);
-      return {
-        filePath,
-        originalContent,
-        patchedContent,
-        lineNumber: source.line,
-        generatedBy: 'fast-path',
-      };
-    } else {
-      console.log('[Source Patch] ⚡ Fast path failed - falling back to AI');
-    }
-  }
-
-  // ⚡ FAST PATH: For CSS-only changes, modify style prop directly
-  if (hasCssChanges && (!textChange || !textChange.newText)) {
-    console.log('[Source Patch] ⚡ FAST PATH: CSS-only change detected');
-    console.log('[Source Patch] CSS changes:', cssChanges);
-
-    const lines = originalContent.split('\n');
-    let targetLine = source.line;
-
-    // Clamp target line to file length
-    if (targetLine > lines.length) {
-      targetLine = lines.length;
-    }
-
-    // Build the style object string for React
-    const styleEntries = Object.entries(cssChanges)
-      .map(([prop, val]) => `${prop}: '${val}'`)
-      .join(', ');
-    const styleObjStr = `{ ${styleEntries} }`;
-
-    // Search around the target line for the element's opening tag
-    // Use larger radius since source maps can be inaccurate
-    const searchRadius = 30;
-    const startSearch = Math.max(0, targetLine - searchRadius - 1);
-    const endSearch = Math.min(lines.length, targetLine + searchRadius);
-
-    let patchedContent = originalContent;
-    let replaced = false;
-
-    // Try to find the element by tag name AND class/id (must match both for specificity)
-    const tagName = element.tagName?.toLowerCase();
-    const className = element.className?.split(' ')[0]; // First class
-
-    console.log('[Source Patch] ⚡ CSS Fast Path searching for:');
-    console.log('[Source Patch]   tagName:', tagName);
-    console.log('[Source Patch]   className:', className);
-    console.log('[Source Patch]   targetLine:', targetLine);
-    console.log('[Source Patch]   searchRange:', startSearch + 1, 'to', endSearch);
-    const elementId = element.id;
-
-    for (let i = startSearch; i < endSearch && !replaced; i++) {
-      const line = lines[i];
-
-      // Look for opening JSX tag that matches our element
-      // Pattern: <tagName or <TagName (for components)
-      const tagPattern = new RegExp(`<${tagName}[\\s>]`, 'i');
-      const classPattern = className ? new RegExp(`className=["'\`][^"'\`]*\\b${className}\\b`) : null;
-      const idPattern = elementId ? new RegExp(`id=["'\`]${elementId}["'\`]`) : null;
-
-      // REQUIRE tag name match PLUS class or id for specificity
-      // This prevents matching wrong elements with same tag
-      const hasTag = tagPattern.test(line);
-      const hasClass = classPattern && classPattern.test(line);
-      const hasId = idPattern && idPattern.test(line);
-
-      // Must match: (tag + class) OR (tag + id) OR (just id if no tag on same line)
-      // If no class/id provided, we CANNOT use fast path (too ambiguous)
-      if (!className && !elementId) {
-        console.log('[Source Patch] ⚡ No class or id - skipping fast path (too ambiguous)');
-        break;
-      }
-      const isMatch = (hasTag && hasClass) || (hasTag && hasId) || (hasId && !hasTag);
-
-      if (isMatch) {
-        console.log('[Source Patch] ⚡ Found element at line', i + 1, ':', line.substring(0, 60));
-
-        // Check if style prop already exists
-        const styleExistsMatch = line.match(/style=\{(\{[^}]*\})\}/);
-        const styleStringMatch = line.match(/style="([^"]*)"/);
-
-        if (styleExistsMatch) {
-          // Merge into existing style object: style={{ existing }} -> style={{ existing, new }}
-          const existingStyle = styleExistsMatch[1];
-
-          // Check if properties already exist - only add new ones
-          const newEntries = Object.entries(cssChanges)
-            .filter(([prop]) => !existingStyle.includes(prop))
-            .map(([prop, val]) => `${prop}: '${val}'`)
-            .join(', ');
-
-          if (newEntries) {
-            const mergedStyle = existingStyle.replace(/\s*\}$/, '') + ', ' + newEntries + ' }';
-            const newLine = line.replace(styleExistsMatch[0], `style={${mergedStyle}}`);
-            lines[i] = newLine;
-            replaced = true;
-            console.log('[Source Patch] ⚡ Merged into existing style prop');
-          } else {
-            console.log('[Source Patch] ⚡ Style properties already exist - no change needed');
-            replaced = true; // Mark as handled to skip AI
-          }
-        } else if (styleStringMatch) {
-          // Convert string style to object and merge: style="color: red" -> style={{ color: 'red', new }}
-          const existingCss = styleStringMatch[1];
-          const existingEntries = existingCss.split(';')
-            .filter(s => s.trim())
-            .map(s => {
-              const [prop, val] = s.split(':').map(x => x.trim());
-              const camelProp = prop.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-              return `${camelProp}: '${val}'`;
-            })
-            .join(', ');
-          const mergedStyle = existingEntries ? `{ ${existingEntries}, ${styleEntries} }` : styleObjStr;
-          const newLine = line.replace(styleStringMatch[0], `style={${mergedStyle}}`);
-          lines[i] = newLine;
-          replaced = true;
-          console.log('[Source Patch] ⚡ Converted string style and merged');
-        } else {
-          // No style prop exists - add one after the tag name
-          // Find position right after <tagName or after className/id
-          const insertMatch = line.match(new RegExp(`(<${tagName})([\\s>])`, 'i'));
-          if (insertMatch) {
-            const newLine = line.replace(
-              insertMatch[0],
-              `${insertMatch[1]} style={${styleObjStr}}${insertMatch[2]}`
-            );
-            lines[i] = newLine;
-            replaced = true;
-            console.log('[Source Patch] ⚡ Added new style prop');
-          }
-        }
-
-        if (replaced) {
-          patchedContent = lines.join('\n');
-        }
-      }
-    }
-
-    if (replaced && patchedContent !== originalContent) {
-      console.log('[Source Patch] ⚡ FAST PATH SUCCESS - modified style directly');
-      return {
-        filePath,
-        originalContent,
-        patchedContent,
-        lineNumber: source.line,
-        generatedBy: 'fast-path',
-      };
-    } else {
-      console.log('[Source Patch] ⚡ CSS fast path failed - falling back to AI');
-    }
-  }
-
-  // ⚡ FAST PATH: Combined text + CSS changes
-  if (hasTextChange && hasCssChanges) {
-    console.log('[Source Patch] ⚡ FAST PATH: Combined text + CSS change detected');
-
-    let patchedContent = originalContent;
-    let textReplaced = false;
-    let cssReplaced = false;
-
-    // Step 1: Apply text change
-    const escapedOld = textChange.oldText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const textPatterns = [
-      new RegExp(`(>\\s*)${escapedOld}(\\s*<)`, 'g'),
-      new RegExp(`(['"])${escapedOld}\\1`, 'g'),
-      new RegExp(`(\`)${escapedOld}(\`)`, 'g'),
-    ];
-
-    for (const pattern of textPatterns) {
-      if (pattern.test(patchedContent)) {
-        patchedContent = patchedContent.replace(pattern, (match, p1, p2) => {
-          return `${p1}${textChange.newText}${p2 || p1}`;
-        });
-        textReplaced = true;
-        console.log('[Source Patch] ⚡ Text replacement successful');
-        break;
-      }
-    }
-
-    // Step 2: Apply CSS changes to the (possibly modified) content
-    const lines = patchedContent.split('\n');
-    let targetLine = source.line;
-    if (targetLine > lines.length) targetLine = lines.length;
-
-    const styleEntries = Object.entries(cssChanges)
-      .map(([prop, val]) => `${prop}: '${val}'`)
-      .join(', ');
-    const styleObjStr = `{ ${styleEntries} }`;
-
-    const searchRadius = 10;
-    const startSearch = Math.max(0, targetLine - searchRadius - 1);
-    const endSearch = Math.min(lines.length, targetLine + searchRadius);
-
-    const tagName = element.tagName?.toLowerCase();
-    const className = element.className?.split(' ')[0];
-    const elementId = element.id;
-
-    for (let i = startSearch; i < endSearch && !cssReplaced; i++) {
-      const line = lines[i];
-      const tagPattern = new RegExp(`<${tagName}[\\s>]`, 'i');
-      const classPattern = className ? new RegExp(`className=["'\`][^"'\`]*\\b${className}\\b`) : null;
-      const idPattern = elementId ? new RegExp(`id=["'\`]${elementId}["'\`]`) : null;
-
-      const isMatch = tagPattern.test(line) ||
-                      (classPattern && classPattern.test(line)) ||
-                      (idPattern && idPattern.test(line));
-
-      if (isMatch) {
-        const styleExistsMatch = line.match(/style=\{(\{[^}]*\})\}/);
-        const styleStringMatch = line.match(/style="([^"]*)"/);
-
-        if (styleExistsMatch) {
-          const existingStyle = styleExistsMatch[1];
-          const mergedStyle = existingStyle.replace(/\s*\}$/, '') + ', ' + styleEntries + ' }';
-          lines[i] = line.replace(styleExistsMatch[0], `style={${mergedStyle}}`);
-          cssReplaced = true;
-        } else if (styleStringMatch) {
-          const existingCss = styleStringMatch[1];
-          const existingEntries = existingCss.split(';')
-            .filter(s => s.trim())
-            .map(s => {
-              const [prop, val] = s.split(':').map(x => x.trim());
-              const camelProp = prop.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-              return `${camelProp}: '${val}'`;
-            })
-            .join(', ');
-          const mergedStyle = existingEntries ? `{ ${existingEntries}, ${styleEntries} }` : styleObjStr;
-          lines[i] = line.replace(styleStringMatch[0], `style={${mergedStyle}}`);
-          cssReplaced = true;
-        } else {
-          const insertMatch = line.match(new RegExp(`(<${tagName})([\\s>])`, 'i'));
-          if (insertMatch) {
-            lines[i] = line.replace(insertMatch[0], `${insertMatch[1]} style={${styleObjStr}}${insertMatch[2]}`);
-            cssReplaced = true;
-          }
-        }
-      }
-    }
-
-    if (cssReplaced) {
-      patchedContent = lines.join('\n');
-    }
-
-    // Success if at least one change was applied
-    if ((textReplaced || cssReplaced) && patchedContent !== originalContent) {
-      console.log('[Source Patch] ⚡ FAST PATH SUCCESS - combined changes applied');
-      console.log('[Source Patch] Text replaced:', textReplaced, '| CSS replaced:', cssReplaced);
-      return {
-        filePath,
-        originalContent,
-        patchedContent,
-        lineNumber: source.line,
-        generatedBy: 'fast-path',
-      };
-    } else {
-      console.log('[Source Patch] ⚡ Combined fast path failed - falling back to AI');
-    }
-  }
-
-  // Get the appropriate provider for the model (for AI-based patching)
-  const providerType = getProviderForModel(providerConfig.modelId);
-  const provider = providerConfig.providers.find(p => p.id === providerType);
-
-  if (!provider?.apiKey) {
-    console.log('[Source Patch] No API key available for provider:', providerType);
-    return null;
-  }
-
-  const google = createGoogleGenerativeAI({ apiKey: provider.apiKey });
-
-  // Convert CSS changes to inline style or className changes
-  const cssString = hasCssChanges
-    ? Object.entries(cssChanges)
-        .map(([prop, val]) => {
-          // Convert camelCase to kebab-case for style prop
-          const kebabProp = prop.replace(/([A-Z])/g, '-$1').toLowerCase();
-          return `${kebabProp}: ${val}`;
-        })
-        .join('; ')
-    : '';
-
-  // Extract only a relevant portion of the file around the target line
-  // This prevents exceeding Gemini's context limits for large files
-  const lines = originalContent.split('\n');
-  let targetLine = source.line;
-
-  // CRITICAL FIX: Source maps from Vite/HMR can report line numbers beyond file length
-  // This happens when the dev server adds transforms. Clamp to actual file length.
-  if (targetLine > lines.length) {
-    console.log('[Source Patch] ⚠️ Source map line', targetLine, 'exceeds file length', lines.length);
-    console.log('[Source Patch] Clamping target to end of file');
-    targetLine = lines.length;
-  }
-
-  const contextLines = 100; // Lines before and after target
-  const startLine = Math.max(0, targetLine - contextLines);
-  const endLine = Math.min(lines.length, targetLine + contextLines);
-
-  // Safety check: ensure we get a valid range
-  if (startLine >= endLine) {
-    console.log('[Source Patch] ❌ ABORT: Invalid line range:', startLine, 'to', endLine);
-    return null;
-  }
-
-  const codeSnippet = lines.slice(startLine, endLine).join('\n');
-
-  // Sanity check: ensure we have meaningful content
-  if (!codeSnippet || codeSnippet.trim().length < 10) {
-    console.log('[Source Patch] ❌ ABORT: Code snippet is empty or too small');
-    console.log('[Source Patch] Snippet length:', codeSnippet?.length || 0);
-    return null;
-  }
-
-  console.log('[Source Patch] Extracting lines', startLine + 1, 'to', endLine, 'of', lines.length, 'total');
-  console.log('[Source Patch] Snippet length:', codeSnippet.length, 'chars');
-  console.log('[Source Patch] Has CSS changes:', hasCssChanges, 'User request:', userRequest);
-
-  // Build change description based on what we're modifying
-  let changeDescription = '';
-  if (hasCssChanges && userRequest) {
-    changeDescription = `CSS changes to apply: ${cssString}\n\nUser's request: "${userRequest}"`;
-  } else if (hasCssChanges) {
-    changeDescription = `CSS changes to apply: ${cssString}`;
-  } else if (userRequest) {
-    changeDescription = `User's request: "${userRequest}"`;
-  } else {
-    console.log('[Source Patch] No changes specified, skipping');
-    return null;
-  }
-
-  // Determine if we need to search by element characteristics (line number unreliable)
-  const lineNumberReliable = source.line <= lines.length;
-  const searchByElement = !lineNumberReliable || element.text || element.className;
-
-  // Build instructions based on the type of change
-  let instructions = '';
-  if (searchByElement) {
-    instructions = `1. SEARCH the snippet for a <${element.tagName}> element`;
-    if (element.text) {
-      instructions += ` containing text "${element.text.substring(0, 50)}"`;
-    }
-    if (element.className) {
-      instructions += ` with class "${element.className.split(' ')[0]}"`;
-    }
-  } else {
-    instructions = `1. Find the JSX element near line ${targetLine} (should be near the middle of the snippet)`;
-  }
-
-  if (hasCssChanges) {
-    instructions += `
-2. MODIFY the existing element's opening tag to add/merge a style prop - DO NOT create a duplicate element
-3. If using Tailwind, convert to Tailwind classes where appropriate
-4. The result should have the SAME NUMBER of elements - only the style prop changes`;
-  }
-  if (userRequest) {
-    // Check if this looks like a text change (quoted text or explicit text change)
-    const isTextChange = /^["'][^"']+["']$/.test(userRequest.trim()) ||
-                         /(?:change|set|update)\s+(?:text|label|content|title)/i.test(userRequest) ||
-                         /text\s*(?:to|:|=)/i.test(userRequest);
-    // Check if this is a remove/delete request
-    const isRemoveRequest = /(?:remove|delete|hide)\s+(?:this|that|it|the)/i.test(userRequest);
-    if (isRemoveRequest) {
-      instructions += `
-2. To remove/delete/hide the element, add style={{ display: 'none' }} to it
-3. Or if the user wants it fully removed, wrap it in {false && <element>...</element>}`;
-    } else if (isTextChange || !hasCssChanges) {
-      instructions += `
-2. Update the text content of the element based on the user's request
-3. If the request is quoted text like "New Text", use that as the new content`;
-    }
-  }
-  instructions += `
-${hasCssChanges ? '5' : '3'}. Output ONLY the modified snippet (lines ${startLine + 1} to ${endLine}), no explanations
-${hasCssChanges ? '6' : '4'}. Preserve exact indentation and formatting
-${hasCssChanges ? '7' : '5'}. CRITICAL: Do NOT duplicate elements - modify in-place`;
-
-  const prompt = `You are a React/TypeScript code modifier. Given a code snippet and requested changes, output ONLY the modified snippet.
-
-Source file: ${source.file}
-${lineNumberReliable ? `Target line in original file: ${targetLine}` : '(Line number from source map may be inaccurate - search by element characteristics)'}
-Snippet shows lines ${startLine + 1} to ${endLine}
-
-Code snippet:
-\`\`\`
-${codeSnippet}
-\`\`\`
-
-Element being modified:
-- Tag: ${element.tagName}
-- Classes: ${element.className || 'none'}
-- ID: ${element.id || 'none'}
-- Current text content: ${element.text?.substring(0, 100) || 'none'}
-
-${changeDescription}
-
-Instructions:
-${instructions}
-
-Output the modified code snippet:`;
-
-  // ⚡ PRO FEATURE: Try Fast Apply (local LLM) first for instant code merging
-  if (window.electronAPI?.fastApply) {
-    try {
-      console.log('[Source Patch] ⚡ Checking Fast Apply availability...');
-      const fastApplyStatus = await window.electronAPI.fastApply.getStatus();
-
-      // Check if a model is selected (it will load on-demand during apply)
-      if (fastApplyStatus.activeModel) {
-        console.log('[Source Patch] ⚡ Fast Apply has active model:', fastApplyStatus.activeModel, '- using local inference...');
-
-        // Check if this is a removal/deletion request - provide specific code guidance
-        const isRemoveRequest = userRequest && /(?:remove|delete|hide)\s+(?:this|that|it|the|element)?/i.test(userRequest);
-
-        // Build the update for Fast Apply - show FIND → REPLACE pattern
-        // The model needs to see what to find AND what to replace it with
-        let updateDescription = '';
-        const classAttr = element.className ? ` className="${element.className.split(' ')[0]}"` : '';
-        const originalTag = `<${element.tagName}${classAttr}>`;
-
-        if (isRemoveRequest) {
-          // For removal, show wrapping the element with {false && ...}
-          updateDescription = `FIND: ${originalTag}
-REPLACE WITH: {false && ${originalTag}...${element.tagName}>}`;
-        } else if (hasCssChanges) {
-          // Build React style object string
-          const styleObjEntries = Object.entries(cssChanges)
-            .map(([prop, val]) => `${prop}: '${val}'`)
-            .join(', ');
-          const newTag = `<${element.tagName} style={{ ${styleObjEntries} }}${classAttr}>`;
-          // Show explicit FIND → REPLACE to avoid duplication
-          updateDescription = `FIND: ${originalTag}
-REPLACE WITH: ${newTag}`;
-        } else {
-          updateDescription = userRequest || '';
-        }
-
-        const fastResult = await window.electronAPI.fastApply.apply(codeSnippet, updateDescription);
-
-        if (fastResult.success && fastResult.code) {
-          console.log('[Source Patch] ⚡ Fast Apply SUCCESS! Duration:', fastResult.durationMs, 'ms');
-
-          // CRITICAL: Validate that Fast Apply returned actual code, not prose explanation
-          // The model sometimes falls back to explaining instead of modifying
-          const proseIndicators = [
-            /^The provided/i,
-            /^I cannot/i,
-            /^I apologize/i,
-            /^Unfortunately/i,
-            /^This (code|update|change)/i,
-            /^Here'?s (how|an example)/i,
-            /does not make sense/i,
-            /is not (a )?valid/i,
-            /you (should|can|need to)/i,
-          ];
-
-          const firstLine = fastResult.code.trim().split('\n')[0];
-          const isProse = proseIndicators.some(p => p.test(firstLine));
-
-          if (isProse) {
-            console.log('[Source Patch] ⚡ Fast Apply returned PROSE instead of code - rejecting');
-            console.log('[Source Patch] First line:', firstLine.substring(0, 100));
-            console.log('[Source Patch] Falling back to Gemini...');
-          } else {
-            // Reconstruct the full file with the patched snippet
-            const patchedLines = fastResult.code.split('\n');
-            const beforeLines = lines.slice(0, startLine);
-            const afterLines = lines.slice(endLine);
-            const fullPatchedContent = [...beforeLines, ...patchedLines, ...afterLines].join('\n');
-
-            // Validate the patched content
-            if (fullPatchedContent !== originalContent) {
-              console.log('='.repeat(60));
-              console.log('[Source Patch] ⚡ === FAST APPLY PATCH GENERATED ===');
-              console.log('[Source Patch] Output:', {
-                filePath,
-                originalLength: originalContent.length,
-                patchedLength: fullPatchedContent.length,
-                lineNumber: source.line,
-                durationMs: fastResult.durationMs,
-              });
-              console.log('='.repeat(60));
-              return {
-                filePath,
-                originalContent,
-                patchedContent: fullPatchedContent,
-                lineNumber: source.line,
-                generatedBy: 'fast-apply',
-                durationMs: fastResult.durationMs,
-              };
-            } else {
-              console.log('[Source Patch] ⚡ Fast Apply returned unchanged content, falling back to Gemini');
-            }
-          }
-        } else {
-          console.log('[Source Patch] ⚡ Fast Apply failed:', fastResult.error || 'Unknown error');
-          console.log('[Source Patch] Falling back to Gemini...');
-        }
-      } else {
-        console.log('[Source Patch] Fast Apply not available (no model selected), using Gemini');
-      }
-    } catch (fastApplyError) {
-      console.log('[Source Patch] Fast Apply error:', fastApplyError);
-      console.log('[Source Patch] Falling back to Gemini...');
-    }
-  }
-
-  try {
-    console.log('[Source Patch] Calling Gemini for code modification...');
-    const result = await generateText({
-      model: google('gemini-2.0-flash-001'),
-      prompt,
-      maxTokens: 8000,
-    });
-
-    console.log('[Source Patch] Gemini response received, length:', result.text.length);
-    let patchedSnippet = result.text.trim();
-    // Remove markdown code blocks if present
-    const codeMatch = patchedSnippet.match(/```(?:tsx?|jsx?|typescript|javascript)?\s*([\s\S]*?)```/);
-    if (codeMatch) {
-      patchedSnippet = codeMatch[1].trim();
-      console.log('[Source Patch] Extracted code from markdown block');
-    }
-
-    // Validate that Gemini returned actual code, not prose explanation
-    const proseIndicators = [
-      /^The provided/i,
-      /^I cannot/i,
-      /^I apologize/i,
-      /^Unfortunately/i,
-      /^This (code|update|change)/i,
-      /^Here'?s (how|an example)/i,
-      /does not make sense/i,
-      /is not (a )?valid/i,
-      /you (should|can|need to)/i,
-    ];
-
-    const firstLine = patchedSnippet.split('\n')[0];
-    const isProse = proseIndicators.some(p => p.test(firstLine));
-
-    if (isProse) {
-      console.log('[Source Patch] ❌ Gemini returned PROSE instead of code - aborting');
-      console.log('[Source Patch] First line:', firstLine.substring(0, 100));
-      return null;
-    }
-
-    // Reconstruct the full file with the patched snippet
-    const patchedLines = patchedSnippet.split('\n');
-    const beforeLines = lines.slice(0, startLine);
-    const afterLines = lines.slice(endLine);
-    const fullPatchedContent = [...beforeLines, ...patchedLines, ...afterLines].join('\n');
-
-    console.log('='.repeat(60));
-    console.log('[Source Patch] ✅ === PATCH GENERATED SUCCESSFULLY ===');
-    console.log('[Source Patch] Output:', {
-      filePath,
-      originalLength: originalContent.length,
-      patchedLength: fullPatchedContent.length,
-      lineNumber: source.line,
-      changed: originalContent !== fullPatchedContent,
-    });
-    console.log('='.repeat(60));
-    return {
-      filePath,  // Use resolved filesystem path, not the source map URL
-      originalContent,
-      patchedContent: fullPatchedContent,
-      lineNumber: source.line,
-      generatedBy: 'gemini',
-    };
-  } catch (error) {
-    console.error('[Source Patch] ❌ EXCEPTION during generation:', error);
-    return null;
-  }
-}
+// generateSourcePatch moved to utils/generateSourcePatch.ts
 
 // Format relative time (e.g., "2m ago", "1h ago", "just now")
 function formatRelativeTime(date: Date): string {
@@ -1338,6 +536,9 @@ export default function App() {
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
   const selectedElementRef = useRef<SelectedElement | null>(null);
   useEffect(() => { selectedElementRef.current = selectedElement; }, [selectedElement]);
+
+  // Ref to hold file modification handler (allows late binding after addEditedFile is defined)
+  const fileModificationHandlerRef = useRef<(event: FileModificationEvent) => void>(() => {});
   const [hoveredElement, setHoveredElement] = useState<{ element: SelectedElement; rect: { top: number; left: number; width: number; height: number } } | null>(null);
   const [screenshotElement, setScreenshotElement] = useState<SelectedElement | null>(null);
   const [capturedScreenshot, setCapturedScreenshot] = useState<string | null>(null);
@@ -1657,6 +858,10 @@ export default function App() {
   } = useCodingAgent({
     mcpTools: mcpToolDefinitions,
     callMCPTool,
+    onFileModified: useCallback((event: FileModificationEvent) => {
+      // Delegate to ref (allows late binding after addEditedFile is defined)
+      fileModificationHandlerRef.current(event);
+    }, []),
   });
 
   // Stash Confirmation Dialog State
@@ -1682,6 +887,9 @@ export default function App() {
     deletions: number;
     undoCode?: string;
     timestamp: Date;
+    // For file-based undo (tool modifications)
+    originalContent?: string;
+    isFileModification?: boolean;
   }
   const [editedFiles, setEditedFiles] = useState<EditedFile[]>([]);
   const [isEditedFilesDrawerOpen, setIsEditedFilesDrawerOpen] = useState(false);
@@ -3875,7 +3083,14 @@ export default function App() {
   }, [showThinkingPopover]);
 
   // Edited files management
-  const addEditedFile = useCallback((file: { path: string; additions?: number; deletions?: number; undoCode?: string }) => {
+  const addEditedFile = useCallback((file: {
+    path: string;
+    additions?: number;
+    deletions?: number;
+    undoCode?: string;
+    originalContent?: string;
+    isFileModification?: boolean;
+  }) => {
     const fileName = file.path.split('/').pop() || file.path;
     setEditedFiles(prev => {
       // Check if file already exists, update it
@@ -3887,6 +3102,9 @@ export default function App() {
           additions: updated[existing].additions + (file.additions || 0),
           deletions: updated[existing].deletions + (file.deletions || 0),
           undoCode: file.undoCode || updated[existing].undoCode,
+          // Keep original content from first modification for undo
+          originalContent: updated[existing].originalContent || file.originalContent,
+          isFileModification: file.isFileModification || updated[existing].isFileModification,
           timestamp: new Date()
         };
         return updated;
@@ -3897,14 +3115,35 @@ export default function App() {
         additions: file.additions || 0,
         deletions: file.deletions || 0,
         undoCode: file.undoCode,
+        originalContent: file.originalContent,
+        isFileModification: file.isFileModification,
         timestamp: new Date()
       }];
     });
   }, []);
 
-  const undoFileEdit = useCallback((path: string) => {
+  const undoFileEdit = useCallback(async (path: string) => {
     const file = editedFiles.find(f => f.path === path);
-    if (file?.undoCode) {
+    if (!file) return;
+
+    // Handle file-based undo (restore original content)
+    if (file.isFileModification && file.originalContent !== undefined) {
+      console.log('[Undo] Restoring file:', path);
+      const { api: electronAPI } = getElectronAPI();
+      if (electronAPI?.files?.writeFile) {
+        const result = await electronAPI.files.writeFile(path, file.originalContent);
+        if (result.success) {
+          console.log('[Undo] File restored successfully');
+          setEditedFiles(prev => prev.filter(f => f.path !== path));
+        } else {
+          console.error('[Undo] Failed to restore file:', result.error);
+        }
+      }
+      return;
+    }
+
+    // Handle DOM-based undo (execute JavaScript in webview)
+    if (file.undoCode) {
       const webview = webviewRefs.current.get(activeTabId);
       if (webview) {
         webview.executeJavaScript(file.undoCode)
@@ -3914,31 +3153,78 @@ export default function App() {
           .catch((err: Error) => console.error('[Undo] Error:', err));
       }
     } else {
-      // No undo code, just remove from list
+      // No undo mechanism, just remove from list
       setEditedFiles(prev => prev.filter(f => f.path !== path));
     }
   }, [editedFiles, activeTabId]);
 
-  const undoAllEdits = useCallback(() => {
+  const undoAllEdits = useCallback(async () => {
     const webview = webviewRefs.current.get(activeTabId);
-    if (!webview) return;
+    const { api: electronAPI } = getElectronAPI();
 
-    // Execute all undo codes in reverse order
+    // Undo in reverse order
     const filesToUndo = [...editedFiles].reverse();
-    Promise.all(
-      filesToUndo
-        .filter(f => f.undoCode)
-        .map(f => webview.executeJavaScript(f.undoCode!).catch(() => {}))
-    ).then(() => {
-      setEditedFiles([]);
-      setIsEditedFilesDrawerOpen(false);
-    });
+
+    for (const file of filesToUndo) {
+      // Handle file-based undo
+      if (file.isFileModification && file.originalContent !== undefined) {
+        if (electronAPI?.files?.writeFile) {
+          await electronAPI.files.writeFile(file.path, file.originalContent).catch(() => {});
+        }
+      } else if (file.undoCode && webview) {
+        // Handle DOM-based undo
+        await webview.executeJavaScript(file.undoCode).catch(() => {});
+      }
+    }
+
+    setEditedFiles([]);
+    setIsEditedFilesDrawerOpen(false);
   }, [editedFiles, activeTabId]);
 
   const keepAllEdits = useCallback(() => {
     setEditedFiles([]);
     setIsEditedFilesDrawerOpen(false);
   }, []);
+
+  // Wire up file modification handler for coding agent tools
+  // This allows write_file, create_file, delete_file to update the edited files drawer
+  useEffect(() => {
+    fileModificationHandlerRef.current = (event: FileModificationEvent) => {
+      console.log('[File Modified] Event:', event.type, event.path);
+
+      // Calculate additions/deletions based on change type
+      let additions = 0;
+      let deletions = 0;
+
+      if (event.type === 'write' && event.originalContent && event.newContent) {
+        const oldLines = event.originalContent.split('\n').length;
+        const newLines = event.newContent.split('\n').length;
+        additions = Math.max(0, newLines - oldLines);
+        deletions = Math.max(0, oldLines - newLines);
+        // If same number of lines, assume modifications
+        if (additions === 0 && deletions === 0) {
+          additions = 1;
+          deletions = 1;
+        }
+      } else if (event.type === 'create' && event.newContent) {
+        additions = event.newContent.split('\n').length;
+      } else if (event.type === 'delete' && event.originalContent) {
+        deletions = event.originalContent.split('\n').length;
+      }
+
+      // Add to edited files drawer with undo capability
+      addEditedFile({
+        path: event.path,
+        additions,
+        deletions,
+        originalContent: event.originalContent,
+        isFileModification: true,
+      });
+
+      // Auto-open the drawer when files are modified by tools
+      setIsEditedFilesDrawerOpen(true);
+    };
+  }, [addEditedFile]);
 
   // Sync Inspector State with Webview
   useEffect(() => {
@@ -5149,7 +4435,13 @@ If you're not sure what the user wants, ask for clarification.
           console.log('[Source Patch] Triggering source patch generation...');
           console.log('[Source Patch] User message:', userMessage.content);
 
-          generateSourcePatch(selectedElement, uiResult.cssChanges, { modelId: selectedModel.id, providers: providerConfigs }, projectPath || undefined, userMessage.content)
+          generateSourcePatch({
+              element: selectedElement,
+              cssChanges: uiResult.cssChanges,
+              providerConfig: { modelId: selectedModel.id, providers: providerConfigs },
+              projectPath: projectPath || undefined,
+              userRequest: userMessage.content,
+            })
             .then(patch => {
               if (patch) {
                 console.log('[Source Patch] Generated patch for:', patch.filePath);
@@ -5550,7 +4842,15 @@ If you're not sure what the user wants, ask for clarification.
     console.log('='.repeat(60));
     // Use refs to get current values (prevents stale closures during async operations)
     const providerConfig = { modelId: selectedModelRef.current.id, providers: providerConfigsRef.current };
-    generateSourcePatch(element, cssChanges, providerConfig, projectPath || undefined, userRequest, textChange, srcChange)
+    generateSourcePatch({
+      element,
+      cssChanges,
+      providerConfig,
+      projectPath: projectPath || undefined,
+      userRequest,
+      textChange,
+      srcChange,
+    })
       .then(patch => {
         console.log('[DOM Approval] Patch generation completed:', { approvalId, success: !!patch });
         setPendingDOMApproval(prev => {

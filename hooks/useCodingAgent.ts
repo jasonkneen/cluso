@@ -387,8 +387,15 @@ To call an MCP tool, use the format: mcp_<serverId>_<toolName>`)
   return parts.join('\n')
 }
 
+// Options for creating coding agent tools
+interface CreateCodingAgentToolsOptions {
+  onFileModified?: (event: FileModificationEvent) => void
+}
+
 // Define tools for the coding agent
-export function createCodingAgentTools(): ToolsMap {
+export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = {}): ToolsMap {
+  const { onFileModified } = options
+
   return {
     // File operations
     read_file: {
@@ -427,8 +434,23 @@ export function createCodingAgentTools(): ToolsMap {
         if (!electronAPI?.files?.writeFile) {
           return { error: 'File operations not available (not in Electron)' }
         }
+        // Read original content for undo capability
+        let originalContent: string | undefined
+        if (electronAPI?.files?.readFile) {
+          const readResult = await electronAPI.files.readFile(path)
+          if (readResult.success) {
+            originalContent = readResult.data
+          }
+        }
         const result = await electronAPI.files.writeFile(path, content)
         if (result.success) {
+          // Notify about file modification for edited files drawer
+          onFileModified?.({
+            type: 'write',
+            path,
+            originalContent,
+            newContent: content,
+          })
           return { success: true, path, bytesWritten: content.length }
         }
         return { error: result.error }
@@ -449,6 +471,12 @@ export function createCodingAgentTools(): ToolsMap {
         }
         const result = await electronAPI.files.createFile(path, content || '')
         if (result.success) {
+          // Notify about file creation for edited files drawer
+          onFileModified?.({
+            type: 'create',
+            path,
+            newContent: content || '',
+          })
           return { success: true, path }
         }
         return { error: result.error }
@@ -466,8 +494,22 @@ export function createCodingAgentTools(): ToolsMap {
         if (!electronAPI?.files?.deleteFile) {
           return { error: 'File operations not available (not in Electron)' }
         }
+        // Read original content for undo capability before deleting
+        let originalContent: string | undefined
+        if (electronAPI?.files?.readFile) {
+          const readResult = await electronAPI.files.readFile(path)
+          if (readResult.success) {
+            originalContent = readResult.data
+          }
+        }
         const result = await electronAPI.files.deleteFile(path)
         if (result.success) {
+          // Notify about file deletion for edited files drawer
+          onFileModified?.({
+            type: 'delete',
+            path,
+            originalContent,
+          })
           return { success: true, path }
         }
         return { error: result.error }
@@ -736,14 +778,23 @@ interface CodingAgentState {
   isProcessing: boolean
 }
 
+// File modification event for tracking edited files
+export interface FileModificationEvent {
+  type: 'write' | 'create' | 'delete'
+  path: string
+  originalContent?: string  // For undo capability
+  newContent?: string
+}
+
 // Hook options
 interface UseCodingAgentOptions {
   mcpTools?: MCPToolDefinition[]
   callMCPTool?: MCPToolCaller
+  onFileModified?: (event: FileModificationEvent) => void  // Callback when files are modified
 }
 
 export function useCodingAgent(options: UseCodingAgentOptions = {}) {
-  const { mcpTools = [], callMCPTool } = options
+  const { mcpTools = [], callMCPTool, onFileModified } = options
 
   const [state, setState] = useState<CodingAgentState>({
     context: {
@@ -757,14 +808,19 @@ export function useCodingAgent(options: UseCodingAgentOptions = {}) {
     isProcessing: false,
   })
 
-  const toolsRef = useRef<ToolsMap>(createCodingAgentTools())
+  // Create tools with the onFileModified callback
+  // Memoize to avoid recreating on every render
+  const codingTools = useMemo(
+    () => createCodingAgentTools({ onFileModified }),
+    [onFileModified]
+  )
 
   // Memoize combined tools (coding agent + MCP)
   const combinedTools = useMemo(() => {
     // DISABLED: MCP tools merging to fix schema issues
     // We now pass MCP tools separately to the AI SDK wrapper
-    return toolsRef.current
-  }, [mcpTools, callMCPTool])
+    return codingTools
+  }, [codingTools, mcpTools, callMCPTool])
 
   // Update context
   const updateContext = useCallback((updates: Partial<CodingContext>) => {
