@@ -471,6 +471,16 @@ document.addEventListener('click', async function(e) {
     ipcRenderer.sendToHost('screenshot-select', payload)
   } else if (isMoveActive) {
     // Move mode - create floating replica
+    // Ignore clicks if overlay already exists (prevents snap-back on drag end)
+    if (moveOverlay) {
+      console.log('[Move] Ignoring click - overlay already exists')
+      return
+    }
+    // Also ignore clicks on the overlay itself
+    if (moveOverlay && (e.target === moveOverlay || moveOverlay.contains(e.target))) {
+      console.log('[Move] Ignoring click on overlay')
+      return
+    }
     e.target.classList.remove('move-hover-target')
     createMoveOverlay(e.target, summary, xpath, sourceLocation)
   }
