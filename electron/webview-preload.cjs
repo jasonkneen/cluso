@@ -43,10 +43,9 @@ let isMoveActive = false
 let multipleMatches = [] // Store multiple AI-selected elements
 let numberBadges = [] // Store number badge elements
 
-// Move mode state
-let moveOverlay = null
-let moveElement = null
-let moveOriginalRect = null
+// Move mode state - support multiple overlays
+let moveOverlays = [] // Array of { overlay, element, originalRect, elementData, positionLabel }
+let activeMoveOverlay = null // Currently being dragged/resized
 let isMoveDragging = false
 let isResizing = false
 let resizeHandle = null
@@ -374,11 +373,16 @@ function getXPath(el) {
   return '/' + parts.join('/')
 }
 
+// Helper to check if element is part of any move overlay
+function isPartOfMoveOverlay(element) {
+  return moveOverlays.some(m => m.overlay === element || m.overlay.contains(element) || m.positionLabel === element)
+}
+
 // Mouse events for inspector
 document.addEventListener('mouseover', function(e) {
   if (!isInspectorActive && !isScreenshotActive && !isMoveActive) return
   if (isEditing) return // Don't highlight while inline editing
-  if (moveOverlay) return // Don't highlight while moving
+  if (isPartOfMoveOverlay(e.target)) return // Don't highlight move overlays
   e.stopPropagation()
 
   if (isInspectorActive) {
@@ -406,7 +410,7 @@ document.addEventListener('mouseover', function(e) {
 document.addEventListener('mouseout', function(e) {
   if (!isInspectorActive && !isScreenshotActive && !isMoveActive) return
   if (isEditing) return // Don't process while inline editing
-  if (moveOverlay) return // Don't process while moving
+  if (isPartOfMoveOverlay(e.target)) return // Don't process move overlays
   e.stopPropagation()
   e.target.classList.remove('inspector-hover-target')
   e.target.classList.remove('screenshot-hover-target')
@@ -470,15 +474,16 @@ document.addEventListener('click', async function(e) {
     console.log('[Inspector] Sending screenshot-select:', payload.element.tagName)
     ipcRenderer.sendToHost('screenshot-select', payload)
   } else if (isMoveActive) {
-    // Move mode - create floating replica
-    // Ignore clicks if overlay already exists (prevents snap-back on drag end)
-    if (moveOverlay) {
-      console.log('[Move] Ignoring click - overlay already exists')
+    // Move mode - create floating replica for multiple elements
+    // Ignore clicks on existing overlays (handled by overlay's own mousedown)
+    if (isPartOfMoveOverlay(e.target)) {
+      console.log('[Move] Ignoring click on existing overlay')
       return
     }
-    // Also ignore clicks on the overlay itself
-    if (moveOverlay && (e.target === moveOverlay || moveOverlay.contains(e.target))) {
-      console.log('[Move] Ignoring click on overlay')
+    // Check if this element already has an overlay
+    const existingOverlay = moveOverlays.find(m => m.element === e.target)
+    if (existingOverlay) {
+      console.log('[Move] Element already has overlay')
       return
     }
     e.target.classList.remove('move-hover-target')
@@ -508,8 +513,7 @@ ipcRenderer.on('set-screenshot-mode', (event, active) => {
   isScreenshotActive = active
   if (active) {
     isInspectorActive = false
-    isMoveActive = false
-    cleanupMoveOverlay()
+    // DON'T disable move mode or cleanup overlays - allow screenshot with moved elements
     if (currentSelected) {
       currentSelected.classList.remove('inspector-selected-target')
       currentSelected = null
@@ -522,13 +526,13 @@ ipcRenderer.on('set-move-mode', (event, active) => {
   isMoveActive = active
   if (active) {
     isInspectorActive = false
-    isScreenshotActive = false
+    // DON'T disable screenshot mode - allow both to work together
     if (currentSelected) {
       currentSelected.classList.remove('inspector-selected-target')
       currentSelected = null
     }
   } else {
-    cleanupMoveOverlay()
+    cleanupAllMoveOverlays()
   }
 })
 
@@ -1093,45 +1097,36 @@ document.addEventListener('keydown', function(e) {
       finishEditing(currentSelected)
       return
     }
-    // Cancel move mode
-    if (moveOverlay) {
-      cleanupMoveOverlay()
+    // Cancel move mode - clear all overlays
+    if (moveOverlays.length > 0) {
+      cleanupAllMoveOverlays()
       ipcRenderer.sendToHost('move-cancelled')
       return
     }
   }
 }, true)
 
-// --- Move Mode Functions ---
-let movePositionLabel = null
-let moveElementData = null
+// --- Move Mode Functions (Multi-overlay support) ---
 
 function createMoveOverlay(element, summary, xpath, sourceLocation) {
-  // Clean up any existing overlay
-  cleanupMoveOverlay()
-
   const rect = element.getBoundingClientRect()
-  moveOriginalRect = {
+  const originalRect = {
     top: rect.top,
     left: rect.left,
     width: rect.width,
     height: rect.height
   }
 
-  // Store element data for later
-  moveElementData = { summary, xpath, sourceLocation }
-  moveElement = element
-
   // Hide the original element (keep layout space)
   element.classList.add('move-original-hidden')
 
   // Create floating overlay
-  moveOverlay = document.createElement('div')
-  moveOverlay.className = 'move-floating-overlay'
-  moveOverlay.style.left = rect.left + 'px'
-  moveOverlay.style.top = rect.top + 'px'
-  moveOverlay.style.width = rect.width + 'px'
-  moveOverlay.style.height = rect.height + 'px'
+  const overlay = document.createElement('div')
+  overlay.className = 'move-floating-overlay'
+  overlay.style.left = rect.left + 'px'
+  overlay.style.top = rect.top + 'px'
+  overlay.style.width = rect.width + 'px'
+  overlay.style.height = rect.height + 'px'
 
   // Clone the element content into the overlay
   const clone = element.cloneNode(true)
@@ -1148,7 +1143,6 @@ function createMoveOverlay(element, summary, xpath, sourceLocation) {
   clone.style.width = '100%'
   clone.style.height = '100%'
   clone.style.display = computedStyle.display
-  // Keep original background styling for seamless appearance
   clone.style.background = computedStyle.background
   clone.style.backgroundColor = computedStyle.backgroundColor
   clone.style.backgroundImage = computedStyle.backgroundImage
@@ -1167,9 +1161,9 @@ function createMoveOverlay(element, summary, xpath, sourceLocation) {
   clone.style.overflow = 'hidden'
 
   // Copy border-radius to overlay as well for seamless look
-  moveOverlay.style.borderRadius = computedStyle.borderRadius
+  overlay.style.borderRadius = computedStyle.borderRadius
 
-  moveOverlay.appendChild(clone)
+  overlay.appendChild(clone)
 
   // Add resize handles
   const handles = ['tl', 'tr', 'bl', 'br']
@@ -1177,39 +1171,49 @@ function createMoveOverlay(element, summary, xpath, sourceLocation) {
     const handle = document.createElement('div')
     handle.className = 'move-resize-handle ' + pos
     handle.dataset.handle = pos
-    moveOverlay.appendChild(handle)
+    overlay.appendChild(handle)
   })
 
-  document.body.appendChild(moveOverlay)
+  document.body.appendChild(overlay)
 
   // Create position label
-  movePositionLabel = document.createElement('div')
-  movePositionLabel.className = 'move-position-label'
-  updatePositionLabel()
-  document.body.appendChild(movePositionLabel)
+  const positionLabel = document.createElement('div')
+  positionLabel.className = 'move-position-label'
+  document.body.appendChild(positionLabel)
+
+  // Store overlay data
+  const overlayData = {
+    overlay,
+    element,
+    originalRect,
+    elementData: { summary, xpath, sourceLocation },
+    positionLabel
+  }
+  moveOverlays.push(overlayData)
+
+  // Update position label
+  updatePositionLabelFor(overlayData)
 
   // Add event listeners for dragging and resizing
-  moveOverlay.addEventListener('mousedown', handleMoveStart)
+  overlay.addEventListener('mousedown', (e) => handleMoveStart(e, overlayData))
 
-  console.log('[Move] Created overlay for element:', summary.tagName)
+  console.log('[Move] Created overlay for element:', summary.tagName, 'Total overlays:', moveOverlays.length)
 
   // Send initial selection to host
   ipcRenderer.sendToHost('move-select', {
     element: { ...summary, xpath, sourceLocation },
-    rect: moveOriginalRect
+    rect: originalRect
   })
 }
 
-function handleMoveStart(e) {
-  if (!moveOverlay) return
+function handleMoveStart(e, overlayData) {
+  activeMoveOverlay = overlayData
 
   const handle = e.target.dataset?.handle
   if (handle) {
-    // Start resizing
     isResizing = true
     resizeHandle = handle
   } else {
-    // Start dragging
     isMoveDragging = true
   }
 
@@ -1224,23 +1228,22 @@ function handleMoveStart(e) {
 }
 
 function handleMoveMove(e) {
-  if (!moveOverlay) return
+  if (!activeMoveOverlay) return
 
+  const overlay = activeMoveOverlay.overlay
   const deltaX = e.clientX - moveStartX
   const deltaY = e.clientY - moveStartY
 
   if (isMoveDragging) {
-    // Move the overlay
-    const currentLeft = parseFloat(moveOverlay.style.left) || 0
-    const currentTop = parseFloat(moveOverlay.style.top) || 0
-    moveOverlay.style.left = (currentLeft + deltaX) + 'px'
-    moveOverlay.style.top = (currentTop + deltaY) + 'px'
+    const currentLeft = parseFloat(overlay.style.left) || 0
+    const currentTop = parseFloat(overlay.style.top) || 0
+    overlay.style.left = (currentLeft + deltaX) + 'px'
+    overlay.style.top = (currentTop + deltaY) + 'px'
   } else if (isResizing) {
-    // Resize the overlay
-    const currentLeft = parseFloat(moveOverlay.style.left) || 0
-    const currentTop = parseFloat(moveOverlay.style.top) || 0
-    const currentWidth = parseFloat(moveOverlay.style.width) || 100
-    const currentHeight = parseFloat(moveOverlay.style.height) || 100
+    const currentLeft = parseFloat(overlay.style.left) || 0
+    const currentTop = parseFloat(overlay.style.top) || 0
+    const currentWidth = parseFloat(overlay.style.width) || 100
+    const currentHeight = parseFloat(overlay.style.height) || 100
 
     let newLeft = currentLeft
     let newTop = currentTop
@@ -1262,22 +1265,27 @@ function handleMoveMove(e) {
       newHeight = currentHeight + deltaY
     }
 
-    // Minimum size
     if (newWidth >= 20 && newHeight >= 20) {
-      moveOverlay.style.left = newLeft + 'px'
-      moveOverlay.style.top = newTop + 'px'
-      moveOverlay.style.width = newWidth + 'px'
-      moveOverlay.style.height = newHeight + 'px'
+      overlay.style.left = newLeft + 'px'
+      overlay.style.top = newTop + 'px'
+      overlay.style.width = newWidth + 'px'
+      overlay.style.height = newHeight + 'px'
     }
   }
 
   moveStartX = e.clientX
   moveStartY = e.clientY
 
-  updatePositionLabel()
+  updatePositionLabelFor(activeMoveOverlay)
 }
 
 function handleMoveEnd(e) {
+  if (!activeMoveOverlay) return
+
+  const overlay = activeMoveOverlay.overlay
+  const elementData = activeMoveOverlay.elementData
+  const originalRect = activeMoveOverlay.originalRect
+
   isMoveDragging = false
   isResizing = false
   resizeHandle = null
@@ -1286,87 +1294,93 @@ function handleMoveEnd(e) {
   document.removeEventListener('mouseup', handleMoveEnd)
 
   // Send updated position to host
-  if (moveOverlay && moveElementData) {
-    const newRect = {
-      x: parseFloat(moveOverlay.style.left) || 0,
-      y: parseFloat(moveOverlay.style.top) || 0,
-      width: parseFloat(moveOverlay.style.width) || 100,
-      height: parseFloat(moveOverlay.style.height) || 100
-    }
+  const newRect = {
+    x: parseFloat(overlay.style.left) || 0,
+    y: parseFloat(overlay.style.top) || 0,
+    width: parseFloat(overlay.style.width) || 100,
+    height: parseFloat(overlay.style.height) || 100
+  }
 
-    ipcRenderer.sendToHost('move-update', {
-      element: {
-        ...moveElementData.summary,
-        xpath: moveElementData.xpath,
-        sourceLocation: moveElementData.sourceLocation
-      },
-      originalRect: moveOriginalRect,
-      targetRect: newRect
-    })
+  ipcRenderer.sendToHost('move-update', {
+    element: {
+      ...elementData.summary,
+      xpath: elementData.xpath,
+      sourceLocation: elementData.sourceLocation
+    },
+    originalRect: originalRect,
+    targetRect: newRect
+  })
+
+  activeMoveOverlay = null
+}
+
+function updatePositionLabelFor(overlayData) {
+  if (!overlayData || !overlayData.positionLabel || !overlayData.overlay) return
+
+  const overlay = overlayData.overlay
+  const label = overlayData.positionLabel
+
+  const x = Math.round(parseFloat(overlay.style.left) || 0)
+  const y = Math.round(parseFloat(overlay.style.top) || 0)
+  const w = Math.round(parseFloat(overlay.style.width) || 0)
+  const h = Math.round(parseFloat(overlay.style.height) || 0)
+
+  label.textContent = `${x}, ${y} • ${w} × ${h}`
+  label.style.left = (x + w / 2 - 50) + 'px'
+  label.style.top = (y - 30) + 'px'
+}
+
+function cleanupSingleMoveOverlay(overlayData) {
+  if (overlayData.element) {
+    overlayData.element.classList.remove('move-original-hidden')
+  }
+  if (overlayData.overlay) {
+    overlayData.overlay.remove()
+  }
+  if (overlayData.positionLabel) {
+    overlayData.positionLabel.remove()
   }
 }
 
-function updatePositionLabel() {
-  if (!movePositionLabel || !moveOverlay) return
-
-  const x = Math.round(parseFloat(moveOverlay.style.left) || 0)
-  const y = Math.round(parseFloat(moveOverlay.style.top) || 0)
-  const w = Math.round(parseFloat(moveOverlay.style.width) || 0)
-  const h = Math.round(parseFloat(moveOverlay.style.height) || 0)
-
-  movePositionLabel.textContent = `${x}, ${y} • ${w} × ${h}`
-  movePositionLabel.style.left = (x + w / 2 - 50) + 'px'
-  movePositionLabel.style.top = (y - 30) + 'px'
-}
-
-function cleanupMoveOverlay() {
-  if (moveElement) {
-    moveElement.classList.remove('move-original-hidden')
-    moveElement = null
-  }
-
-  if (moveOverlay) {
-    moveOverlay.removeEventListener('mousedown', handleMoveStart)
-    moveOverlay.remove()
-    moveOverlay = null
-  }
-
-  if (movePositionLabel) {
-    movePositionLabel.remove()
-    movePositionLabel = null
-  }
-
-  moveOriginalRect = null
-  moveElementData = null
+function cleanupAllMoveOverlays() {
+  moveOverlays.forEach(overlayData => {
+    cleanupSingleMoveOverlay(overlayData)
+  })
+  moveOverlays = []
+  activeMoveOverlay = null
   isMoveDragging = false
   isResizing = false
   resizeHandle = null
 }
 
-// Confirm move and send final position
+// Confirm move and send final positions for all overlays
 ipcRenderer.on('confirm-move', () => {
-  if (moveOverlay && moveElementData) {
+  moveOverlays.forEach(overlayData => {
+    const overlay = overlayData.overlay
+    const elementData = overlayData.elementData
+    const originalRect = overlayData.originalRect
+
     const targetRect = {
-      x: parseFloat(moveOverlay.style.left) || 0,
-      y: parseFloat(moveOverlay.style.top) || 0,
-      width: parseFloat(moveOverlay.style.width) || 100,
-      height: parseFloat(moveOverlay.style.height) || 100
+      x: parseFloat(overlay.style.left) || 0,
+      y: parseFloat(overlay.style.top) || 0,
+      width: parseFloat(overlay.style.width) || 100,
+      height: parseFloat(overlay.style.height) || 100
     }
 
     ipcRenderer.sendToHost('move-confirmed', {
       element: {
-        ...moveElementData.summary,
-        xpath: moveElementData.xpath,
-        sourceLocation: moveElementData.sourceLocation
+        ...elementData.summary,
+        xpath: elementData.xpath,
+        sourceLocation: elementData.sourceLocation
       },
-      originalRect: moveOriginalRect,
+      originalRect: originalRect,
       targetRect: targetRect
     })
-  }
-  cleanupMoveOverlay()
+  })
+  cleanupAllMoveOverlays()
 })
 
 // Cancel move
 ipcRenderer.on('cancel-move', () => {
-  cleanupMoveOverlay()
+  cleanupAllMoveOverlays()
 })
