@@ -74,6 +74,7 @@ import {
   Image,
   FolderOpen,
   Square,
+  Move,
 } from 'lucide-react';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
@@ -557,10 +558,20 @@ export default function App() {
   // Inspector & Context State
   const [isInspectorActive, setIsInspectorActive] = useState(false);
   const [isScreenshotActive, setIsScreenshotActive] = useState(false);
+  const [isMoveActive, setIsMoveActive] = useState(false);
+
+  // Move mode state - tracks target position for element repositioning
+  const [moveTargetPosition, setMoveTargetPosition] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
 
   // Refs to track current state values for closures (webview event handlers)
   const isInspectorActiveRef = useRef(false);
   const isScreenshotActiveRef = useRef(false);
+  const isMoveActiveRef = useRef(false);
 
   // Store previous model/thinking settings when inspector is activated
   const preInspectorSettingsRef = useRef<{
@@ -1085,6 +1096,10 @@ export default function App() {
   useEffect(() => {
     isScreenshotActiveRef.current = isScreenshotActive;
   }, [isScreenshotActive]);
+
+  useEffect(() => {
+    isMoveActiveRef.current = isMoveActive;
+  }, [isMoveActive]);
 
   // Auto-switch to Gemini 2.5 Flash and disable thinking when inspector is active
   useEffect(() => {
@@ -2432,6 +2447,55 @@ export default function App() {
           content: `Could not find element: ${data.selector}. ${data.error}`,
           timestamp: new Date()
         }]);
+      } else if (channel === 'move-select') {
+        // Move mode - element selected, floating overlay created
+        const data = args[0] as {
+          element: SelectedElement;
+          rect: { top: number; left: number; width: number; height: number };
+        };
+        console.log('[Move] Element selected for repositioning:', data.element.tagName);
+        setSelectedElement({
+          ...data.element,
+          rect: data.rect
+        });
+        setMoveTargetPosition({
+          x: data.rect.left,
+          y: data.rect.top,
+          width: data.rect.width,
+          height: data.rect.height
+        });
+        setHoveredElement(null);
+      } else if (channel === 'move-update') {
+        // Move mode - element position/size updated
+        const data = args[0] as {
+          element: SelectedElement;
+          originalRect: { top: number; left: number; width: number; height: number };
+          targetRect: { x: number; y: number; width: number; height: number };
+        };
+        console.log('[Move] Position updated:', data.targetRect);
+        setMoveTargetPosition(data.targetRect);
+      } else if (channel === 'move-confirmed') {
+        // Move mode - user confirmed the new position
+        const data = args[0] as {
+          element: SelectedElement;
+          originalRect: { top: number; left: number; width: number; height: number };
+          targetRect: { x: number; y: number; width: number; height: number };
+        };
+        console.log('[Move] Position confirmed:', data.targetRect);
+        // Update selected element with target position info
+        setSelectedElement(prev => prev ? {
+          ...prev,
+          targetPosition: data.targetRect,
+          originalPosition: data.originalRect
+        } : null);
+        setIsMoveActive(false);
+        setMoveTargetPosition(null);
+      } else if (channel === 'move-cancelled') {
+        // Move mode - user cancelled
+        console.log('[Move] Cancelled');
+        setSelectedElement(null);
+        setIsMoveActive(false);
+        setMoveTargetPosition(null);
       } else if (channel === 'drop-image-on-element') {
         // Handle image dropped on selected element - SMART insertion
         const data = args[0] as { imageData: string; element: SelectedElement; rect: unknown };
@@ -3260,19 +3324,20 @@ export default function App() {
       return;
     }
 
-    console.log('[Inspector Sync] Sending inspector modes to webview:', { isInspectorActive, isScreenshotActive });
+    console.log('[Inspector Sync] Sending inspector modes to webview:', { isInspectorActive, isScreenshotActive, isMoveActive });
     try {
       webview.send('set-inspector-mode', isInspectorActive);
       webview.send('set-screenshot-mode', isScreenshotActive);
+      webview.send('set-move-mode', isMoveActive);
     } catch (e) {
       console.warn('[Inspector Sync] Failed to send to webview:', e);
     }
 
-    if (!isInspectorActive) {
+    if (!isInspectorActive && !isMoveActive) {
       setSelectedElement(null);
       setShowElementChat(false);
     }
-  }, [isInspectorActive, isScreenshotActive, isElectron, isWebviewReady, activeTabId]);
+  }, [isInspectorActive, isScreenshotActive, isMoveActive, isElectron, isWebviewReady, activeTabId]);
 
   // Auto-reload webview on HMR (Hot Module Replacement)
   useEffect(() => {
@@ -3550,6 +3615,9 @@ Keep the summary brief but comprehensive enough to continue the conversation eff
     // Build element context in react-grab style format
     let elementContext = '';
     if (selectedElement) {
+      // Check if user has specified a target position via move mode
+      const hasTargetPosition = selectedElement.targetPosition && selectedElement.originalPosition;
+
       elementContext = `
 <selected_element>
 ${selectedElement.outerHTML || `<${selectedElement.tagName}${selectedElement.id ? ` id="${selectedElement.id}"` : ''}${selectedElement.className ? ` class="${selectedElement.className}"` : ''}>${selectedElement.text || ''}</${selectedElement.tagName}>`}
@@ -3562,7 +3630,23 @@ ${selectedElement.xpath ? `- XPath: ${selectedElement.xpath}` : ''}
 ${selectedElement.text ? `- Text Content: "${selectedElement.text}"` : ''}
 ${selectedElement.attributes ? `- Attributes: ${JSON.stringify(selectedElement.attributes)}` : ''}
 ${selectedElement.computedStyle ? `- Computed Style: display=${selectedElement.computedStyle.display}, position=${selectedElement.computedStyle.position}, color=${selectedElement.computedStyle.color}, bg=${selectedElement.computedStyle.backgroundColor}` : ''}
-${selectedElement.rect ? `- Dimensions: ${Math.round(selectedElement.rect.width)}x${Math.round(selectedElement.rect.height)} at (${Math.round(selectedElement.rect.left)}, ${Math.round(selectedElement.rect.top)})` : ''}
+${selectedElement.rect ? `- Current Position: ${Math.round(selectedElement.rect.width)}x${Math.round(selectedElement.rect.height)} at (${Math.round(selectedElement.rect.left)}, ${Math.round(selectedElement.rect.top)})` : ''}
+${hasTargetPosition ? `
+<repositioning_request>
+The user wants to MOVE this element to a new position.
+- Original Position: ${Math.round(selectedElement.originalPosition!.width)}x${Math.round(selectedElement.originalPosition!.height)} at (${Math.round(selectedElement.originalPosition!.left)}, ${Math.round(selectedElement.originalPosition!.top)})
+- Target Position: ${Math.round(selectedElement.targetPosition!.width)}x${Math.round(selectedElement.targetPosition!.height)} at (${Math.round(selectedElement.targetPosition!.x)}, ${Math.round(selectedElement.targetPosition!.y)})
+- Width Change: ${selectedElement.targetPosition!.width - selectedElement.originalPosition!.width}px
+- Height Change: ${selectedElement.targetPosition!.height - selectedElement.originalPosition!.height}px
+- X Offset: ${selectedElement.targetPosition!.x - selectedElement.originalPosition!.left}px
+- Y Offset: ${selectedElement.targetPosition!.y - selectedElement.originalPosition!.top}px
+
+Please help the user achieve this repositioning by modifying the CSS/layout of the element. Consider:
+1. Position property (relative, absolute, fixed, or using flexbox/grid)
+2. The element's current CSS and its impact on layout
+3. Whether the element needs to be extracted from the normal flow
+4. Responsive considerations
+</repositioning_request>` : ''}
 </selected_element>`;
     }
 
@@ -5205,11 +5289,25 @@ If you're not sure what the user wants, ask for clarification.
             onClick={() => {
               setIsInspectorActive(!isInspectorActive);
               setIsScreenshotActive(false);
+              setIsMoveActive(false);
             }}
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isInspectorActive ? 'bg-blue-100 text-blue-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500')}`}
             title="Element Inspector"
           >
             <MousePointer2 size={16} />
+          </button>
+
+          {/* Move Mode Toggle */}
+          <button
+            onClick={() => {
+              setIsMoveActive(!isMoveActive);
+              setIsInspectorActive(false);
+              setIsScreenshotActive(false);
+            }}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isMoveActive ? 'bg-orange-100 text-orange-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500')}`}
+            title="Move & Resize Element"
+          >
+            <Move size={16} />
           </button>
 
           {/* DevTools Toggle */}
@@ -5474,31 +5572,44 @@ If you're not sure what the user wants, ask for clarification.
 
             {/* Floating Toolbar when sidebar collapsed */}
             {!isSidebarOpen && (
-                <div className={`absolute bottom-8 left-1/2 transform -translate-x-1/2 flex items-center gap-2 backdrop-blur shadow-2xl p-2 rounded-full z-40 ${isDarkMode ? 'bg-neutral-800/90 border border-neutral-700/50' : 'bg-white/90 border border-stone-200/50'}`}>
+                <div className={`absolute bottom-8 left-1/2 transform -translate-x-1/2 flex items-center gap-1 backdrop-blur shadow-2xl p-2 rounded-full z-40 ${isDarkMode ? 'bg-neutral-800/90 border border-neutral-700/50' : 'bg-white/90 border border-stone-200/50'}`}>
                     <button
                         onClick={() => setIsScreenSharing(!isScreenSharing)}
-                        className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isScreenSharing ? 'bg-green-100 text-green-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500')}`}
+                        className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isScreenSharing ? 'bg-green-100 text-green-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500')}`}
                         title="Toggle Screen Share"
                     >
-                        <Monitor size={18} />
+                        <Monitor size={16} />
                     </button>
 
                     <button
                         onClick={() => {
                             setIsInspectorActive(!isInspectorActive);
                             setIsScreenshotActive(false);
+                            setIsMoveActive(false);
                         }}
-                        className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isInspectorActive ? 'bg-blue-100 text-blue-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500')}`}
+                        className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isInspectorActive ? 'bg-blue-100 text-blue-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500')}`}
                         title="Toggle Element Inspector"
                     >
-                        <MousePointer2 size={18} />
+                        <MousePointer2 size={16} />
                     </button>
 
-                    <div className={`w-[1px] h-6 mx-1 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
+                    <button
+                        onClick={() => {
+                            setIsMoveActive(!isMoveActive);
+                            setIsInspectorActive(false);
+                            setIsScreenshotActive(false);
+                        }}
+                        className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isMoveActive ? 'bg-orange-100 text-orange-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500')}`}
+                        title="Move & Resize Element"
+                    >
+                        <Move size={16} />
+                    </button>
+
+                    <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
 
                     <button
                         onClick={streamState.isConnected ? disconnect : connect}
-                        className={`flex items-center justify-center w-10 h-10 rounded-full font-medium transition-all ${streamState.isConnected ? 'bg-red-50 text-red-600 ring-1 ring-red-100' : (isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-800')}`}
+                        className={`flex items-center justify-center w-9 h-9 rounded-full font-medium transition-all ${streamState.isConnected ? 'bg-red-50 text-red-600 ring-1 ring-red-100' : (isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-800')}`}
                         title={streamState.isConnected ? 'End voice session' : 'Start voice session'}
                     >
                         {streamState.isConnected ? (
@@ -5507,14 +5618,14 @@ If you're not sure what the user wants, ask for clarification.
                                 <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
                             </span>
                         ) : (
-                            <Mic size={18} />
+                            <Mic size={16} />
                         )}
                     </button>
                 </div>
             )}
 
             {/* Element Info Label - shows during inspector hover */}
-            {(isInspectorActive || isScreenshotActive) && hoveredElement && (
+            {(isInspectorActive || isScreenshotActive || isMoveActive) && hoveredElement && (
               <div
                 className="fixed z-[60] pointer-events-none"
                 style={{
@@ -5526,7 +5637,9 @@ If you're not sure what the user wants, ask for clarification.
                   className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-mono shadow-lg ${
                     isScreenshotActive
                       ? 'bg-purple-600 text-white'
-                      : 'bg-blue-600 text-white'
+                      : isMoveActive
+                        ? 'bg-orange-500 text-white'
+                        : 'bg-blue-600 text-white'
                   }`}
                   style={{
                     backdropFilter: 'blur(8px)',
@@ -6536,11 +6649,15 @@ If you're not sure what the user wants, ask for clarification.
                           )}
                           {selectedElement && (
                               <div
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs border border-blue-200 cursor-pointer hover:bg-blue-100 transition-colors"
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border cursor-pointer transition-colors ${
+                                  selectedElement.targetPosition
+                                    ? 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100'
+                                    : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                                }`}
                                 onClick={handleShowSourceCode}
-                                title="Click to view source code"
+                                title={selectedElement.targetPosition ? 'Element with repositioning target' : 'Click to view source code'}
                               >
-                                  <Check size={12} />
+                                  {selectedElement.targetPosition ? <Move size={12} /> : <Check size={12} />}
                                   {selectedElement.sourceLocation ? (
                                       <span className="font-mono font-medium">
                                           {(() => {
@@ -6562,13 +6679,19 @@ If you're not sure what the user wants, ask for clarification.
                                   ) : (
                                       <span className="font-medium">{selectedElement.tagName.toLowerCase()}</span>
                                   )}
+                                  {selectedElement.targetPosition && (
+                                    <span className="text-[10px] opacity-70">
+                                      → {Math.round(selectedElement.targetPosition.x)},{Math.round(selectedElement.targetPosition.y)}
+                                    </span>
+                                  )}
                                   <button
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         setSelectedElement(null);
                                         setDisplayedSourceCode(null);
+                                        setMoveTargetPosition(null);
                                       }}
-                                      className="ml-0.5 hover:text-blue-900"
+                                      className={`ml-0.5 ${selectedElement.targetPosition ? 'hover:text-orange-900' : 'hover:text-blue-900'}`}
                                   >
                                       <X size={12} />
                                   </button>
@@ -6965,11 +7088,25 @@ If you're not sure what the user wants, ask for clarification.
                               onClick={() => {
                                   setIsInspectorActive(!isInspectorActive);
                                   setIsScreenshotActive(false);
+                                  setIsMoveActive(false);
                               }}
                               className={`p-2 rounded-lg transition-colors ${isInspectorActive ? 'bg-blue-100 text-blue-600' : (isDarkMode ? 'hover:bg-neutral-600 text-neutral-400' : 'hover:bg-stone-100 text-stone-400')}`}
                               title="Select Element"
                           >
                               <MousePointer2 size={18} />
+                          </button>
+
+                          {/* Move/Reposition */}
+                          <button
+                              onClick={() => {
+                                  setIsMoveActive(!isMoveActive);
+                                  setIsInspectorActive(false);
+                                  setIsScreenshotActive(false);
+                              }}
+                              className={`p-2 rounded-lg transition-colors ${isMoveActive ? 'bg-orange-100 text-orange-600' : (isDarkMode ? 'hover:bg-neutral-600 text-neutral-400' : 'hover:bg-stone-100 text-stone-400')}`}
+                              title="Move & Resize Element"
+                          >
+                              <Move size={18} />
                           </button>
 
                           {/* Console Logs */}
