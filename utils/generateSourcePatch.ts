@@ -661,33 +661,23 @@ export async function generateSourcePatch(
     targetLine = lines.length
   }
 
-  const contextLines = 100
-  const startLine = Math.max(0, targetLine - contextLines)
-  const endLine = Math.min(lines.length, targetLine + contextLines)
+  // Use smaller context for Fast Apply (local LLM is slower with large inputs)
+  const fastApplyContextLines = 30 // ~60 lines total - faster for local LLM
+  const fastApplyStartLine = Math.max(0, targetLine - fastApplyContextLines)
+  const fastApplyEndLine = Math.min(lines.length, targetLine + fastApplyContextLines)
+  const fastApplySnippet = lines.slice(fastApplyStartLine, fastApplyEndLine).join('\n')
 
-  if (startLine >= endLine) {
-    console.log('[Source Patch] ABORT: Invalid line range:', startLine, 'to', endLine)
-    return null
-  }
+  console.log('[Source Patch] Fast Apply snippet: lines', fastApplyStartLine + 1, 'to', fastApplyEndLine, '(', fastApplySnippet.length, 'chars)')
 
-  const codeSnippet = lines.slice(startLine, endLine).join('\n')
-
-  if (!codeSnippet || codeSnippet.trim().length < 10) {
-    console.log('[Source Patch] ABORT: Code snippet is empty or too small')
-    return null
-  }
-
-  console.log('[Source Patch] Extracting lines', startLine + 1, 'to', endLine, 'of', lines.length, 'total')
-  console.log('[Source Patch] Snippet length:', codeSnippet.length, 'chars')
-
-  // Try Fast Apply (local LLM) first
-  const fastApplyResult = await tryFastApply(codeSnippet, element, cssChanges, userRequest)
+  // Try Fast Apply (local LLM) first with smaller snippet
+  const fastApplyResult = await tryFastApply(fastApplySnippet, element, cssChanges, userRequest)
+  
   if (fastApplyResult.success && fastApplyResult.code) {
     console.log('[Source Patch] Fast Apply SUCCESS! Duration:', fastApplyResult.durationMs, 'ms')
 
     const patchedLines = fastApplyResult.code.split('\n')
-    const beforeLines = lines.slice(0, startLine)
-    const afterLines = lines.slice(endLine)
+    const beforeLines = lines.slice(0, fastApplyStartLine)
+    const afterLines = lines.slice(fastApplyEndLine)
     const fullPatchedContent = [...beforeLines, ...patchedLines, ...afterLines].join('\n')
 
     if (fullPatchedContent !== originalContent) {
@@ -714,6 +704,19 @@ export async function generateSourcePatch(
   } else {
     console.log('[Source Patch] Fast Apply not available or failed:', fastApplyResult.error)
   }
+
+  // Larger context for Gemini (cloud API is faster with large inputs)
+  const contextLines = 100
+  const startLine = Math.max(0, targetLine - contextLines)
+  const endLine = Math.min(lines.length, targetLine + contextLines)
+
+  if (startLine >= endLine) {
+    console.log('[Source Patch] ABORT: Invalid line range:', startLine, 'to', endLine)
+    return null
+  }
+
+  const codeSnippet = lines.slice(startLine, endLine).join('\n')
+  console.log('[Source Patch] Gemini snippet: lines', startLine + 1, 'to', endLine, '(', codeSnippet.length, 'chars)')
 
   // Fall back to Gemini
   const patchedSnippet = await useGeminiForPatch(
