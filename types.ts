@@ -14,6 +14,12 @@ export interface ToolUsage {
   args: Record<string, unknown>;
   result?: unknown;
   isError?: boolean;
+  
+  // Execution tracking
+  turnId?: string;       // Which turn this tool belongs to
+  startTime?: number;    // When execution started
+  endTime?: number;      // When execution completed
+  duration?: number;     // Total execution time in milliseconds
 }
 
 export interface Message {
@@ -26,6 +32,11 @@ export interface Message {
   intent?: string;
   toolUsage?: ToolUsage[];
   reasoning?: string; // AI's reasoning/thinking content
+  
+  // Turn tracking for correlating related messages and tool calls
+  turnId?: string;       // Unique ID for this turn (shared by user request + agent response)
+  parentTurnId?: string; // Links to the user message this is responding to
+  sequenceNumber?: number; // 0 for user, 1+ for agent turns and continuations
 }
 
 export interface ComponentSource {
