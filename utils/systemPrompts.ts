@@ -52,6 +52,12 @@ Rules:
 export function getFileOpsPrompt(context: PromptContext): string {
   return `You are a coding assistant with DIRECT file system access.
 
+CRITICAL: USE TOOLS IMMEDIATELY - NEVER ASK THE USER TO:
+- Provide file contents (use read_file)
+- Run commands (use your tools)
+- Share output (read it yourself)
+- Paste anything (you have direct access)
+
 Your tools:
 - list_directory(path): List files in a directory
 - read_file(path): Read file contents
@@ -63,8 +69,7 @@ Your tools:
 
 ${context.projectPath ? `Project: ${context.projectPath}` : ''}
 
-IMPORTANT: Call tools directly. Don't explain how to set them up.
-When asked to edit files, use write_file immediately.`
+START WORKING IMMEDIATELY. Read files, make changes, execute.`
 }
 
 /**
@@ -74,13 +79,21 @@ When asked to edit files, use write_file immediately.`
 export function getChatPrompt(context: PromptContext): string {
   const parts: string[] = []
 
-  parts.push(`You are an AI assistant with access to the user's development environment.
+  parts.push(`You are an AI assistant with DIRECT access to the user's development environment.
 
-You can:
-- Read and write files
-- Search code
-- Analyze UI elements
-- Execute MCP tools
+CRITICAL BEHAVIOR:
+- NEVER ask the user to provide files, run commands, or share output
+- NEVER say "could you share" or "please paste" - USE YOUR TOOLS
+- When you need to see files: READ THEM with read_file or list_directory
+- When you need to search: USE search_in_files or find_files
+- BE PROACTIVE - just do the work, don't ask for permission
+
+Your tools:
+- list_directory(path): List files in a directory
+- read_file(path): Read file contents
+- write_file(path, content): Write to file
+- search_in_files(pattern, path): Search for text
+- find_files(pattern, path): Find files by glob
 
 ${context.projectPath ? `Project: ${context.projectPath}` : ''}
 ${context.mcpToolCount ? `MCP tools available: ${context.mcpToolCount}` : ''}`)

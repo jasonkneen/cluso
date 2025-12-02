@@ -764,6 +764,13 @@ declare global {
         }) => void) => () => void
         onError: (callback: (data: { requestId: string; error: string }) => void) => () => void
         removeAllListeners: () => void
+        webSearch: (query: string, maxResults?: number) => Promise<{
+          success: boolean
+          query?: string
+          results?: Array<{ title: string; url: string; snippet: string }>
+          count?: number
+          error?: string
+        }>
       }
       oauth: {
         getAccessToken: () => Promise<{ success: boolean; accessToken?: string | null }>

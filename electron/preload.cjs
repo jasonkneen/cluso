@@ -231,6 +231,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeAllListeners('ai-sdk:complete')
       ipcRenderer.removeAllListeners('ai-sdk:error')
     },
+    // Direct web search (for instant console error searching)
+    webSearch: (query, maxResults) => ipcRenderer.invoke('ai-sdk:web-search', { query, maxResults }),
   },
 
   // Fast Apply (Local LLM for instant code merging) - Pro Feature
