@@ -5297,12 +5297,12 @@ If you're not sure what the user wants, ask for clarification.
             <MousePointer2 size={16} />
           </button>
 
-          {/* Move Mode Toggle */}
+          {/* Move Mode Toggle - can work alongside screenshot */}
           <button
             onClick={() => {
               setIsMoveActive(!isMoveActive);
               setIsInspectorActive(false);
-              setIsScreenshotActive(false);
+              // DON'T disable screenshot mode - they work together
             }}
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isMoveActive ? 'bg-orange-100 text-orange-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500')}`}
             title="Move & Resize Element"
@@ -5597,7 +5597,7 @@ If you're not sure what the user wants, ask for clarification.
                         onClick={() => {
                             setIsMoveActive(!isMoveActive);
                             setIsInspectorActive(false);
-                            setIsScreenshotActive(false);
+                            // DON'T disable screenshot mode - they work together
                         }}
                         className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isMoveActive ? 'bg-orange-100 text-orange-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500')}`}
                         title="Move & Resize Element"
@@ -7096,12 +7096,12 @@ If you're not sure what the user wants, ask for clarification.
                               <MousePointer2 size={18} />
                           </button>
 
-                          {/* Move/Reposition */}
+                          {/* Move/Reposition - works alongside screenshot */}
                           <button
                               onClick={() => {
                                   setIsMoveActive(!isMoveActive);
                                   setIsInspectorActive(false);
-                                  setIsScreenshotActive(false);
+                                  // DON'T disable screenshot mode - they work together
                               }}
                               className={`p-2 rounded-lg transition-colors ${isMoveActive ? 'bg-orange-100 text-orange-600' : (isDarkMode ? 'hover:bg-neutral-600 text-neutral-400' : 'hover:bg-stone-100 text-stone-400')}`}
                               title="Move & Resize Element"
