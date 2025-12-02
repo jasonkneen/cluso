@@ -578,9 +578,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                 debugLog.liveGemini.log("Tool call received", message.toolCall);
                 const functionCalls = message.toolCall.functionCalls;
                 if (functionCalls && functionCalls.length > 0) {
-                    const call = functionCalls[0] as ToolCall;
-
-                    // Build handlers object from callback props
+                    // Build handlers object from callback props (once, reuse for all calls)
                     const handlers: ToolHandlers = {
                       onCodeUpdate,
                       onElementSelect,
@@ -600,7 +598,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                       onCloseBrowser,
                     };
 
-                    // Create send response function
+                    // Create send response function (once, reuse for all calls)
                     const sendResponse = (id: string, name: string, response: Record<string, unknown>) => {
                       withSession(session => {
                         session.sendToolResponse({
@@ -609,8 +607,19 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                       });
                     };
 
-                    // Dispatch to tool router
-                    dispatchToolCall(call, handlers, sendResponse);
+                    // Process ALL tool calls, not just the first one
+                    // Each tool call is dispatched and can execute in parallel
+                    for (const call of functionCalls) {
+                      const toolCall = call as ToolCall;
+                      try {
+                        dispatchToolCall(toolCall, handlers, sendResponse);
+                      } catch (err) {
+                        debugLog.liveGemini.error(`Failed to dispatch tool ${toolCall.name}:`, err);
+                        sendResponse(toolCall.id, toolCall.name, {
+                          error: err instanceof Error ? err.message : 'Unknown error'
+                        });
+                      }
+                    }
                 }
             }
 

@@ -18,6 +18,9 @@ import { useAIChat, getProviderForModel, ProviderConfig, MCPToolDefinition, toCo
 import type { CoreMessage } from './hooks/useAIChat';
 import { useCodingAgent, CodingContext, FileModificationEvent } from './hooks/useCodingAgent';
 import { useMCP } from './hooks/useMCP';
+import { useToolTracker } from './hooks/useToolTracker';
+import { generateTurnId } from './utils/turnUtils';
+import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler';
 import { getElectronAPI } from './hooks/useElectronAPI';
 import type { MCPServerConfig } from './types/mcp';
 import { GoogleGenAI } from '@google/genai'; // Keep for voice streaming
@@ -616,6 +619,9 @@ export default function App() {
   // Git State
   const git = useGit();
   const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
+
+  // Tool Execution Tracking
+  const toolTracker = useToolTracker();
   const [commitMessage, setCommitMessage] = useState('');
   const [newBranchName, setNewBranchName] = useState('');
   const [isCreatingBranch, setIsCreatingBranch] = useState(false);
@@ -807,6 +813,12 @@ export default function App() {
           status: 'running' as const,
         }]
       } : null)
+      // Track tool execution start
+      toolTracker.trackStart({
+        id: toolCall.toolCallId,
+        name: toolCall.toolName,
+        args: toolCall.args as Record<string, unknown>,
+      })
     },
     onToolResult: (toolResult) => {
       // Update tool call status when result arrives
@@ -818,6 +830,17 @@ export default function App() {
             : tc
         )
       } : null)
+      // Track tool execution completion
+      const hasError = toolResult.result && typeof toolResult.result === 'object' && 'error' in toolResult.result;
+      if (hasError) {
+        const errorMsg = String((toolResult.result as any).error);
+        const toolError = createToolError(toolResult.toolCallId, 'tool', new Error(errorMsg));
+        const display = formatErrorForDisplay(toolError);
+        console.log(`[Tool Error] ${display.title}: ${display.description}`);
+        toolTracker.trackError(toolResult.toolCallId, errorMsg)
+      } else {
+        toolTracker.trackSuccess(toolResult.toolCallId, toolResult.result)
+      }
     },
   });
 
@@ -3611,12 +3634,18 @@ Keep the summary brief but comprehensive enough to continue the conversation eff
 
     if (!promptText.trim() && !selectedElement && attachedImages.length === 0 && !screenshotElement) return;
 
+    // Generate turn ID for this conversation turn
+    const turnId = generateTurnId();
+    console.log('[Turn]', turnId);
+
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
       content: promptText,
       timestamp: new Date(),
-      selectedElement: selectedElement || undefined
+      selectedElement: selectedElement || undefined,
+      turnId,
+      sequenceNumber: 0
     };
 
     setMessages(prev => [...prev, userMessage]);
@@ -4769,6 +4798,9 @@ If you're not sure what the user wants, ask for clarification.
           intent: pendingIntent,
           toolUsage: pendingToolUsage,
           reasoning: pendingReasoning,
+          turnId,
+          parentTurnId: userMessage.id,
+          sequenceNumber: 1,
         }]);
 
         // If we have code to execute, execute immediately and show toolbar
@@ -6068,6 +6100,45 @@ If you're not sure what the user wants, ask for clarification.
                       Start a conversation...
                   </div>
               )}
+
+              {/* Tool Execution Status - Shows running/completed tools */}
+              {toolTracker.toolCalls.length > 0 && (
+                <div className={`mb-4 p-3 rounded-lg ${isDarkMode ? 'bg-neutral-800' : 'bg-stone-100'}`}>
+                  <div className="text-xs font-medium mb-2 opacity-70">Tools Executing</div>
+                  <div className="space-y-1">
+                    {toolTracker.toolCalls.map(tool => (
+                      <div key={tool.id} className="flex items-center gap-2 text-xs">
+                        {/* Status indicator */}
+                        {tool.status === 'running' && (
+                          <Loader2 size={12} className="animate-spin text-blue-500" />
+                        )}
+                        {tool.status === 'success' && (
+                          <Check size={12} className="text-green-500" />
+                        )}
+                        {tool.status === 'error' && (
+                          <X size={12} className="text-red-500" />
+                        )}
+                        
+                        {/* Tool name */}
+                        <span className="font-mono font-medium">{tool.name}</span>
+                        
+                        {/* Duration (if completed) */}
+                        {tool.duration && (
+                          <span className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'}>
+                            {tool.duration}ms
+                          </span>
+                        )}
+                        
+                        {/* Error message (if failed) */}
+                        {tool.error && (
+                          <span className="text-red-500 text-[11px]">{tool.error}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {messages.map((msg) => (
                   <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                       {/* Reasoning Display for Assistant Messages */}
