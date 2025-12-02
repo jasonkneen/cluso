@@ -909,6 +909,98 @@ const BUILT_IN_TOOL_EXECUTORS = {
       return { error: error.message }
     }
   },
+
+  // Web search tool - searches for error solutions, documentation, etc.
+  async web_search({ query, maxResults = 5 }) {
+    try {
+      if (!query || typeof query !== 'string') {
+        return { error: 'web_search requires a "query" argument' }
+      }
+
+      // Use DuckDuckGo HTML API (no API key required, works in Node.js)
+      const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`
+
+      const response = await fetch(searchUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+        },
+      })
+
+      if (!response.ok) {
+        return { error: `Search failed: ${response.status} ${response.statusText}` }
+      }
+
+      const html = await response.text()
+
+      // Parse results from DuckDuckGo HTML
+      const results = []
+      const resultRegex = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/g
+      const snippetRegex = /<a[^>]*class="result__snippet"[^>]*>([^<]*(?:<[^>]*>[^<]*)*)<\/a>/g
+
+      let match
+      let snippetMatch
+      const snippets = []
+
+      // Extract snippets
+      while ((snippetMatch = snippetRegex.exec(html)) !== null && snippets.length < maxResults) {
+        // Clean HTML from snippet
+        const cleanSnippet = snippetMatch[1]
+          .replace(/<[^>]*>/g, '')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#x27;/g, "'")
+          .trim()
+        snippets.push(cleanSnippet)
+      }
+
+      // Extract links and titles
+      let i = 0
+      while ((match = resultRegex.exec(html)) !== null && results.length < maxResults) {
+        const url = match[1]
+        const title = match[2]
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#x27;/g, "'")
+          .trim()
+
+        // Skip DuckDuckGo internal URLs
+        if (url && !url.includes('duckduckgo.com') && title) {
+          results.push({
+            title,
+            url: url.startsWith('//') ? `https:${url}` : url,
+            snippet: snippets[i] || '',
+          })
+        }
+        i++
+      }
+
+      return {
+        query,
+        results,
+        count: results.length,
+      }
+    } catch (error) {
+      return { error: error.message }
+    }
+  },
+}
+
+// ============================================================================
+// Standalone Web Search Function (for direct IPC calls)
+// ============================================================================
+
+/**
+ * Perform a web search directly (not via AI tool call)
+ * Used for instant console log error searching
+ */
+async function performWebSearch(query, maxResults = 5) {
+  return BUILT_IN_TOOL_EXECUTORS.web_search({ query, maxResults })
 }
 
 /**
@@ -1599,6 +1691,18 @@ function registerHandlers() {
       await initialize()
       return { success: true }
     } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Direct web search (for instant console log error searching)
+  ipcMain.handle('ai-sdk:web-search', async (_event, { query, maxResults = 5 }) => {
+    try {
+      console.log('[AI-SDK-Wrapper] Web search request:', query)
+      const result = await performWebSearch(query, maxResults)
+      return { success: !result.error, ...result }
+    } catch (error) {
+      console.error('[AI-SDK-Wrapper] Web search error:', error)
       return { success: false, error: error.message }
     }
   })

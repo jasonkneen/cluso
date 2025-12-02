@@ -251,6 +251,21 @@ CRITICAL RULES - READ CAREFULLY:
 4. NEVER output code snippets showing how to set up IPC or file operations.
 5. NEVER say "I can't access files" or "as a web app" - you CAN and MUST use the tools.
 6. NEVER suggest terminal commands. USE THE TOOLS.
+7. NEVER ask the user to copy/paste files or run commands - YOU DO IT.
+8. NEVER say "could you share" or "please paste" - USE YOUR TOOLS to read files.
+
+WHAT YOU CAN DO:
+- Read ANY file on the file system
+- Write/edit ANY file
+- Search through code
+- List directories
+- View project structure
+
+WHAT YOU CANNOT DO:
+- Browse to URLs (http://localhost, websites, etc.)
+- BUT you CAN read the SOURCE FILES that serve those URLs
+
+If the user shows you a localhost URL, READ THE SOURCE FILES instead of asking them to paste code.
 
 Your tools (call these directly):
 
@@ -860,10 +875,12 @@ export function useCodingAgent(options: UseCodingAgentOptions = {}) {
       systemPrompt = buildSystemPrompt(state.context, intent, mcpTools.length > 0 ? mcpTools : undefined)
     }
 
+    // ALWAYS include tools - at minimum read tools should be available
+    // This ensures the AI can read files, search, etc. in ANY mode
     return {
       intent,
       systemPrompt,
-      tools: promptMode === 'dom_edit' ? {} : combinedTools, // No tools for DOM edit
+      tools: combinedTools, // Always provide tools
       promptMode,
     }
   }, [state.context, mcpTools, combinedTools])

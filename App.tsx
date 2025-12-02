@@ -78,6 +78,7 @@ import {
   FolderOpen,
   Square,
   Move,
+  Copy,
 } from 'lucide-react';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
@@ -629,6 +630,18 @@ export default function App() {
 
   // Project Setup Flow State
   const [setupProject, setSetupProject] = useState<{ path: string; name: string } | null>(null);
+
+  // Web Search Results State (for console log error searching)
+  interface SearchResult {
+    title: string;
+    url: string;
+    snippet: string;
+  }
+  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearchPopover, setShowSearchPopover] = useState(false);
+  const [attachedSearchResults, setAttachedSearchResults] = useState<SearchResult[] | null>(null); // Chip state
 
   // Dark Mode State
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -3166,6 +3179,92 @@ export default function App() {
     setConsoleFilters(new Set());
   }, []);
 
+  // Instant web search for console errors
+  const performInstantSearch = useCallback(async (query: string) => {
+    if (!query.trim() || !window.electronAPI?.aiSdk?.webSearch) {
+      console.warn('[Search] No query or webSearch not available');
+      return;
+    }
+
+    setIsSearching(true);
+    setSearchQuery(query);
+    setShowSearchPopover(true);
+    setSearchResults(null);
+
+    try {
+      // Format query for error searching
+      const searchQuery = `${query.slice(0, 500)} solution fix`;
+      console.log('[Search] Searching for:', searchQuery);
+      
+      const result = await window.electronAPI.aiSdk.webSearch(searchQuery, 5);
+      
+      if (result.success && result.results) {
+        setSearchResults(result.results);
+        console.log('[Search] Found', result.results.length, 'results');
+      } else {
+        console.error('[Search] Failed:', result.error);
+        setSearchResults([]);
+      }
+    } catch (error) {
+      console.error('[Search] Error:', error);
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  }, []);
+
+  // Attach search results to chat (creates chip)
+  const attachSearchResults = useCallback(() => {
+    if (searchResults && searchResults.length > 0) {
+      setAttachedSearchResults(searchResults);
+      setShowSearchPopover(false);
+    }
+  }, [searchResults]);
+
+  // Keyboard shortcuts for console log actions
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle if console is open and logs are selected
+      if (!isConsolePanelOpen || selectedLogIndices.size === 0) return;
+      
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const modKey = isMac ? e.metaKey : e.ctrlKey;
+      
+      if (e.key === 'Escape') {
+        // Clear selection
+        setSelectedLogIndices(new Set());
+        e.preventDefault();
+      } else if (modKey && e.key === 'g') {
+        // Instant web search for selected logs
+        const logsText = Array.from(selectedLogIndices)
+          .sort((a, b) => a - b)
+          .map(i => consoleLogs[i]?.message || '')
+          .join('\n');
+        performInstantSearch(logsText);
+        e.preventDefault();
+      } else if (modKey && e.key === 'c' && selectedLogIndices.size > 0) {
+        // Copy (only if in console context, don't override normal copy)
+        const activeElement = document.activeElement;
+        const isInputFocused = activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA';
+        if (!isInputFocused) {
+          const logsText = Array.from(selectedLogIndices)
+            .sort((a, b) => a - b)
+            .map(i => {
+              const log = consoleLogs[i];
+              return log ? `[${log.type}] ${log.message}` : '';
+            })
+            .filter(Boolean)
+            .join('\n');
+          navigator.clipboard.writeText(logsText);
+          e.preventDefault();
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isConsolePanelOpen, selectedLogIndices, consoleLogs, setInput]);
+
   // Filtered console logs
   const filteredConsoleLogs = useMemo(() => {
     if (consoleFilters.size === 0) return consoleLogs;
@@ -3736,6 +3835,14 @@ ${screenshotElement ? `Context: User selected element for visual reference: <${s
         fullPromptText += `\n\nSelected Console Logs (${selectedLogs.length} entries):\n${logsText}`;
     }
 
+    // Include attached search results if any
+    if (attachedSearchResults && attachedSearchResults.length > 0) {
+        const searchText = attachedSearchResults.map((result, i) =>
+          `${i + 1}. ${result.title}\n   URL: ${result.url}\n   ${result.snippet}`
+        ).join('\n\n');
+        fullPromptText += `\n\nWeb Search Results (${attachedSearchResults.length} results for context):\n${searchText}`;
+    }
+
     // Only include code execution instructions if user has selected an element
     // OR explicitly asks to modify the page (change, update, modify, etc.)
     const modifyKeywords = /\b(change|modify|update|edit|delete|remove|add|make|set|fix|replace|style|color|size|font|width|height|margin|padding|border)\b/i;
@@ -3796,6 +3903,7 @@ If you're not sure what the user wants, ask for clarification.
     setAttachLogs(false);
     setAttachedImages([]);
     setScreenshotElement(null);
+    setAttachedSearchResults(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
 
     try {
@@ -4640,13 +4748,10 @@ If you're not sure what the user wants, ask for clarification.
       }
 
       // Determine if we should use coding agent tools
-      // Use tools for file operations, code-related intents, or when MCP tools are available
-      // DOM edits (ui_modify with selected element) use the fast path with minimal prompt
-      const hasMCPTools = mcpToolDefinitions.length > 0
-      const intentNeedsTools = ['code_edit', 'code_create', 'code_delete', 'code_refactor', 'file_operation', 'debug', 'ui_inspect']
-        .includes(intent.type)
+      // ALWAYS provide tools unless in DOM edit mode (fast path for direct CSS changes)
+      // This ensures the AI can read files, search, etc. for ANY request
       // DOM edit mode uses minimal prompt without tools (fast path)
-      const shouldUseTools = promptMode !== 'dom_edit' && (intentNeedsTools || hasMCPTools)
+      const shouldUseTools = promptMode !== 'dom_edit'
       console.log(`[AI SDK] Mode: ${promptMode} | MCP tools: ${mcpToolDefinitions.length} | Tools enabled: ${shouldUseTools}`);
 
       // Use AI SDK for OpenAI, Anthropic, Google text models, and OAuth providers
@@ -5937,9 +6042,42 @@ If you're not sure what the user wants, ask for clarification.
                 </div>
                 <div className="flex items-center gap-1">
                   {selectedLogIndices.size > 0 && (
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-600'}`}>
-                      {selectedLogIndices.size} selected
-                    </span>
+                    <>
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-600'}`}>
+                        {selectedLogIndices.size} selected
+                      </span>
+                      {/* Quick Actions for selected logs */}
+                      <div className="flex items-center gap-0.5 ml-1">
+                        <button
+                          onClick={() => {
+                            const logsText = selectedLogs?.map(l => l.message).join('\n') || '';
+                            // Trigger instant web search
+                            performInstantSearch(logsText);
+                          }}
+                          className={`p-1.5 rounded transition-colors ${isDarkMode ? 'hover:bg-neutral-600 text-neutral-400 hover:text-neutral-200' : 'hover:bg-stone-200 text-stone-500 hover:text-stone-700'}`}
+                          title="Search for solutions (⌘G)"
+                        >
+                          <Search size={14} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            const logsText = selectedLogs?.map(l => `[${l.type}] ${l.message}`).join('\n') || '';
+                            navigator.clipboard.writeText(logsText);
+                          }}
+                          className={`p-1.5 rounded transition-colors ${isDarkMode ? 'hover:bg-neutral-600 text-neutral-400 hover:text-neutral-200' : 'hover:bg-stone-200 text-stone-500 hover:text-stone-700'}`}
+                          title="Copy (⌘C)"
+                        >
+                          <Copy size={14} />
+                        </button>
+                        <button
+                          onClick={() => setSelectedLogIndices(new Set())}
+                          className={`p-1.5 rounded transition-colors ${isDarkMode ? 'hover:bg-neutral-600 text-neutral-400 hover:text-neutral-200' : 'hover:bg-stone-200 text-stone-500 hover:text-stone-700'}`}
+                          title="Clear selection (Esc)"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </>
                   )}
                   <button
                     onClick={handleClearConsole}
@@ -5999,6 +6137,88 @@ If you're not sure what the user wants, ask for clarification.
                   ))
                 )}
                 <div ref={consoleEndRef} />
+              </div>
+            </div>
+          )}
+
+          {/* Search Results Popover */}
+          {showSearchPopover && (
+            <div 
+              className={`absolute bottom-full left-0 right-0 mb-2 mx-2 rounded-xl border shadow-xl overflow-hidden z-50 ${
+                isDarkMode ? 'bg-neutral-800 border-neutral-600' : 'bg-white border-stone-200'
+              }`}
+              style={{ maxHeight: '300px' }}
+            >
+              {/* Header */}
+              <div className={`flex items-center justify-between px-3 py-2 border-b ${isDarkMode ? 'border-neutral-700' : 'border-stone-100'}`}>
+                <div className="flex items-center gap-2">
+                  <Globe size={14} className={isDarkMode ? 'text-blue-400' : 'text-blue-500'} />
+                  <span className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`}>
+                    {isSearching ? 'Searching...' : `${searchResults?.length || 0} Results`}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  {searchResults && searchResults.length > 0 && (
+                    <button
+                      onClick={attachSearchResults}
+                      className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded transition-colors ${
+                        isDarkMode 
+                          ? 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30' 
+                          : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                      }`}
+                      title="Send to chat"
+                    >
+                      <Send size={12} />
+                      Add to Chat
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowSearchPopover(false)}
+                    className={`p-1 rounded transition-colors ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+              
+              {/* Results */}
+              <div className="overflow-y-auto" style={{ maxHeight: '240px' }}>
+                {isSearching ? (
+                  <div className={`flex items-center justify-center py-8 ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                    <Loader2 size={20} className="animate-spin mr-2" />
+                    <span className="text-sm">Searching the web...</span>
+                  </div>
+                ) : searchResults && searchResults.length > 0 ? (
+                  <div className="divide-y divide-stone-100 dark:divide-neutral-700">
+                    {searchResults.map((result, idx) => (
+                      <a
+                        key={idx}
+                        href={result.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`block px-3 py-2 transition-colors ${
+                          isDarkMode ? 'hover:bg-neutral-700' : 'hover:bg-stone-50'
+                        }`}
+                      >
+                        <div className={`text-sm font-medium truncate ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
+                          {result.title}
+                        </div>
+                        <div className={`text-xs truncate mt-0.5 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                          {result.url}
+                        </div>
+                        {result.snippet && (
+                          <div className={`text-xs mt-1 line-clamp-2 ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                            {result.snippet}
+                          </div>
+                        )}
+                      </a>
+                    ))}
+                  </div>
+                ) : searchResults && searchResults.length === 0 ? (
+                  <div className={`text-center py-8 text-sm ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                    No results found
+                  </div>
+                ) : null}
               </div>
             </div>
           )}
@@ -6769,7 +6989,7 @@ If you're not sure what the user wants, ask for clarification.
                     </div>
                   )}
                   {/* Selection Chips */}
-                  {(selectedElement || screenshotElement || attachLogs || selectedLogs) && (
+                  {(selectedElement || screenshotElement || attachLogs || selectedLogs || attachedSearchResults) && (
                       <div className="px-3 pt-3 flex flex-wrap gap-2">
                           {attachLogs && (
                               <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-yellow-50 text-yellow-700 rounded-lg text-xs border border-yellow-200">
@@ -6793,6 +7013,18 @@ If you're not sure what the user wants, ask for clarification.
                                         lastClickedLogIndex.current = null;
                                       }}
                                       className="ml-0.5 hover:text-purple-900"
+                                  >
+                                      <X size={12} />
+                                  </button>
+                              </div>
+                          )}
+                          {attachedSearchResults && attachedSearchResults.length > 0 && (
+                              <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-xs border border-blue-200">
+                                  <Globe size={12} />
+                                  <span className="font-medium">{attachedSearchResults.length} Search Result{attachedSearchResults.length > 1 ? 's' : ''}</span>
+                                  <button
+                                      onClick={() => setAttachedSearchResults(null)}
+                                      className="ml-0.5 hover:text-blue-900"
                                   >
                                       <X size={12} />
                                   </button>
