@@ -2402,16 +2402,26 @@ export default function App() {
         setIsScreenshotActive(false);
 
         if (webview && data.rect) {
-          webview.capturePage({
-            x: Math.floor(data.rect.left),
-            y: Math.floor(data.rect.top),
-            width: Math.ceil(data.rect.width),
-            height: Math.ceil(data.rect.height)
-          }).then((image: Electron.NativeImage) => {
-            setCapturedScreenshot(image.toDataURL());
-          }).catch((err: Error) => {
-            console.error('Failed to capture screenshot:', err);
-          });
+          // Hide move handles before screenshot
+          webview.send('hide-move-handles');
+
+          // Small delay to let UI update, then capture
+          setTimeout(() => {
+            webview.capturePage({
+              x: Math.floor(data.rect.left),
+              y: Math.floor(data.rect.top),
+              width: Math.ceil(data.rect.width),
+              height: Math.ceil(data.rect.height)
+            }).then((image: Electron.NativeImage) => {
+              setCapturedScreenshot(image.toDataURL());
+              // Restore move handles after screenshot
+              webview.send('show-move-handles');
+            }).catch((err: Error) => {
+              console.error('Failed to capture screenshot:', err);
+              // Restore handles even on error
+              webview.send('show-move-handles');
+            });
+          }, 50);
         }
       } else if (channel === 'console-log') {
         const data = args[0] as { level: string; message: string };

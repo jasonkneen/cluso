@@ -1384,3 +1384,41 @@ ipcRenderer.on('confirm-move', () => {
 ipcRenderer.on('cancel-move', () => {
   cleanupAllMoveOverlays()
 })
+
+// Hide move handles for screenshot (keeps element visible)
+ipcRenderer.on('hide-move-handles', () => {
+  moveOverlays.forEach(overlayData => {
+    // Hide handles
+    const handles = overlayData.overlay.querySelectorAll('.move-resize-handle')
+    handles.forEach(handle => {
+      handle.style.display = 'none'
+    })
+    // Hide outline
+    overlayData.overlay.style.outline = 'none'
+    overlayData.overlay.style.outlineOffset = '0'
+    // Hide position label
+    if (overlayData.positionLabel) {
+      overlayData.positionLabel.style.display = 'none'
+    }
+  })
+  console.log('[Move] Handles hidden for screenshot')
+})
+
+// Show move handles after screenshot
+ipcRenderer.on('show-move-handles', () => {
+  moveOverlays.forEach(overlayData => {
+    // Show handles
+    const handles = overlayData.overlay.querySelectorAll('.move-resize-handle')
+    handles.forEach(handle => {
+      handle.style.display = ''
+    })
+    // Restore outline
+    overlayData.overlay.style.outline = '2px solid #f97316'
+    overlayData.overlay.style.outlineOffset = '2px'
+    // Show position label
+    if (overlayData.positionLabel) {
+      overlayData.positionLabel.style.display = ''
+    }
+  })
+  console.log('[Move] Handles restored after screenshot')
+})
