@@ -225,7 +225,7 @@ function injectStyles() {
       outline: 2px solid #f97316 !important;
       outline-offset: 2px !important;
       background: transparent !important;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12) !important;
+      box-shadow: none !important;
       cursor: move !important;
       z-index: 100000 !important;
       overflow: visible !important;
@@ -1130,7 +1130,7 @@ function createMoveOverlay(element, summary, xpath, sourceLocation) {
   // Copy all computed styles from original element to clone
   const computedStyle = window.getComputedStyle(element)
 
-  // Apply key visual styles to ensure seamless appearance
+  // Apply key visual styles - preserve element's original appearance exactly
   clone.style.cssText = ''
   clone.style.visibility = 'visible'
   clone.style.position = 'static'
@@ -1138,6 +1138,7 @@ function createMoveOverlay(element, summary, xpath, sourceLocation) {
   clone.style.width = '100%'
   clone.style.height = '100%'
   clone.style.display = computedStyle.display
+  // Keep original background styling for seamless appearance
   clone.style.background = computedStyle.background
   clone.style.backgroundColor = computedStyle.backgroundColor
   clone.style.backgroundImage = computedStyle.backgroundImage
