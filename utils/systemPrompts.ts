@@ -152,15 +152,18 @@ export function getSystemPrompt(mode: PromptMode, context: PromptContext): strin
  */
 export function getPromptModeForIntent(intentType: string, hasSelectedElement: boolean): PromptMode {
   // DOM edits with selected element = fast path
-  if (intentType === 'ui_modify' && hasSelectedElement) {
+  if ((intentType === 'ui_modify' || intentType === 'ui_build') && hasSelectedElement) {
     return 'dom_edit'
   }
 
-  // File operations
-  if (['code_edit', 'code_create', 'code_delete', 'file_operation', 'code_refactor'].includes(intentType)) {
+  // File operations - includes new coding-related intents
+  if ([
+    'code_edit', 'code_create', 'code_delete', 'file_operation', 'code_refactor',
+    'test', 'document', 'deploy', 'configure'
+  ].includes(intentType)) {
     return 'file_ops'
   }
 
-  // Everything else gets full chat
+  // Everything else gets full chat (research, analyze, compare, plan, review, question, chat, etc.)
   return 'chat'
 }

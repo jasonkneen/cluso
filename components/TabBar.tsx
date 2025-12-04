@@ -18,6 +18,7 @@ interface TabBarProps {
   onTabSelect: (tabId: string) => void
   onTabClose: (tabId: string) => void
   onNewTab: (type?: TabType) => void
+  onReorderTabs?: (tabs: Tab[]) => void
   isDarkMode: boolean
   onToggleDarkMode: () => void
   onOpenSettings: () => void
@@ -48,6 +49,7 @@ export function TabBar({
   onTabSelect,
   onTabClose,
   onNewTab,
+  onReorderTabs,
   isDarkMode,
   onToggleDarkMode,
   onOpenSettings,
@@ -55,6 +57,8 @@ export function TabBar({
   fileWatcherActive
 }: TabBarProps) {
   const [showMenu, setShowMenu] = useState(false)
+  const [draggedTabId, setDraggedTabId] = useState<string | null>(null)
+  const [dragOverTabId, setDragOverTabId] = useState<string | null>(null)
   const menuTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -98,6 +102,56 @@ export function TabBar({
     onNewTab(type)
   }
 
+  // Drag and drop handlers
+  const handleDragStart = (e: React.DragEvent, tabId: string) => {
+    setDraggedTabId(tabId)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', tabId)
+    // Add a slight delay to show the drag state
+    requestAnimationFrame(() => {
+      const target = e.target as HTMLElement
+      target.style.opacity = '0.5'
+    })
+  }
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    const target = e.target as HTMLElement
+    target.style.opacity = '1'
+    setDraggedTabId(null)
+    setDragOverTabId(null)
+  }
+
+  const handleDragOver = (e: React.DragEvent, tabId: string) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (tabId !== draggedTabId) {
+      setDragOverTabId(tabId)
+    }
+  }
+
+  const handleDragLeave = () => {
+    setDragOverTabId(null)
+  }
+
+  const handleDrop = (e: React.DragEvent, targetTabId: string) => {
+    e.preventDefault()
+    if (!draggedTabId || draggedTabId === targetTabId || !onReorderTabs) return
+
+    const draggedIndex = tabs.findIndex(t => t.id === draggedTabId)
+    const targetIndex = tabs.findIndex(t => t.id === targetTabId)
+
+    if (draggedIndex === -1 || targetIndex === -1) return
+
+    // Create new array with reordered tabs
+    const newTabs = [...tabs]
+    const [draggedTab] = newTabs.splice(draggedIndex, 1)
+    newTabs.splice(targetIndex, 0, draggedTab)
+
+    onReorderTabs(newTabs)
+    setDraggedTabId(null)
+    setDragOverTabId(null)
+  }
+
   return (
     <div
       className={`h-11 flex items-center justify-between select-none ${
@@ -117,9 +171,17 @@ export function TabBar({
       >
         {tabs.map((tab) => {
           const TabIcon = getTabIcon(tab.type || 'browser')
+          const isDragging = draggedTabId === tab.id
+          const isDragOver = dragOverTabId === tab.id
           return (
             <div
               key={tab.id}
+              draggable={!!onReorderTabs}
+              onDragStart={(e) => handleDragStart(e, tab.id)}
+              onDragEnd={handleDragEnd}
+              onDragOver={(e) => handleDragOver(e, tab.id)}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, tab.id)}
               onClick={() => onTabSelect(tab.id)}
               className={`
                 group relative flex items-center gap-2 h-8 px-3 rounded-lg cursor-pointer
@@ -132,6 +194,8 @@ export function TabBar({
                     ? 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
                     : 'text-stone-500 hover:bg-stone-200/60 hover:text-stone-700'
                 }
+                ${isDragging ? 'opacity-50' : ''}
+                ${isDragOver ? (isDarkMode ? 'ring-2 ring-violet-500' : 'ring-2 ring-violet-400') : ''}
               `}
               style={{ position: 'relative', top: '3px' }}
             >
@@ -249,7 +313,7 @@ export function TabBar({
             title="File watcher active - monitoring project for changes"
           >
             <Eye size={10} className={isDarkMode ? 'text-emerald-400' : 'text-emerald-600'} />
-            <span>Watch</span>
+            <span>Watching</span>
           </div>
         )}
 
@@ -264,7 +328,7 @@ export function TabBar({
             title="Fast Apply is ready - local AI model loaded"
           >
             <Zap size={10} className={isDarkMode ? 'text-yellow-400' : 'text-yellow-600'} />
-            <span>Fast</span>
+            <span>Ready</span>
           </div>
         )}
 

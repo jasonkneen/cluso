@@ -80,6 +80,18 @@ import {
   Square,
   Move,
   Copy,
+  // Intent icons
+  BookOpen,
+  BarChart2,
+  GitCompare,
+  Map as MapIcon,
+  FileEdit,
+  TestTube,
+  ShieldCheck,
+  Upload,
+  Wrench,
+  MessageSquare,
+  Hammer,
 } from 'lucide-react';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
@@ -337,6 +349,14 @@ export default function App() {
     setActiveTabId(tabId);
   }, []);
 
+  const handleReorderTabs = useCallback((reorderedTabs: Tab[]) => {
+    // Map the reordered Tab[] back to TabState[] preserving all properties
+    setTabs(prev => {
+      const tabMap = new Map(prev.map(t => [t.id, t]));
+      return reorderedTabs.map(t => tabMap.get(t.id)!).filter(Boolean);
+    });
+  }, []);
+
   // Sync URL input when switching tabs
   useEffect(() => {
     setUrlInput(activeTab.url || '');
@@ -570,7 +590,7 @@ export default function App() {
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
-  const [previewIntent, setPreviewIntent] = useState<{ type: string; label: string } | null>(null);
+  const [previewIntent, setPreviewIntent] = useState<{ type: string; label: string; secondaryTypes?: string[]; secondaryLabels?: string[] } | null>(null);
 
   // Selection States
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
@@ -2549,20 +2569,45 @@ export default function App() {
     if (value.trim().length >= 3 && !value.startsWith('@') && !value.startsWith('/')) {
       const { intent } = processCodingMessage(value);
       const intentLabels: Record<string, string> = {
+        // Code operations
         code_edit: 'Edit Code',
-        code_create: 'Create File',
+        code_create: 'Create',
         code_delete: 'Delete',
         code_explain: 'Explain',
         code_refactor: 'Refactor',
         file_operation: 'File Op',
-        question: 'Question',
-        ui_inspect: 'Inspect UI',
+        // UI operations
+        ui_inspect: 'Inspect',
         ui_modify: 'Modify UI',
+        ui_build: 'Build UI',
+        // Research & Analysis
+        research: 'Research',
+        analyze: 'Analyze',
+        compare: 'Compare',
+        // Planning & Architecture
+        plan: 'Plan',
+        document: 'Document',
+        // Testing & Quality
+        test: 'Test',
         debug: 'Debug',
+        review: 'Review',
+        // DevOps
+        deploy: 'Deploy',
+        configure: 'Configure',
+        // Communication
+        question: 'Question',
+        chat: 'Chat',
         unknown: '',
       };
       if (intent.type !== 'unknown' && intent.confidence > 0.2) {
-        setPreviewIntent({ type: intent.type, label: intentLabels[intent.type] });
+        // Filter secondary intents - remove primary type to avoid duplicates
+        const dedupedSecondary = (intent.secondaryTypes || []).filter(t => t !== intent.type && t !== 'unknown');
+        setPreviewIntent({
+          type: intent.type,
+          label: intentLabels[intent.type] || intent.type,
+          secondaryTypes: dedupedSecondary,
+          secondaryLabels: dedupedSecondary.map(t => intentLabels[t] || t),
+        });
       } else {
         setPreviewIntent(null);
       }
@@ -3835,20 +3880,29 @@ export default function App() {
       return;
     }
 
+    // Check if webview is actually ready to receive messages
+    // getWebContentsId() throws if webview isn't fully attached and ready
+    try {
+      webview.getWebContentsId();
+    } catch (e) {
+      console.log('[Inspector Sync] Skipping: webview not ready to receive messages');
+      return;
+    }
+
     console.log('[Inspector Sync] Sending inspector modes to webview:', { isInspectorActive, isScreenshotActive, isMoveActive });
     try {
       webview.send('set-inspector-mode', isInspectorActive);
       webview.send('set-screenshot-mode', isScreenshotActive);
       webview.send('set-move-mode', isMoveActive);
+
+      if (!isInspectorActive && !isMoveActive) {
+        setSelectedElement(null);
+        setShowElementChat(false);
+        // Clear canvas indicators when modes are deactivated
+        webview.send('clear-selection');
+      }
     } catch (e) {
       console.warn('[Inspector Sync] Failed to send to webview:', e);
-    }
-
-    if (!isInspectorActive && !isMoveActive) {
-      setSelectedElement(null);
-      setShowElementChat(false);
-      // Clear canvas indicators when modes are deactivated
-      webview?.send('clear-selection');
     }
   }, [isInspectorActive, isScreenshotActive, isMoveActive, isElectron, isWebviewReady, activeTabId]);
 
@@ -5869,6 +5923,7 @@ If you're not sure what the user wants, ask for clarification.
         onTabSelect={handleSelectTab}
         onTabClose={handleCloseTab}
         onNewTab={handleNewTab}
+        onReorderTabs={handleReorderTabs}
         isDarkMode={isDarkMode}
         onToggleDarkMode={toggleDarkMode}
         onOpenSettings={() => setIsSettingsOpen(true)}
@@ -7565,26 +7620,68 @@ If you're not sure what the user wants, ask for clarification.
                       </div>
                   )}
 
-                  {/* Intent Preview Chip */}
+                  {/* Intent Preview Chips - supports multiple intents */}
                   {previewIntent && previewIntent.label && (
-                      <div className={`px-3 pt-2`}>
+                      <div className={`px-3 pt-2 flex flex-wrap gap-1.5`}>
+                          {/* Primary intent chip */}
                           <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium ${
                             isDarkMode
                               ? 'bg-gradient-to-r from-violet-500/20 to-purple-500/20 text-violet-300 border border-violet-500/30'
                               : 'bg-gradient-to-r from-violet-50 to-purple-50 text-violet-700 border border-violet-200'
                           }`}>
+                              {/* Code operations */}
                               {previewIntent.type === 'code_edit' && <Pencil size={12} />}
                               {previewIntent.type === 'code_create' && <FilePlus size={12} />}
                               {previewIntent.type === 'code_delete' && <Trash2 size={12} />}
                               {previewIntent.type === 'code_explain' && <Lightbulb size={12} />}
                               {previewIntent.type === 'code_refactor' && <RefreshCw size={12} />}
                               {previewIntent.type === 'file_operation' && <Folder size={12} />}
-                              {previewIntent.type === 'question' && <HelpCircle size={12} />}
+                              {/* UI operations */}
                               {previewIntent.type === 'ui_inspect' && <Search size={12} />}
                               {previewIntent.type === 'ui_modify' && <Palette size={12} />}
+                              {previewIntent.type === 'ui_build' && <Hammer size={12} />}
+                              {/* Research & Analysis */}
+                              {previewIntent.type === 'research' && <BookOpen size={12} />}
+                              {previewIntent.type === 'analyze' && <BarChart2 size={12} />}
+                              {previewIntent.type === 'compare' && <GitCompare size={12} />}
+                              {/* Planning */}
+                              {previewIntent.type === 'plan' && <MapIcon size={12} />}
+                              {previewIntent.type === 'document' && <FileEdit size={12} />}
+                              {/* Testing & Quality */}
+                              {previewIntent.type === 'test' && <TestTube size={12} />}
                               {previewIntent.type === 'debug' && <Bug size={12} />}
+                              {previewIntent.type === 'review' && <ShieldCheck size={12} />}
+                              {/* DevOps */}
+                              {previewIntent.type === 'deploy' && <Upload size={12} />}
+                              {previewIntent.type === 'configure' && <Wrench size={12} />}
+                              {/* Communication */}
+                              {previewIntent.type === 'question' && <HelpCircle size={12} />}
+                              {previewIntent.type === 'chat' && <MessageSquare size={12} />}
                               <span>{previewIntent.label}</span>
                           </div>
+                          {/* Secondary intent chips */}
+                          {previewIntent.secondaryLabels?.map((label, idx) => (
+                              <div key={idx} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium ${
+                                isDarkMode
+                                  ? 'bg-gradient-to-r from-blue-500/15 to-cyan-500/15 text-blue-300 border border-blue-500/25'
+                                  : 'bg-gradient-to-r from-blue-50 to-cyan-50 text-blue-600 border border-blue-200'
+                              }`}>
+                                  {/* Secondary icons */}
+                                  {previewIntent.secondaryTypes?.[idx] === 'research' && <BookOpen size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'analyze' && <BarChart2 size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'compare' && <GitCompare size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'plan' && <MapIcon size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'test' && <TestTube size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'review' && <ShieldCheck size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'debug' && <Bug size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'question' && <HelpCircle size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'ui_modify' && <Palette size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'ui_build' && <Hammer size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'code_edit' && <Pencil size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'code_create' && <FilePlus size={12} />}
+                                  <span>{label}</span>
+                              </div>
+                          ))}
                       </div>
                   )}
 

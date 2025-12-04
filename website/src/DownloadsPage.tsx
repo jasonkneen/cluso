@@ -472,10 +472,9 @@ export const DownloadsPage: React.FC = () => {
             {/* macOS */}
             <div className="download-card">
               <div className="download-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M18 13a6 6 0 0 0-6-6 6 6 0 0 0-6 6"/>
-                  <path d="M9 13a3 3 0 0 1 6 0"/>
-                  <path d="M12 2a10 10 0 0 1 10 10 10 10 0 0 1-10 10 10 10 0 0 1-10-10 10 10 0 0 1 10-10z"/>
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.3-3.14-2.53C4.25 17.12 3.75 15.36 4.4 13.9c.6-1.23 1.85-2.02 3.12-2.05 1.28-.03 2.5.77 3.27.77.76 0 2.39-1 4.04-.92 1.44.15 2.87.72 3.85 1.65-.35.2-1.65 1.24-1.65 2.73 0 1.73 1.4 2.58 1.4 2.58s-.45 1.52-1.47 2.27z"/>
+                  <path d="M12.07 5.22c.65-.78 1.14-1.87.99-2.96-.96.04-2.14.65-2.85 1.44-.63.73-1.18 1.89-.99 3.01 1.07.08 2.17-.54 2.85-1.49z"/>
                 </svg>
               </div>
               <h2>macOS</h2>
@@ -501,9 +500,8 @@ export const DownloadsPage: React.FC = () => {
             {/* Windows */}
             <div className="download-card">
               <div className="download-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M3 4h18v6H3V4z"/>
-                  <path d="M3 14h18v6H3v-6z"/>
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/>
                 </svg>
               </div>
               <h2>Windows</h2>
@@ -529,7 +527,7 @@ export const DownloadsPage: React.FC = () => {
 
           {/* Version Info */}
           <div className="version-info">
-            <p>Latest Version: <span className="version-number">1.0.0</span> • December 2024</p>
+            <p>Latest Version: <span className="version-number">1.0.0</span> • December 2025</p>
           </div>
         </div>
       </div>

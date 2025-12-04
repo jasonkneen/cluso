@@ -1135,7 +1135,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
             </button>
           </form>
 
-          <p className="hero-note">Join the waitlist to get early access.</p>
+          <p className="hero-note">Join for early access</p>
 
           <div className="hero-image">
             <img

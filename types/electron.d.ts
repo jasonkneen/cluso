@@ -669,6 +669,103 @@ interface ElectronSelectorAgentAPI {
   onError: (callback: (error: string) => void) => () => void
 }
 
+// File Watcher API
+interface FileWatcherEvent {
+  type: 'add' | 'change' | 'unlink'
+  path: string
+  relativePath: string
+  projectPath: string
+  timestamp: number
+}
+
+interface ElectronFileWatcherAPI {
+  start: (projectPath: string) => Promise<{ success: boolean; alreadyWatching?: boolean }>
+  stop: (projectPath: string) => Promise<{ success: boolean; wasNotWatching?: boolean }>
+  getWatched: () => Promise<string[]>
+  onChange: (callback: (event: FileWatcherEvent) => void) => () => void
+}
+
+// Background Validator API
+interface ValidationIssue {
+  file: string
+  relativePath: string
+  line: number
+  column: number
+  severity: 'error' | 'warning'
+  code: string
+  message: string
+  tool: 'typescript' | 'eslint'
+  fixable?: boolean
+}
+
+interface ValidationResult {
+  tool: string
+  success: boolean
+  issues: ValidationIssue[]
+  skipped?: boolean
+  raw?: string
+}
+
+interface ValidationEvent {
+  type: 'start' | 'complete' | 'error'
+  projectPath: string
+  timestamp: number
+  changedFiles?: string[]
+  results?: ValidationResult[]
+  issues?: ValidationIssue[]
+  summary?: {
+    errors: number
+    warnings: number
+    total: number
+  }
+}
+
+interface ValidationState {
+  running: boolean
+  issues: ValidationIssue[]
+  lastRun?: number
+  lastComplete?: number
+}
+
+interface ElectronValidatorAPI {
+  trigger: (projectPath: string) => Promise<{ results: ValidationResult[]; issues: ValidationIssue[] }>
+  getState: (projectPath: string) => Promise<ValidationState>
+  clear: (projectPath: string) => Promise<{ success: boolean }>
+  onEvent: (callback: (event: ValidationEvent) => void) => () => void
+}
+
+// Agent Todos Aggregation API
+interface AgentTodo {
+  id: string
+  text: string
+  completed: boolean
+  status?: 'pending' | 'in_progress' | 'completed'
+  priority?: 'low' | 'medium' | 'high'
+  agent: string
+  source: string
+  line?: number
+  createdAt: string
+}
+
+interface AgentInfo {
+  id: string
+  name: string
+  icon: string
+  color: string
+  count?: number
+}
+
+interface AgentTodosScanResult {
+  todos: AgentTodo[]
+  agents: Record<string, AgentInfo>
+}
+
+interface ElectronAgentTodosAPI {
+  scan: (projectPath: string) => Promise<AgentTodosScanResult>
+  getAgents: () => Promise<AgentInfo[]>
+  getAgentInfo: (agentId: string) => Promise<AgentInfo | null>
+}
+
 interface ElectronAPI {
   git: ElectronGitAPI
   files: ElectronFilesAPI
@@ -683,6 +780,9 @@ interface ElectronAPI {
   voice?: ElectronVoiceAPI
   tabdata?: ElectronTabDataAPI
   fastApply?: ElectronFastApplyAPI
+  fileWatcher?: ElectronFileWatcherAPI
+  validator?: ElectronValidatorAPI
+  agentTodos?: ElectronAgentTodosAPI
   getWebviewPreloadPath: () => Promise<string>
   isElectron: boolean
 }

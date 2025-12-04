@@ -10,6 +10,8 @@ const selectorAgent = require('./selector-agent.cjs')
 const aiSdkWrapper = require('./ai-sdk-wrapper.cjs')
 const agentSdkWrapper = require('./agent-sdk-wrapper.cjs')
 const fileWatcher = require('./file-watcher.cjs')
+const backgroundValidator = require('./background-validator.cjs')
+const agentTodos = require('./agent-todos.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -983,6 +985,33 @@ function registerGitHandlers() {
 
   ipcMain.handle('file-watcher:get-watched', async () => {
     return fileWatcher.getWatchedPaths()
+  })
+
+  // Background validator handlers
+  ipcMain.handle('validator:trigger', async (event, projectPath) => {
+    return backgroundValidator.triggerValidation(projectPath)
+  })
+
+  ipcMain.handle('validator:get-state', async (event, projectPath) => {
+    return backgroundValidator.getValidationState(projectPath)
+  })
+
+  ipcMain.handle('validator:clear', async (event, projectPath) => {
+    backgroundValidator.clearValidation(projectPath)
+    return { success: true }
+  })
+
+  // Agent todos handlers - aggregate todos from various AI coding agents
+  ipcMain.handle('agent-todos:scan', async (event, projectPath) => {
+    return agentTodos.scanAllAgents(projectPath)
+  })
+
+  ipcMain.handle('agent-todos:agents', async () => {
+    return agentTodos.getAllAgents()
+  })
+
+  ipcMain.handle('agent-todos:agent-info', async (event, agentId) => {
+    return agentTodos.getAgentInfo(agentId)
   })
 
   // Get file stats (size, modified time, etc)

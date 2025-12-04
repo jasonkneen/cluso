@@ -5,26 +5,46 @@ import { SelectedElement, Message } from '../types'
 import { getSystemPrompt, getPromptModeForIntent, type PromptMode } from '../utils/systemPrompts'
 import { getElectronAPI } from './useElectronAPI'
 
-// Intent classification types
+// Intent classification types - designed to be combinable (e.g., ui_modify + research)
 export type IntentType =
+  // Code operations
   | 'code_edit'      // Edit/modify existing code
   | 'code_create'    // Create new files/code
   | 'code_delete'    // Delete files/code
   | 'code_explain'   // Explain code
   | 'code_refactor'  // Refactor/improve code
   | 'file_operation' // File system operations (list, rename, etc)
-  | 'question'       // General question about code/context
+  // UI operations
   | 'ui_inspect'     // Inspect/analyze UI element
   | 'ui_modify'      // Modify UI element
+  | 'ui_build'       // Build new UI component/feature
+  // Research & Analysis
+  | 'research'       // Research, investigate, find information
+  | 'analyze'        // Analyze code, data, or patterns
+  | 'compare'        // Compare options, approaches, or implementations
+  // Planning & Architecture
+  | 'plan'           // Plan implementation, design architecture
+  | 'document'       // Write documentation, comments, README
+  // Testing & Quality
+  | 'test'           // Write tests, run tests, test functionality
   | 'debug'          // Debug/fix issues
+  | 'review'         // Code review, security review
+  // DevOps & Deployment
+  | 'deploy'         // Deploy, publish, release
+  | 'configure'      // Configure settings, environment, tools
+  // Communication
+  | 'question'       // General question about code/context
+  | 'chat'           // General conversation, not task-specific
+  // Meta
   | 'unknown'        // Couldn't classify
 
 export interface ClassifiedIntent {
-  type: IntentType
+  type: IntentType           // Primary intent
+  secondaryTypes: IntentType[] // Additional intents (for combinations like "research + ui_modify")
   confidence: number
-  targets: string[]        // Files/elements being targeted
-  action: string           // What to do (edit, create, delete, etc)
-  description: string      // Human-readable description
+  targets: string[]          // Files/elements being targeted
+  action: string             // What to do (edit, create, delete, etc)
+  description: string        // Human-readable description
 }
 
 // Context for the coding agent
@@ -151,13 +171,102 @@ const INTENT_PATTERNS: Array<{
     ],
     keywords: ['how', 'what', 'why', 'question'],
   },
+  // New intent types for comprehensive coverage
+  {
+    type: 'ui_build',
+    patterns: [
+      /(?:build|create|make)\s+(?:a\s+)?(?:new\s+)?(?:page|screen|view|layout|form|modal|dialog|menu|nav|sidebar|header|footer|component|widget)/i,
+      /(?:add|implement)\s+(?:a\s+)?(?:new\s+)?(?:feature|section|area)/i,
+    ],
+    keywords: ['build', 'create page', 'new page', 'new screen', 'add section', 'new component', 'create form', 'add modal'],
+  },
+  {
+    type: 'research',
+    patterns: [
+      /(?:research|investigate|look\s+into|find\s+out|explore|discover)/i,
+      /(?:what\s+are\s+the\s+best|best\s+practices|how\s+do\s+others|industry\s+standard)/i,
+      /(?:search\s+for|look\s+up|google|find\s+examples)/i,
+    ],
+    keywords: ['research', 'investigate', 'explore', 'best practices', 'find out', 'look into', 'examples of'],
+  },
+  {
+    type: 'analyze',
+    patterns: [
+      /(?:analyze|analysis|audit|assess|evaluate|examine|study)/i,
+      /(?:what's\s+wrong|find\s+issues|identify\s+problems|check\s+for)/i,
+    ],
+    keywords: ['analyze', 'analysis', 'audit', 'assess', 'evaluate', 'examine', 'study', 'find issues'],
+  },
+  {
+    type: 'compare',
+    patterns: [
+      /(?:compare|versus|vs\.?|which\s+is\s+better|pros\s+and\s+cons|trade-?offs)/i,
+      /(?:difference\s+between|similarities|options)/i,
+    ],
+    keywords: ['compare', 'versus', 'vs', 'better', 'pros cons', 'trade-offs', 'difference between', 'options'],
+  },
+  {
+    type: 'plan',
+    patterns: [
+      /(?:plan|design|architect|outline|strategy|roadmap|approach)/i,
+      /(?:how\s+should\s+we|what's\s+the\s+best\s+way\s+to|steps\s+to)/i,
+    ],
+    keywords: ['plan', 'design', 'architect', 'outline', 'strategy', 'roadmap', 'approach', 'steps'],
+  },
+  {
+    type: 'document',
+    patterns: [
+      /(?:document|write\s+docs|readme|jsdoc|comment|annotate)/i,
+      /(?:add\s+documentation|explain\s+in\s+code|write\s+comments)/i,
+    ],
+    keywords: ['document', 'documentation', 'readme', 'jsdoc', 'comments', 'annotate'],
+  },
+  {
+    type: 'test',
+    patterns: [
+      /(?:test|write\s+tests|unit\s+test|integration\s+test|e2e|spec)/i,
+      /(?:verify|validate|check\s+if\s+works|make\s+sure)/i,
+    ],
+    keywords: ['test', 'tests', 'unit test', 'integration test', 'e2e', 'spec', 'verify', 'validate'],
+  },
+  {
+    type: 'review',
+    patterns: [
+      /(?:review|code\s+review|security\s+review|check\s+code|audit\s+code)/i,
+      /(?:is\s+this\s+code\s+(?:good|safe|secure)|any\s+issues|improvements)/i,
+    ],
+    keywords: ['review', 'code review', 'security review', 'audit', 'check code', 'improvements'],
+  },
+  {
+    type: 'deploy',
+    patterns: [
+      /(?:deploy|publish|release|ship|push\s+to\s+prod|go\s+live)/i,
+      /(?:build\s+for\s+production|production\s+build|package)/i,
+    ],
+    keywords: ['deploy', 'publish', 'release', 'ship', 'production', 'go live'],
+  },
+  {
+    type: 'configure',
+    patterns: [
+      /(?:configure|config|setup|set\s+up|settings|environment|env)/i,
+      /(?:install|add\s+package|npm\s+install|add\s+dependency)/i,
+    ],
+    keywords: ['configure', 'config', 'setup', 'settings', 'environment', 'env', 'install', 'package'],
+  },
+  {
+    type: 'chat',
+    patterns: [
+      /^(?:hi|hello|hey|thanks|thank\s+you|ok|okay|sure|cool|nice|great)\s*[!.]?$/i,
+    ],
+    keywords: ['hi', 'hello', 'hey', 'thanks', 'ok'],
+  },
 ]
 
-// Classify user intent from message
+// Classify user intent from message - returns primary + secondary intents
 function classifyIntent(message: string, context: CodingContext): ClassifiedIntent {
   const lowerMessage = message.toLowerCase()
-  let bestMatch: { type: IntentType; score: number } = { type: 'unknown', score: 0 }
   const scoreBreakdown: Record<string, { pattern: number; keyword: number; context: number; total: number }> = {}
+  const allScores: Array<{ type: IntentType; score: number }> = []
 
   for (const pattern of INTENT_PATTERNS) {
     let score = 0
@@ -182,7 +291,7 @@ function classifyIntent(message: string, context: CodingContext): ClassifiedInte
     score += keywordScore
 
     // Boost score based on context
-    if (context.selectedElement && (pattern.type === 'ui_inspect' || pattern.type === 'ui_modify')) {
+    if (context.selectedElement && (pattern.type === 'ui_inspect' || pattern.type === 'ui_modify' || pattern.type === 'ui_build')) {
       contextScore += 2
     }
     if (context.selectedFiles.length > 0 && pattern.type.startsWith('code_')) {
@@ -195,15 +304,30 @@ function classifyIntent(message: string, context: CodingContext): ClassifiedInte
 
     scoreBreakdown[pattern.type] = { pattern: patternScore, keyword: keywordScore, context: contextScore, total: score }
 
-    if (score > bestMatch.score) {
-      bestMatch = { type: pattern.type, score }
+    if (score > 0) {
+      allScores.push({ type: pattern.type, score })
     }
   }
 
+  // Sort by score descending
+  allScores.sort((a, b) => b.score - a.score)
+
+  // Get primary intent (highest scoring)
+  const primaryIntent = allScores[0] || { type: 'unknown' as IntentType, score: 0 }
+
+  // Get secondary intents (other high-scoring intents above threshold)
+  // Threshold: at least 50% of primary score and score >= 2
+  const secondaryThreshold = Math.max(primaryIntent.score * 0.5, 2)
+  const secondaryTypes: IntentType[] = allScores
+    .slice(1) // Skip primary
+    .filter(s => s.score >= secondaryThreshold)
+    .slice(0, 2) // Max 2 secondary intents
+    .map(s => s.type)
+
   // Log intent classification for debugging
   console.log('[Intent] Classification for:', message.substring(0, 50))
-  console.log('[Intent] Scores:', scoreBreakdown)
-  console.log('[Intent] Winner:', bestMatch.type, 'with score', bestMatch.score)
+  console.log('[Intent] Top scores:', allScores.slice(0, 5))
+  console.log('[Intent] Primary:', primaryIntent.type, '| Secondary:', secondaryTypes)
 
   // Extract targets from message
   const targets: string[] = []
@@ -222,19 +346,31 @@ function classifyIntent(message: string, context: CodingContext): ClassifiedInte
     code_explain: 'explain',
     code_refactor: 'refactor',
     file_operation: 'file_op',
-    question: 'answer',
     ui_inspect: 'inspect',
     ui_modify: 'modify',
+    ui_build: 'build',
+    research: 'research',
+    analyze: 'analyze',
+    compare: 'compare',
+    plan: 'plan',
+    document: 'document',
+    test: 'test',
     debug: 'debug',
+    review: 'review',
+    deploy: 'deploy',
+    configure: 'configure',
+    question: 'answer',
+    chat: 'chat',
     unknown: 'process',
   }
 
   return {
-    type: bestMatch.type,
-    confidence: Math.min(bestMatch.score / 10, 1),
+    type: primaryIntent.type,
+    secondaryTypes,
+    confidence: Math.min(primaryIntent.score / 10, 1),
     targets,
-    action: actionMap[bestMatch.type],
-    description: `${actionMap[bestMatch.type]} ${targets.join(', ') || 'context'}`,
+    action: actionMap[primaryIntent.type] || 'process',
+    description: `${actionMap[primaryIntent.type] || 'process'} ${targets.join(', ') || 'context'}`,
   }
 }
 

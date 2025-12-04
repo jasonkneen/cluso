@@ -425,6 +425,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // Background validator operations (lint, typecheck, etc)
+  validator: {
+    trigger: (projectPath) => ipcRenderer.invoke('validator:trigger', projectPath),
+    getState: (projectPath) => ipcRenderer.invoke('validator:get-state', projectPath),
+    clear: (projectPath) => ipcRenderer.invoke('validator:clear', projectPath),
+    // Listen for validation events
+    onEvent: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('background-validator:event', handler)
+      return () => ipcRenderer.removeListener('background-validator:event', handler)
+    },
+  },
+
+  // Agent todos aggregation (scan todos from Claude, Cline, Roo, etc)
+  agentTodos: {
+    scan: (projectPath) => ipcRenderer.invoke('agent-todos:scan', projectPath),
+    getAgents: () => ipcRenderer.invoke('agent-todos:agents'),
+    getAgentInfo: (agentId) => ipcRenderer.invoke('agent-todos:agent-info', agentId),
+  },
+
   // Check if running in Electron
   isElectron: true,
 })

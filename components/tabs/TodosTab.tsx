@@ -1,11 +1,33 @@
-import React, { useState, useCallback } from 'react'
-import { Plus, Check, Circle, Trash2, Bot, User, AlertCircle, Clock } from 'lucide-react'
+import React, { useState, useCallback, useEffect } from 'react'
+import { Plus, Check, Circle, Trash2, Bot, User, AlertCircle, Clock, RefreshCw, Filter } from 'lucide-react'
 import { TodoItem } from '../../types/tab'
+
+// Agent todo from external tools (Claude, Cline, Roo, etc.)
+interface AgentTodo {
+  id: string
+  text: string
+  completed: boolean
+  status?: 'pending' | 'in_progress' | 'completed'
+  priority?: 'low' | 'medium' | 'high'
+  agent: string
+  source: string
+  line?: number
+  createdAt: string
+}
+
+interface AgentInfo {
+  id: string
+  name: string
+  icon: string
+  color: string
+  count?: number
+}
 
 interface TodosTabProps {
   items: TodoItem[]
   isDarkMode: boolean
   onUpdateItems: (items: TodoItem[]) => void
+  projectPath?: string // If provided, will scan for agent todos
 }
 
 const PRIORITY_COLORS = {
@@ -14,10 +36,50 @@ const PRIORITY_COLORS = {
   high: { bg: 'bg-red-500/20', text: 'text-red-500', label: 'High' },
 }
 
-export function TodosTab({ items, isDarkMode, onUpdateItems }: TodosTabProps) {
+// Default agent colors (fallback if not provided by scan)
+const AGENT_COLORS: Record<string, string> = {
+  'claude-code': '#D97706',
+  'cline': '#3B82F6',
+  'roo-code': '#10B981',
+  'codex': '#8B5CF6',
+  'aider': '#EF4444',
+  'windsurf': '#06B6D4',
+  'user': '#6B7280',
+}
+
+export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: TodosTabProps) {
   const [newTodoText, setNewTodoText] = useState('')
   const [newTodoPriority, setNewTodoPriority] = useState<'low' | 'medium' | 'high'>('medium')
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all')
+  const [agentFilter, setAgentFilter] = useState<string | null>(null) // null = all agents
+
+  // Agent todos state
+  const [agentTodos, setAgentTodos] = useState<AgentTodo[]>([])
+  const [agents, setAgents] = useState<Record<string, AgentInfo>>({})
+  const [isScanning, setIsScanning] = useState(false)
+  const [showAgentTodos, setShowAgentTodos] = useState(true)
+
+  // Scan for agent todos when project path changes
+  useEffect(() => {
+    if (projectPath && window.electronAPI?.agentTodos) {
+      scanAgentTodos()
+    }
+  }, [projectPath])
+
+  const scanAgentTodos = async () => {
+    if (!projectPath || !window.electronAPI?.agentTodos) return
+
+    setIsScanning(true)
+    try {
+      const result = await window.electronAPI.agentTodos.scan(projectPath)
+      setAgentTodos(result.todos)
+      setAgents(result.agents)
+    } catch (err) {
+      console.error('[TodosTab] Failed to scan agent todos:', err)
+    } finally {
+      setIsScanning(false)
+    }
+  }
 
   // Add a new todo
   const handleAddTodo = useCallback(() => {
@@ -55,10 +117,25 @@ export function TodosTab({ items, isDarkMode, onUpdateItems }: TodosTabProps) {
     onUpdateItems(items.filter(item => item.id !== id))
   }, [items, onUpdateItems])
 
+  // Combine user todos and agent todos into unified format
+  const combinedTodos = [
+    // User todos
+    ...items.map(item => ({
+      ...item,
+      agent: 'user',
+      source: 'local',
+    })),
+    // Agent todos (if showing)
+    ...(showAgentTodos ? agentTodos : []),
+  ]
+
   // Filter items
-  const filteredItems = items.filter(item => {
-    if (filter === 'active') return !item.completed
-    if (filter === 'completed') return item.completed
+  const filteredItems = combinedTodos.filter(item => {
+    // Completion filter
+    if (filter === 'active' && item.completed) return false
+    if (filter === 'completed' && !item.completed) return false
+    // Agent filter
+    if (agentFilter && item.agent !== agentFilter) return false
     return true
   })
 
@@ -72,8 +149,9 @@ export function TodosTab({ items, isDarkMode, onUpdateItems }: TodosTabProps) {
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   })
 
-  const completedCount = items.filter(i => i.completed).length
-  const activeCount = items.length - completedCount
+  const completedCount = combinedTodos.filter(i => i.completed).length
+  const activeCount = combinedTodos.length - completedCount
+  const agentCount = agentTodos.length
 
   return (
     <div className={`flex-1 flex flex-col h-full overflow-hidden ${isDarkMode ? 'bg-neutral-900' : 'bg-stone-100'}`}>
@@ -87,8 +165,71 @@ export function TodosTab({ items, isDarkMode, onUpdateItems }: TodosTabProps) {
             <span className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'}>
               {activeCount} active, {completedCount} completed
             </span>
+            {projectPath && (
+              <button
+                onClick={scanAgentTodos}
+                disabled={isScanning}
+                className={`p-1 rounded transition-colors ${
+                  isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'
+                } ${isScanning ? 'animate-spin' : ''}`}
+                title="Refresh agent todos"
+              >
+                <RefreshCw size={14} />
+              </button>
+            )}
           </div>
         </div>
+
+        {/* Agent Filter Chips */}
+        {Object.keys(agents).length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-3">
+            <button
+              onClick={() => setAgentFilter(null)}
+              className={`px-2 py-1 text-[10px] font-medium rounded-full transition-colors ${
+                agentFilter === null
+                  ? 'bg-neutral-500 text-white'
+                  : isDarkMode
+                    ? 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+                    : 'bg-stone-200 text-stone-600 hover:bg-stone-300'
+              }`}
+            >
+              All ({combinedTodos.length})
+            </button>
+            <button
+              onClick={() => setAgentFilter('user')}
+              className={`px-2 py-1 text-[10px] font-medium rounded-full transition-colors ${
+                agentFilter === 'user'
+                  ? 'text-white'
+                  : isDarkMode
+                    ? 'text-neutral-300 hover:opacity-80'
+                    : 'text-stone-700 hover:opacity-80'
+              }`}
+              style={{
+                backgroundColor: agentFilter === 'user' ? AGENT_COLORS['user'] : `${AGENT_COLORS['user']}20`,
+              }}
+            >
+              👤 You ({items.length})
+            </button>
+            {Object.entries(agents).map(([agentId, agent]) => (
+              <button
+                key={agentId}
+                onClick={() => setAgentFilter(agentId)}
+                className={`px-2 py-1 text-[10px] font-medium rounded-full transition-colors ${
+                  agentFilter === agentId
+                    ? 'text-white'
+                    : isDarkMode
+                      ? 'text-neutral-300 hover:opacity-80'
+                      : 'text-stone-700 hover:opacity-80'
+                }`}
+                style={{
+                  backgroundColor: agentFilter === agentId ? agent.color : `${agent.color}20`,
+                }}
+              >
+                {agent.icon} {agent.name} ({agent.count || 0})
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Filters */}
         <div className="flex gap-2 mt-3">
