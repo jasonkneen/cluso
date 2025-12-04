@@ -3783,9 +3783,6 @@ export default function App() {
         originalContent: event.originalContent,
         isFileModification: true,
       });
-
-      // Auto-open the drawer when files are modified by tools
-      setIsEditedFilesDrawerOpen(true);
     };
   }, [addEditedFile]);
 
@@ -3829,9 +3826,6 @@ export default function App() {
         originalContent: event.originalContent,
         isFileModification: true,
       });
-
-      // Auto-open the drawer
-      setIsEditedFilesDrawerOpen(true);
     });
 
     return removeListener;
@@ -3876,9 +3870,6 @@ export default function App() {
         deletions: event.type === 'unlink' ? 1 : event.type === 'change' ? 1 : 0,
         isFileModification: true,
       });
-
-      // Auto-open the drawer when files change
-      setIsEditedFilesDrawerOpen(true);
     });
 
     // Cleanup: stop watching when project changes or unmounts
@@ -8589,6 +8580,7 @@ If you're not sure what the user wants, ask for clarification.
         onToggleDarkMode={toggleDarkMode}
         settings={appSettings}
         onSettingsChange={setAppSettings}
+        projectPath={activeTab?.projectPath}
       />
 
       </div>

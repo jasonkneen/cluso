@@ -36,9 +36,10 @@ import {
 } from 'lucide-react'
 import { debugLog } from '../utils/debug'
 import { FastApplySettings } from './FastApplySettings'
+import { CodeIndexSettings } from './CodeIndexSettings'
 import { useTheme } from '../hooks/useTheme'
 
-type SettingsSection = 'general' | 'display' | 'providers' | 'models' | 'mcp' | 'lsp' | 'themes' | 'pro'
+type SettingsSection = 'general' | 'display' | 'providers' | 'models' | 'mcp' | 'lsp' | 'themes' | 'codeindex' | 'pro'
 
 export interface Provider {
   id: string
@@ -166,6 +167,7 @@ interface SettingsDialogProps {
   onToggleDarkMode: () => void
   settings: AppSettings
   onSettingsChange: (settings: AppSettings) => void
+  projectPath?: string  // Current project path from activeTab
 }
 
 const SECTIONS: { id: SettingsSection; label: string; icon: React.ReactNode }[] = [
@@ -176,6 +178,7 @@ const SECTIONS: { id: SettingsSection; label: string; icon: React.ReactNode }[] 
   { id: 'mcp', label: 'MCP Servers', icon: <Server size={18} /> },
   { id: 'lsp', label: 'Language Servers', icon: <Terminal size={18} /> },
   { id: 'themes', label: 'Themes', icon: <Palette size={18} /> },
+  { id: 'codeindex', label: 'Code Index', icon: <HardDrive size={18} /> },
   { id: 'pro', label: 'Pro Features', icon: <Zap size={18} /> },
 ]
 
@@ -211,6 +214,7 @@ export function SettingsDialog({
   onToggleDarkMode,
   settings,
   onSettingsChange,
+  projectPath,
 }: SettingsDialogProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general')
   const [showApiKeys, setShowApiKeys] = useState<Record<string, boolean>>({})
@@ -260,6 +264,8 @@ export function SettingsDialog({
   const [isLoadingLsp, setIsLoadingLsp] = useState(false)
   const [installingServers, setInstallingServers] = useState<Set<string>>(new Set())
   const [lspCacheInfo, setLspCacheInfo] = useState<{ cacheSize: number; cacheDir: string } | null>(null)
+
+  // Project path for Code Index is passed via prop (from activeTab.projectPath)
 
   // Check Claude Code OAuth status on mount and when dialog opens
   useEffect(() => {
@@ -2343,6 +2349,11 @@ export function SettingsDialog({
           </div>
         )
       }
+
+      case 'codeindex':
+        return (
+          <CodeIndexSettings isDarkMode={isDarkMode} projectPath={projectPath} />
+        )
 
       case 'pro':
         return (
