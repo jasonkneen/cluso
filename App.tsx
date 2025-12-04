@@ -1555,7 +1555,7 @@ export default function App() {
     latestResult: selectorResult,
     error: selectorAgentError,
   } = useSelectorAgent({
-    cwd: projectPath || undefined,
+    cwd: activeTab?.projectPath || undefined,
     onSelectionResult: useCallback((result) => {
       console.log('[SelectorAgent] Selection result:', result);
       if (result.selector) {
