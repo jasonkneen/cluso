@@ -4941,15 +4941,53 @@ If you're not sure what the user wants, ask for clarification.
 
         let resolvedText = (result.text || streamedTextBuffer || '').trim();
         if (!resolvedText && result.toolResults && result.toolResults.length > 0) {
+          // Create a concise summary of tool results instead of dumping raw JSON
           const summaries = result.toolResults
             .map(tr => {
-              const resultStr = typeof tr.result === 'string'
-                ? tr.result
-                : JSON.stringify(tr.result, null, 2);
-              return `${tr.toolName}: ${resultStr}`;
+              const toolName = tr.toolName?.replace(/^mcp_[^_]+_/, '') || 'tool';
+              const res = tr.result as Record<string, unknown>;
+
+              // Handle different result types with concise summaries
+              if (res?.error) {
+                return `❌ ${toolName}: ${res.error}`;
+              }
+              if (res?.content && typeof res.content === 'string') {
+                // File content - show truncated preview
+                const preview = res.content.length > 200
+                  ? res.content.substring(0, 200) + '...'
+                  : res.content;
+                return `✓ ${toolName}: ${res.path || 'file'}\n\`\`\`\n${preview}\n\`\`\``;
+              }
+              if (res?.tree && Array.isArray(res.tree)) {
+                // File tree - show count
+                const countItems = (items: unknown[]): number => {
+                  let count = items.length;
+                  for (const item of items) {
+                    if ((item as any)?.children) count += countItems((item as any).children);
+                  }
+                  return count;
+                };
+                return `✓ ${toolName}: Found ${countItems(res.tree)} items`;
+              }
+              if (res?.entries && Array.isArray(res.entries)) {
+                // Directory listing - show count and first few
+                const entries = res.entries as Array<{ name: string; isDirectory: boolean }>;
+                const preview = entries.slice(0, 5).map(e => e.isDirectory ? `📁 ${e.name}` : `📄 ${e.name}`).join(', ');
+                return `✓ ${toolName}: ${entries.length} items (${preview}${entries.length > 5 ? '...' : ''})`;
+              }
+              if (res?.matches && Array.isArray(res.matches)) {
+                // Search results
+                return `✓ ${toolName}: Found ${res.matches.length} matches`;
+              }
+              if (res?.success) {
+                return `✓ ${toolName}: Success`;
+              }
+              // Fallback - show truncated JSON
+              const json = JSON.stringify(res, null, 2);
+              return `✓ ${toolName}: ${json.length > 200 ? json.substring(0, 200) + '...' : json}`;
             })
             .join('\n\n');
-          resolvedText = `Tool output:\n${summaries}`;
+          resolvedText = summaries || 'Tasks completed.';
         }
         if (!resolvedText) {
           resolvedText = 'No response generated.';
