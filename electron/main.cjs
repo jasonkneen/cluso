@@ -1154,6 +1154,98 @@ function registerGitHandlers() {
     }
   })
 
+  // Install an LSP server
+  ipcMain.handle('lsp:install-server', async (event, serverId) => {
+    try {
+      const { getServer } = require('./lsp/server.cjs')
+      const server = getServer(serverId)
+      if (!server) {
+        return { success: false, error: `Unknown server: ${serverId}` }
+      }
+      if (!server.installable) {
+        return { success: false, error: `Server ${serverId} is not installable` }
+      }
+
+      // Send progress updates to renderer
+      const onProgress = (progress) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('lsp:install-progress', {
+            serverId,
+            ...progress,
+          })
+        }
+      }
+
+      const installedPath = await server.install(onProgress)
+      return { success: true, path: installedPath }
+    } catch (error) {
+      console.error('[LSP] Install server failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Get LSP cache info
+  ipcMain.handle('lsp:get-cache-info', async () => {
+    try {
+      const installer = require('./lsp/installer.cjs')
+      const cacheDir = installer.getCacheDir()
+      const binDir = installer.getBinDir()
+      const nodeModulesDir = installer.getNodeModulesDir()
+
+      // Get cache size by walking the directory (safe, no shell)
+      async function getDirSize(dirPath) {
+        let size = 0
+        try {
+          const entries = await fs.readdir(dirPath, { withFileTypes: true })
+          for (const entry of entries) {
+            const fullPath = path.join(dirPath, entry.name)
+            if (entry.isDirectory()) {
+              size += await getDirSize(fullPath)
+            } else {
+              try {
+                const stats = await fs.stat(fullPath)
+                size += stats.size
+              } catch {
+                // Ignore files we can't stat
+              }
+            }
+          }
+        } catch {
+          // Directory doesn't exist or can't be read
+        }
+        return size
+      }
+
+      const cacheSize = await getDirSize(cacheDir)
+
+      return {
+        success: true,
+        data: {
+          cacheDir,
+          binDir,
+          nodeModulesDir,
+          cacheSize,
+          cacheVersion: installer.CACHE_VERSION,
+        },
+      }
+    } catch (error) {
+      console.error('[LSP] Get cache info failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Clear LSP cache
+  ipcMain.handle('lsp:clear-cache', async () => {
+    try {
+      const installer = require('./lsp/installer.cjs')
+      await installer.clearCache()
+      return { success: true }
+    } catch (error) {
+      console.error('[LSP] Clear cache failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
   // Get file stats (size, modified time, etc)
   ipcMain.handle('files:stat', async (event, filePath) => {
     try {

@@ -477,11 +477,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
     references: (filePath, line, character) => ipcRenderer.invoke('lsp:references', filePath, line, character),
     // Enable/disable a specific server
     setServerEnabled: (serverId, enabled) => ipcRenderer.invoke('lsp:set-server-enabled', serverId, enabled),
+    // Install an LSP server
+    installServer: (serverId) => ipcRenderer.invoke('lsp:install-server', serverId),
+    // Get cache info (size, paths)
+    getCacheInfo: () => ipcRenderer.invoke('lsp:get-cache-info'),
+    // Clear the LSP cache
+    clearCache: () => ipcRenderer.invoke('lsp:clear-cache'),
     // Listen for LSP events (diagnostics, server status changes)
     onEvent: (callback) => {
       const handler = (_event, data) => callback(data)
       ipcRenderer.on('lsp:event', handler)
       return () => ipcRenderer.removeListener('lsp:event', handler)
+    },
+    // Listen for install progress events
+    onInstallProgress: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('lsp:install-progress', handler)
+      return () => ipcRenderer.removeListener('lsp:install-progress', handler)
     },
   },
 

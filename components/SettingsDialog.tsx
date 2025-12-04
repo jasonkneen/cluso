@@ -31,6 +31,8 @@ import {
   Square,
   Palette,
   Server,
+  Download,
+  HardDrive,
 } from 'lucide-react'
 import { debugLog } from '../utils/debug'
 import { FastApplySettings } from './FastApplySettings'
@@ -256,6 +258,8 @@ export function SettingsDialog({
   // LSP Server state
   const [lspServers, setLspServers] = useState<LSPServerStatus[]>([])
   const [isLoadingLsp, setIsLoadingLsp] = useState(false)
+  const [installingServers, setInstallingServers] = useState<Set<string>>(new Set())
+  const [lspCacheInfo, setLspCacheInfo] = useState<{ cacheSize: number; cacheDir: string } | null>(null)
 
   // Check Claude Code OAuth status on mount and when dialog opens
   useEffect(() => {
@@ -303,6 +307,7 @@ export function SettingsDialog({
     // Load LSP server status when dialog opens
     if (isOpen && window.electronAPI?.lsp?.getStatus) {
       loadLspStatus()
+      loadLspCacheInfo()
     }
   }, [isOpen])
 
@@ -360,6 +365,63 @@ export function SettingsDialog({
       loadLspStatus()
     } catch (err) {
       console.error('Failed to toggle LSP server:', err)
+    }
+  }
+
+  // Install an LSP server
+  const installLspServer = async (serverId: string) => {
+    if (!window.electronAPI?.lsp?.installServer) return
+
+    setInstallingServers(prev => new Set([...prev, serverId]))
+    try {
+      const result = await window.electronAPI.lsp.installServer(serverId)
+      if (result.success) {
+        // Refresh status after install
+        await loadLspStatus()
+        await loadLspCacheInfo()
+      } else {
+        console.error('Failed to install LSP server:', result.error)
+      }
+    } catch (err) {
+      console.error('Failed to install LSP server:', err)
+    } finally {
+      setInstallingServers(prev => {
+        const next = new Set(prev)
+        next.delete(serverId)
+        return next
+      })
+    }
+  }
+
+  // Load LSP cache info
+  const loadLspCacheInfo = async () => {
+    if (!window.electronAPI?.lsp?.getCacheInfo) return
+
+    try {
+      const result = await window.electronAPI.lsp.getCacheInfo()
+      if (result.success && result.data) {
+        setLspCacheInfo({
+          cacheSize: result.data.cacheSize,
+          cacheDir: result.data.cacheDir,
+        })
+      }
+    } catch (err) {
+      console.error('Failed to load LSP cache info:', err)
+    }
+  }
+
+  // Clear LSP cache
+  const clearLspCache = async () => {
+    if (!window.electronAPI?.lsp?.clearCache) return
+
+    try {
+      const result = await window.electronAPI.lsp.clearCache()
+      if (result.success) {
+        await loadLspCacheInfo()
+        await loadLspStatus()
+      }
+    } catch (err) {
+      console.error('Failed to clear LSP cache:', err)
     }
   }
 
@@ -2019,21 +2081,50 @@ export function SettingsDialog({
                         </div>
                       </div>
 
-                      {/* Enable/disable toggle */}
-                      <button
-                        onClick={() => toggleLspServer(server.id, !server.enabled)}
-                        className={`w-10 h-6 rounded-full transition-colors relative ${
-                          server.enabled
-                            ? 'bg-blue-500'
-                            : isDarkMode ? 'bg-neutral-600' : 'bg-stone-300'
-                        }`}
-                      >
-                        <span
-                          className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                            server.enabled ? 'left-5' : 'left-1'
+                      <div className="flex items-center gap-2">
+                        {/* Install button for uninstalled servers */}
+                        {!server.installed && server.installable && (
+                          <button
+                            onClick={() => installLspServer(server.id)}
+                            disabled={installingServers.has(server.id)}
+                            className={`px-2.5 py-1 text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors ${
+                              installingServers.has(server.id)
+                                ? isDarkMode ? 'bg-neutral-700 text-neutral-400' : 'bg-stone-200 text-stone-400'
+                                : isDarkMode
+                                ? 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
+                                : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                            }`}
+                          >
+                            {installingServers.has(server.id) ? (
+                              <>
+                                <Loader2 size={12} className="animate-spin" />
+                                Installing...
+                              </>
+                            ) : (
+                              <>
+                                <Download size={12} />
+                                Install
+                              </>
+                            )}
+                          </button>
+                        )}
+
+                        {/* Enable/disable toggle */}
+                        <button
+                          onClick={() => toggleLspServer(server.id, !server.enabled)}
+                          className={`w-10 h-6 rounded-full transition-colors relative ${
+                            server.enabled
+                              ? 'bg-blue-500'
+                              : isDarkMode ? 'bg-neutral-600' : 'bg-stone-300'
                           }`}
-                        />
-                      </button>
+                        >
+                          <span
+                            className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                              server.enabled ? 'left-5' : 'left-1'
+                            }`}
+                          />
+                        </button>
+                      </div>
                     </div>
 
                     {/* Running instances */}
@@ -2070,6 +2161,38 @@ export function SettingsDialog({
                 ))
               )}
             </div>
+
+            {/* Cache Info */}
+            {lspCacheInfo && lspCacheInfo.cacheSize > 0 && (
+              <div className={`p-4 rounded-lg border ${
+                isDarkMode ? 'bg-neutral-800/50 border-neutral-700' : 'bg-stone-50 border-stone-200'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <HardDrive size={16} className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'} />
+                    <div>
+                      <div className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                        LSP Cache
+                      </div>
+                      <div className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                        {(lspCacheInfo.cacheSize / 1024 / 1024).toFixed(1)} MB used
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={clearLspCache}
+                    className={`px-2.5 py-1 text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors ${
+                      isDarkMode
+                        ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                        : 'bg-red-100 text-red-700 hover:bg-red-200'
+                    }`}
+                  >
+                    <Trash2 size={12} />
+                    Clear Cache
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Info Box */}
             <div className={`p-3 rounded-lg ${
@@ -2260,7 +2383,7 @@ export function SettingsDialog({
           className="w-52 flex-shrink-0 border-r"
           style={{ backgroundColor: sidebarBg, borderColor }}
         >
-          <div className="p-4 border-b" style={{ borderColor }}>
+          <div className="px-5 py-4 border-b" style={{ borderColor }}>
             <h2 className="text-lg font-semibold" style={{ color: fgColor }}>
               Settings
             </h2>

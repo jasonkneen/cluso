@@ -7,12 +7,14 @@
  * - extensions: File extensions this server handles
  * - rootPatterns: Files/dirs that indicate project root
  * - spawn: Function to spawn the server process
- * - installable: Whether we can auto-install this server
+ * - install: Function to install the server (if installable)
+ * - checkInstalled: Function to check if installed
  */
 
 const path = require('path')
 const { spawn, execFileSync } = require('child_process')
 const fs = require('fs').promises
+const installer = require('./installer.cjs')
 
 /**
  * Find the nearest directory containing one of the target files
@@ -77,38 +79,52 @@ const SERVERS = {
     installed: false,
 
     async checkInstalled() {
-      // Check for typescript-language-server
-      if (which('typescript-language-server')) return true
-      // Check in node_modules
+      // Check in our cache first
+      const cachedPath = installer.getNpmBinaryPath('.bin/typescript-language-server')
       try {
-        require.resolve('typescript-language-server')
+        await fs.access(cachedPath)
         return true
       } catch {
-        return false
+        // Not in cache
       }
+      // Check system PATH
+      if (which('typescript-language-server')) return true
+      return false
+    },
+
+    async install(onProgress) {
+      return installer.installNpmPackage(
+        {
+          packageName: 'typescript-language-server typescript',
+          entryPoint: '.bin/typescript-language-server',
+        },
+        onProgress
+      )
     },
 
     async spawn(root, options = {}) {
       const args = ['--stdio']
       const env = { ...process.env, ...options.env }
 
-      // Try global install first
+      // Check our cache first
+      const cachedPath = installer.getNpmBinaryPath('.bin/typescript-language-server')
+      try {
+        await fs.access(cachedPath)
+        return spawn(cachedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+      } catch {
+        // Not in cache
+      }
+
+      // Try global install
       const globalBin = which('typescript-language-server')
       if (globalBin) {
         return spawn(globalBin, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
       }
 
-      // Try npx (using spawn with array args, not shell interpolation)
-      const npxBin = which('npx')
-      if (npxBin) {
-        return spawn(npxBin, ['typescript-language-server', ...args], {
-          cwd: root,
-          env,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        })
-      }
-
-      return null
+      // Auto-install if not found
+      console.log('[LSP] Auto-installing typescript-language-server...')
+      const installedPath = await this.install()
+      return spawn(installedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
     },
 
     initialization: {
@@ -123,40 +139,59 @@ const SERVERS = {
     id: 'eslint',
     name: 'ESLint',
     extensions: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte'],
-    rootPatterns: ['.eslintrc', '.eslintrc.js', '.eslintrc.json', '.eslintrc.yaml', 'eslint.config.js', 'eslint.config.mjs'],
+    rootPatterns: [
+      '.eslintrc',
+      '.eslintrc.js',
+      '.eslintrc.json',
+      '.eslintrc.yaml',
+      'eslint.config.js',
+      'eslint.config.mjs',
+    ],
     installable: true,
     installed: false,
 
     async checkInstalled() {
-      if (which('vscode-eslint-language-server')) return true
+      const cachedPath = installer.getNpmBinaryPath('.bin/vscode-eslint-language-server')
       try {
-        require.resolve('vscode-langservers-extracted')
+        await fs.access(cachedPath)
         return true
       } catch {
-        return false
+        // Not in cache
       }
+      if (which('vscode-eslint-language-server')) return true
+      return false
+    },
+
+    async install(onProgress) {
+      return installer.installNpmPackage(
+        {
+          packageName: 'vscode-langservers-extracted',
+          entryPoint: '.bin/vscode-eslint-language-server',
+        },
+        onProgress
+      )
     },
 
     async spawn(root, options = {}) {
       const args = ['--stdio']
       const env = { ...process.env, ...options.env }
 
+      const cachedPath = installer.getNpmBinaryPath('.bin/vscode-eslint-language-server')
+      try {
+        await fs.access(cachedPath)
+        return spawn(cachedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+      } catch {
+        // Not in cache
+      }
+
       const globalBin = which('vscode-eslint-language-server')
       if (globalBin) {
         return spawn(globalBin, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
       }
 
-      // Try npx with vscode-langservers-extracted
-      const npxBin = which('npx')
-      if (npxBin) {
-        return spawn(npxBin, ['vscode-eslint-language-server', ...args], {
-          cwd: root,
-          env,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        })
-      }
-
-      return null
+      console.log('[LSP] Auto-installing vscode-eslint-language-server...')
+      const installedPath = await this.install()
+      return spawn(installedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
     },
 
     initialization: {
@@ -176,34 +211,47 @@ const SERVERS = {
     installed: false,
 
     async checkInstalled() {
-      if (which('vscode-json-language-server')) return true
+      const cachedPath = installer.getNpmBinaryPath('.bin/vscode-json-language-server')
       try {
-        require.resolve('vscode-langservers-extracted')
+        await fs.access(cachedPath)
         return true
       } catch {
-        return false
+        // Not in cache
       }
+      if (which('vscode-json-language-server')) return true
+      return false
+    },
+
+    async install(onProgress) {
+      return installer.installNpmPackage(
+        {
+          packageName: 'vscode-langservers-extracted',
+          entryPoint: '.bin/vscode-json-language-server',
+        },
+        onProgress
+      )
     },
 
     async spawn(root, options = {}) {
       const args = ['--stdio']
       const env = { ...process.env, ...options.env }
 
+      const cachedPath = installer.getNpmBinaryPath('.bin/vscode-json-language-server')
+      try {
+        await fs.access(cachedPath)
+        return spawn(cachedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+      } catch {
+        // Not in cache
+      }
+
       const globalBin = which('vscode-json-language-server')
       if (globalBin) {
         return spawn(globalBin, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
       }
 
-      const npxBin = which('npx')
-      if (npxBin) {
-        return spawn(npxBin, ['vscode-json-language-server', ...args], {
-          cwd: root,
-          env,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        })
-      }
-
-      return null
+      console.log('[LSP] Auto-installing vscode-json-language-server...')
+      const installedPath = await this.install()
+      return spawn(installedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
     },
   },
 
@@ -216,34 +264,47 @@ const SERVERS = {
     installed: false,
 
     async checkInstalled() {
-      if (which('vscode-css-language-server')) return true
+      const cachedPath = installer.getNpmBinaryPath('.bin/vscode-css-language-server')
       try {
-        require.resolve('vscode-langservers-extracted')
+        await fs.access(cachedPath)
         return true
       } catch {
-        return false
+        // Not in cache
       }
+      if (which('vscode-css-language-server')) return true
+      return false
+    },
+
+    async install(onProgress) {
+      return installer.installNpmPackage(
+        {
+          packageName: 'vscode-langservers-extracted',
+          entryPoint: '.bin/vscode-css-language-server',
+        },
+        onProgress
+      )
     },
 
     async spawn(root, options = {}) {
       const args = ['--stdio']
       const env = { ...process.env, ...options.env }
 
+      const cachedPath = installer.getNpmBinaryPath('.bin/vscode-css-language-server')
+      try {
+        await fs.access(cachedPath)
+        return spawn(cachedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+      } catch {
+        // Not in cache
+      }
+
       const globalBin = which('vscode-css-language-server')
       if (globalBin) {
         return spawn(globalBin, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
       }
 
-      const npxBin = which('npx')
-      if (npxBin) {
-        return spawn(npxBin, ['vscode-css-language-server', ...args], {
-          cwd: root,
-          env,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        })
-      }
-
-      return null
+      console.log('[LSP] Auto-installing vscode-css-language-server...')
+      const installedPath = await this.install()
+      return spawn(installedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
     },
   },
 
@@ -256,34 +317,47 @@ const SERVERS = {
     installed: false,
 
     async checkInstalled() {
-      if (which('vscode-html-language-server')) return true
+      const cachedPath = installer.getNpmBinaryPath('.bin/vscode-html-language-server')
       try {
-        require.resolve('vscode-langservers-extracted')
+        await fs.access(cachedPath)
         return true
       } catch {
-        return false
+        // Not in cache
       }
+      if (which('vscode-html-language-server')) return true
+      return false
+    },
+
+    async install(onProgress) {
+      return installer.installNpmPackage(
+        {
+          packageName: 'vscode-langservers-extracted',
+          entryPoint: '.bin/vscode-html-language-server',
+        },
+        onProgress
+      )
     },
 
     async spawn(root, options = {}) {
       const args = ['--stdio']
       const env = { ...process.env, ...options.env }
 
+      const cachedPath = installer.getNpmBinaryPath('.bin/vscode-html-language-server')
+      try {
+        await fs.access(cachedPath)
+        return spawn(cachedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+      } catch {
+        // Not in cache
+      }
+
       const globalBin = which('vscode-html-language-server')
       if (globalBin) {
         return spawn(globalBin, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
       }
 
-      const npxBin = which('npx')
-      if (npxBin) {
-        return spawn(npxBin, ['vscode-html-language-server', ...args], {
-          cwd: root,
-          env,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        })
-      }
-
-      return null
+      console.log('[LSP] Auto-installing vscode-html-language-server...')
+      const installedPath = await this.install()
+      return spawn(installedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
     },
   },
 
@@ -296,11 +370,37 @@ const SERVERS = {
     installed: false,
 
     async checkInstalled() {
+      const cachedPath = installer.getNpmBinaryPath('.bin/pyright-langserver')
+      try {
+        await fs.access(cachedPath)
+        return true
+      } catch {
+        // Not in cache
+      }
       return !!which('pyright-langserver') || !!which('pyright')
     },
 
+    async install(onProgress) {
+      return installer.installNpmPackage(
+        {
+          packageName: 'pyright',
+          entryPoint: '.bin/pyright-langserver',
+        },
+        onProgress
+      )
+    },
+
     async spawn(root, options = {}) {
+      const args = ['--stdio']
       const env = { ...process.env, ...options.env }
+
+      const cachedPath = installer.getNpmBinaryPath('.bin/pyright-langserver')
+      try {
+        await fs.access(cachedPath)
+        return spawn(cachedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+      } catch {
+        // Not in cache
+      }
 
       const langserverBin = which('pyright-langserver')
       if (langserverBin) {
@@ -312,17 +412,9 @@ const SERVERS = {
         return spawn(pyrightBin, ['--langserver', '--stdio'], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
       }
 
-      // Try npx
-      const npxBin = which('npx')
-      if (npxBin) {
-        return spawn(npxBin, ['pyright', '--langserver', '--stdio'], {
-          cwd: root,
-          env,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        })
-      }
-
-      return null
+      console.log('[LSP] Auto-installing pyright...')
+      const installedPath = await this.install()
+      return spawn(installedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
     },
   },
 
@@ -331,19 +423,47 @@ const SERVERS = {
     name: 'Go (gopls)',
     extensions: ['.go'],
     rootPatterns: ['go.mod', 'go.sum'],
-    installable: false, // Requires Go toolchain
+    installable: true, // Can install via go install
     installed: false,
 
     async checkInstalled() {
+      // Check our cache
+      if (await installer.isCached('gopls')) return true
       return !!which('gopls')
     },
 
-    async spawn(root, options = {}) {
-      const bin = which('gopls')
-      if (!bin) return null
+    async install(onProgress) {
+      return installer.installGoPackage(
+        {
+          packagePath: 'golang.org/x/tools/gopls@latest',
+          binaryName: 'gopls',
+        },
+        onProgress
+      )
+    },
 
+    async spawn(root, options = {}) {
       const env = { ...process.env, ...options.env }
-      return spawn(bin, [], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+
+      // Check our cache
+      if (await installer.isCached('gopls')) {
+        const cachedPath = installer.getCachedBinaryPath('gopls')
+        return spawn(cachedPath, [], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+      }
+
+      const bin = which('gopls')
+      if (bin) {
+        return spawn(bin, [], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+      }
+
+      // Try to auto-install if Go is available
+      if (which('go')) {
+        console.log('[LSP] Auto-installing gopls...')
+        const installedPath = await this.install()
+        return spawn(installedPath, [], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+      }
+
+      return null
     },
   },
 
@@ -352,19 +472,58 @@ const SERVERS = {
     name: 'Rust (rust-analyzer)',
     extensions: ['.rs'],
     rootPatterns: ['Cargo.toml'],
-    installable: false, // Requires rustup
+    installable: true, // Can download from GitHub releases
     installed: false,
 
     async checkInstalled() {
+      if (await installer.isCached('rust-analyzer')) return true
       return !!which('rust-analyzer')
     },
 
-    async spawn(root, options = {}) {
-      const bin = which('rust-analyzer')
-      if (!bin) return null
+    async install(onProgress) {
+      return installer.installFromGitHub(
+        {
+          repo: 'rust-lang/rust-analyzer',
+          binaryName: 'rust-analyzer',
+          getAssetName: (release, platform, arch) => {
+            const platformMap = {
+              darwin: 'apple-darwin',
+              linux: 'unknown-linux-gnu',
+              win32: 'pc-windows-msvc',
+            }
+            const archMap = {
+              x64: 'x86_64',
+              arm64: 'aarch64',
+            }
 
+            const p = platformMap[platform]
+            const a = archMap[arch]
+            if (!p || !a) return null
+
+            const ext = platform === 'win32' ? '.zip' : '.gz'
+            return `rust-analyzer-${a}-${p}${ext}`
+          },
+        },
+        onProgress
+      )
+    },
+
+    async spawn(root, options = {}) {
       const env = { ...process.env, ...options.env }
-      return spawn(bin, [], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+
+      if (await installer.isCached('rust-analyzer')) {
+        const cachedPath = installer.getCachedBinaryPath('rust-analyzer')
+        return spawn(cachedPath, [], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+      }
+
+      const bin = which('rust-analyzer')
+      if (bin) {
+        return spawn(bin, [], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+      }
+
+      console.log('[LSP] Auto-installing rust-analyzer...')
+      const installedPath = await this.install()
+      return spawn(installedPath, [], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
     },
   },
 
@@ -377,28 +536,98 @@ const SERVERS = {
     installed: false,
 
     async checkInstalled() {
+      const cachedPath = installer.getNpmBinaryPath('.bin/yaml-language-server')
+      try {
+        await fs.access(cachedPath)
+        return true
+      } catch {
+        // Not in cache
+      }
       return !!which('yaml-language-server')
+    },
+
+    async install(onProgress) {
+      return installer.installNpmPackage(
+        {
+          packageName: 'yaml-language-server',
+          entryPoint: '.bin/yaml-language-server',
+        },
+        onProgress
+      )
     },
 
     async spawn(root, options = {}) {
       const args = ['--stdio']
       const env = { ...process.env, ...options.env }
 
+      const cachedPath = installer.getNpmBinaryPath('.bin/yaml-language-server')
+      try {
+        await fs.access(cachedPath)
+        return spawn(cachedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+      } catch {
+        // Not in cache
+      }
+
       const bin = which('yaml-language-server')
       if (bin) {
         return spawn(bin, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
       }
 
-      const npxBin = which('npx')
-      if (npxBin) {
-        return spawn(npxBin, ['yaml-language-server', ...args], {
-          cwd: root,
-          env,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        })
+      console.log('[LSP] Auto-installing yaml-language-server...')
+      const installedPath = await this.install()
+      return spawn(installedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+    },
+  },
+
+  tailwindcss: {
+    id: 'tailwindcss',
+    name: 'Tailwind CSS',
+    extensions: ['.css', '.html', '.jsx', '.tsx', '.vue', '.svelte'],
+    rootPatterns: ['tailwind.config.js', 'tailwind.config.ts', 'tailwind.config.cjs', 'tailwind.config.mjs'],
+    installable: true,
+    installed: false,
+
+    async checkInstalled() {
+      const cachedPath = installer.getNpmBinaryPath('.bin/tailwindcss-language-server')
+      try {
+        await fs.access(cachedPath)
+        return true
+      } catch {
+        // Not in cache
+      }
+      return !!which('tailwindcss-language-server')
+    },
+
+    async install(onProgress) {
+      return installer.installNpmPackage(
+        {
+          packageName: '@tailwindcss/language-server',
+          entryPoint: '.bin/tailwindcss-language-server',
+        },
+        onProgress
+      )
+    },
+
+    async spawn(root, options = {}) {
+      const args = ['--stdio']
+      const env = { ...process.env, ...options.env }
+
+      const cachedPath = installer.getNpmBinaryPath('.bin/tailwindcss-language-server')
+      try {
+        await fs.access(cachedPath)
+        return spawn(cachedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+      } catch {
+        // Not in cache
       }
 
-      return null
+      const bin = which('tailwindcss-language-server')
+      if (bin) {
+        return spawn(bin, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
+      }
+
+      console.log('[LSP] Auto-installing tailwindcss-language-server...')
+      const installedPath = await this.install()
+      return spawn(installedPath, args, { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] })
     },
   },
 }
@@ -407,9 +636,7 @@ const SERVERS = {
  * Get servers that handle a given file extension
  */
 function getServersForExtension(ext) {
-  return Object.values(SERVERS).filter(server =>
-    server.extensions.includes(ext.toLowerCase())
-  )
+  return Object.values(SERVERS).filter((server) => server.extensions.includes(ext.toLowerCase()))
 }
 
 /**

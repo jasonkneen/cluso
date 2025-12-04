@@ -90,10 +90,12 @@
          ============================================================ */
 
       /* Panel backgrounds - override bg-neutral-800 and bg-white patterns */
-      [data-theme] .bg-neutral-800,
+      /* bg-neutral-900 = base background (darkest for dark themes) */
       [data-theme] .bg-neutral-900 {
         background-color: var(--color-background) !important;
       }
+      /* bg-neutral-800, bg-white = panel backgrounds (lighter for dark themes) */
+      [data-theme] .bg-neutral-800,
       [data-theme] .bg-white,
       [data-theme] .bg-stone-50 {
         background-color: var(--color-panel, var(--color-background)) !important;

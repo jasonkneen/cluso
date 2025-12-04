@@ -835,6 +835,21 @@ interface LSPEvent {
   enabled?: boolean
 }
 
+interface LSPInstallProgress {
+  serverId: string
+  stage: 'installing' | 'fetching' | 'downloading' | 'extracting' | 'complete'
+  package?: string
+  size?: number
+}
+
+interface LSPCacheInfo {
+  cacheDir: string
+  binDir: string
+  nodeModulesDir: string
+  cacheSize: number
+  cacheVersion: string
+}
+
 interface ElectronLSPAPI {
   init: (projectPath: string) => Promise<{ success: boolean; error?: string }>
   shutdown: () => Promise<{ success: boolean; error?: string }>
@@ -849,7 +864,11 @@ interface ElectronLSPAPI {
   definition: (filePath: string, line: number, character: number) => Promise<{ success: boolean; data?: LSPLocation | LSPLocation[] | null; error?: string }>
   references: (filePath: string, line: number, character: number) => Promise<{ success: boolean; data?: LSPLocation[]; error?: string }>
   setServerEnabled: (serverId: string, enabled: boolean) => Promise<{ success: boolean; error?: string }>
+  installServer: (serverId: string) => Promise<{ success: boolean; path?: string; error?: string }>
+  getCacheInfo: () => Promise<{ success: boolean; data?: LSPCacheInfo; error?: string }>
+  clearCache: () => Promise<{ success: boolean; error?: string }>
   onEvent: (callback: (event: LSPEvent) => void) => () => void
+  onInstallProgress: (callback: (progress: LSPInstallProgress) => void) => () => void
 }
 
 interface ElectronAPI {
