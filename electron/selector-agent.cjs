@@ -187,6 +187,12 @@ async function initializeSession(options = {}) {
       }
     })
 
+    // Send initial message to bootstrap the session - required to keep connection alive
+    await pushMessage({
+      role: 'user',
+      content: [{ type: 'text', text: 'Hello, I am the element selector interface. I will send you page contexts and element selection requests. Please respond with JSON format as specified in your instructions. Ready?' }]
+    })
+
     // Signal ready
     onReady?.()
 

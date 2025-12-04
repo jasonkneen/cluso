@@ -123,9 +123,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ],
   models: [
     // Claude Code OAuth models (recommended for Agent SDK)
-    { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', provider: 'claude-code', enabled: false },
-    { id: 'claude-opus-4-5', name: 'Claude Opus 4.5', provider: 'claude-code', enabled: false },
-    { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', provider: 'claude-code', enabled: false },
+    { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', provider: 'claude-code', enabled: true },
+    { id: 'claude-opus-4-5', name: 'Claude Opus 4.5', provider: 'claude-code', enabled: true },
+    { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', provider: 'claude-code', enabled: true },
     // Claude legacy API models
     { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'anthropic', enabled: false },
     { id: 'claude-3-opus', name: 'Claude 3 Opus', provider: 'anthropic', enabled: false },

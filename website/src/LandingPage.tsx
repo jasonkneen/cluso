@@ -1097,7 +1097,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
             <div className="nav-links">
               <a href="#features">Features</a>
               <a href="#pricing">Pricing</a>
-              <a href="#">Docs</a>
+              <a href="#">Documentation</a>
               <a href="https://github.com/jkneen/flows" target="_blank" rel="noopener noreferrer">Github</a>
               <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
                 {isDark ? (
@@ -1399,7 +1399,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               <div className="footer-links">
                 <h4>Resources</h4>
                 <ul>
-                  <li><a href="#" >Docs</a></li>
+                  <li><a href="#" >Documentation</a></li>
                   <li style={{ display: 'none' }}><a href="https://github.com/jkneen/flows" target="_blank" rel="noopener noreferrer">Github</a></li>
                 </ul>
               </div>

@@ -1690,8 +1690,15 @@ function registerSelectorAgentHandlers() {
         }
       }
 
+      // Check if already active to prevent double-init
+      if (selectorAgent.isSessionActive()) {
+        console.log('[SelectorAgent] Session already active, skipping init')
+        return { success: true }
+      }
+
       // Start the session - responses will be streamed via events
-      selectorAgent.initializeSession({
+      // Use a Promise wrapper to catch async errors from the SDK
+      const initPromise = selectorAgent.initializeSession({
         cwd: options.cwd || process.cwd(),
         onTextChunk: (text) => {
           if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1704,15 +1711,26 @@ function registerSelectorAgentHandlers() {
           }
         },
         onError: (error) => {
+          console.error('[SelectorAgent] Session error:', error)
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('selector-agent:error', error)
           }
         },
         onReady: () => {
+          console.log('[SelectorAgent] Session ready')
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('selector-agent:ready')
           }
         },
+      })
+
+      // Catch async errors from the SDK (e.g., "process exited with code 1")
+      initPromise.catch((error) => {
+        console.error('[SelectorAgent] Init failed:', error)
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('selector-agent:error',
+            error instanceof Error ? error.message : 'Session initialization failed')
+        }
       })
 
       return { success: true }

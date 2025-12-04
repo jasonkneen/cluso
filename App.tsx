@@ -731,9 +731,18 @@ export default function App() {
     }
   }, [appSettings]);
 
-  // Get all models from settings with availability status
+  // Provider order: Claude first, then OpenAI, then Gemini
+  const providerSortOrder: Record<string, number> = {
+    'claude-code': 1,  // Claude Code OAuth (recommended)
+    'anthropic': 2,    // Claude legacy API
+    'openai': 3,       // OpenAI API
+    'codex': 4,        // Codex OAuth (ChatGPT Plus/Pro)
+    'google': 5,       // Gemini (last)
+  };
+
+  // Get all models from settings with availability status, sorted by provider
   const displayModels = useMemo(() => {
-    return appSettings.models.map(settingsModel => {
+    const models = appSettings.models.map(settingsModel => {
       const provider = appSettings.providers.find(p => p.id === settingsModel.provider);
 
       // For claude-code and codex, check OAuth status instead of provider API key
@@ -755,6 +764,13 @@ export default function App() {
         isEnabled: settingsModel.enabled,
         isProviderConfigured,
       };
+    });
+
+    // Sort by provider: Claude → OpenAI → Gemini
+    return models.sort((a, b) => {
+      const orderA = providerSortOrder[a.provider] || 99;
+      const orderB = providerSortOrder[b.provider] || 99;
+      return orderA - orderB;
     });
   }, [appSettings.models, appSettings.providers, appSettings.claudeCodeAuthenticated, appSettings.codexAuthenticated]);
 
