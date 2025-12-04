@@ -4850,7 +4850,7 @@ If you're not sure what the user wants, ask for clarification.
         setAgentProcessing(true);
         setIsStreaming(true);
 
-        // Create streaming message placeholder
+        // Create streaming message placeholder with initial activity indicator
         const streamingId = `streaming-${Date.now()}`;
         setStreamingMessage({
           id: streamingId,
@@ -4858,6 +4858,9 @@ If you're not sure what the user wants, ask for clarification.
           reasoning: '',
           toolCalls: [],
         });
+
+        // Track accumulated tool calls for display
+        const accumulatedToolCalls: Array<{ name: string; status: 'running' | 'done' | 'error'; result?: unknown }> = [];
 
         // Use streaming API for real-time response
         console.log('[AI SDK] Starting stream...');
@@ -4875,10 +4878,10 @@ If you're not sure what the user wants, ask for clarification.
           mcpTools: mcpToolDefinitions, // Pass MCP tools separately
           projectFolder: activeTab?.projectPath || undefined,
           onChunk: (chunk) => {
-            // Update streaming message as chunks arrive (handled by hook callbacks)
+            // Update streaming message as chunks arrive
             const chunkStr = typeof chunk === 'string' ? chunk : String(chunk ?? '');
             streamedTextBuffer += chunkStr;
-            console.log('[AI SDK] Stream chunk:', chunkStr.substring(0, 50));
+            setStreamingMessage(prev => prev ? { ...prev, content: streamedTextBuffer } : null);
           },
           onStepFinish: (step) => {
             console.log('[AI SDK] Step finished:', {
@@ -4886,11 +4889,49 @@ If you're not sure what the user wants, ask for clarification.
               toolCalls: step?.toolCalls?.length,
               toolResults: step?.toolResults?.length,
             });
+
+            // Update streaming message with tool activity
+            if (step?.toolCalls && step.toolCalls.length > 0) {
+              for (const tc of step.toolCalls) {
+                const toolName = tc.toolName?.replace(/^mcp_[^_]+_/, '') || 'tool';
+                const existing = accumulatedToolCalls.find(t => t.name === toolName && t.status === 'running');
+                if (!existing) {
+                  accumulatedToolCalls.push({ name: toolName, status: 'running' });
+                }
+              }
+            }
+
+            // Mark tools as done when results come in
+            if (step?.toolResults && step.toolResults.length > 0) {
+              for (const tr of step.toolResults) {
+                const toolName = tr.toolName?.replace(/^mcp_[^_]+_/, '') || 'tool';
+                const existing = accumulatedToolCalls.find(t => t.name === toolName && t.status === 'running');
+                if (existing) {
+                  existing.status = (tr.result as any)?.error ? 'error' : 'done';
+                  existing.result = tr.result;
+                }
+              }
+            }
+
+            // Update streaming message to show tool activity
+            const toolSummary = accumulatedToolCalls.map(t => {
+              const icon = t.status === 'running' ? '⏳' : t.status === 'error' ? '❌' : '✓';
+              return `${icon} ${t.name}`;
+            }).join(' → ');
+
+            if (toolSummary) {
+              setStreamingMessage(prev => prev ? {
+                ...prev,
+                content: streamedTextBuffer || `Working: ${toolSummary}`,
+                toolCalls: accumulatedToolCalls.map(t => ({ name: t.name, status: t.status }))
+              } : null);
+            }
           },
           onReasoningChunk: (chunk) => {
             // Reasoning chunk may be a string or an object with content
             const reasoningStr = typeof chunk === 'string' ? chunk : (chunk?.content ?? String(chunk ?? ''));
             console.log('[AI SDK] Reasoning chunk:', reasoningStr.substring(0, 100));
+            setStreamingMessage(prev => prev ? { ...prev, reasoning: (prev.reasoning || '') + reasoningStr } : null);
           },
         });
 

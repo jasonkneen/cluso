@@ -480,13 +480,11 @@ function normalizeToolPath(inputPath, baseDir = PROJECT_ROOT) {
   const tildeExpanded = inputPath.startsWith('~/')
     ? path.join(os.homedir(), inputPath.slice(2))
     : inputPath
+  // If it's an absolute path, return it as-is (don't prepend baseDir)
   if (path.isAbsolute(tildeExpanded)) {
-    if (fsSync.existsSync(tildeExpanded)) {
-      return tildeExpanded
-    }
-    const stripped = tildeExpanded.replace(/^\/+/, '')
-    return path.resolve(baseDir, stripped)
+    return tildeExpanded
   }
+  // For relative paths, resolve against baseDir
   const cleaned = tildeExpanded.replace(/^\.\/+/, '')
   return path.resolve(baseDir, cleaned)
 }
