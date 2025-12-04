@@ -830,7 +830,9 @@ function registerGitHandlers() {
     console.log('[Files] writeFile called with path:', filePath)
     console.log('[Files] Content length:', content?.length || 0)
 
-    const validation = validatePath(filePath)
+    // Allow writing anywhere in home directory (users need to save to their projects)
+    // Sensitive directories (.ssh, .aws, etc) are still blocked
+    const validation = validatePath(filePath, { allowHomeDir: true })
     if (!validation.valid) {
       console.log('[Files] ❌ Path validation failed:', validation.error)
       return { success: false, error: validation.error }
@@ -856,7 +858,7 @@ function registerGitHandlers() {
 
   // Create file (fails if exists)
   ipcMain.handle('files:createFile', async (event, filePath, content = '') => {
-    const validation = validatePath(filePath)
+    const validation = validatePath(filePath, { allowHomeDir: true })
     if (!validation.valid) {
       return { success: false, error: validation.error }
     }
@@ -879,7 +881,7 @@ function registerGitHandlers() {
 
   // Delete file
   ipcMain.handle('files:deleteFile', async (event, filePath) => {
-    const validation = validatePath(filePath)
+    const validation = validatePath(filePath, { allowHomeDir: true })
     if (!validation.valid) {
       return { success: false, error: validation.error }
     }
@@ -895,8 +897,8 @@ function registerGitHandlers() {
 
   // Rename/move file
   ipcMain.handle('files:renameFile', async (event, oldPath, newPath) => {
-    const oldValidation = validatePath(oldPath)
-    const newValidation = validatePath(newPath)
+    const oldValidation = validatePath(oldPath, { allowHomeDir: true })
+    const newValidation = validatePath(newPath, { allowHomeDir: true })
     if (!oldValidation.valid) {
       return { success: false, error: oldValidation.error }
     }
@@ -915,7 +917,7 @@ function registerGitHandlers() {
 
   // Create directory
   ipcMain.handle('files:createDirectory', async (event, dirPath) => {
-    const validation = validatePath(dirPath)
+    const validation = validatePath(dirPath, { allowHomeDir: true })
     if (!validation.valid) {
       return { success: false, error: validation.error }
     }
@@ -931,7 +933,7 @@ function registerGitHandlers() {
 
   // Delete directory
   ipcMain.handle('files:deleteDirectory', async (event, dirPath) => {
-    const validation = validatePath(dirPath)
+    const validation = validatePath(dirPath, { allowHomeDir: true })
     if (!validation.valid) {
       return { success: false, error: validation.error }
     }
@@ -1194,7 +1196,7 @@ function registerGitHandlers() {
   ipcMain.handle('files:saveImage', async (event, base64DataUrl, destPath) => {
     console.log('[Files] saveImage called with destPath:', destPath)
 
-    const validation = validatePath(destPath)
+    const validation = validatePath(destPath, { allowHomeDir: true })
     if (!validation.valid) {
       return { success: false, error: validation.error }
     }
