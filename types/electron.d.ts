@@ -466,6 +466,97 @@ interface ElectronAISdkAPI {
     onComplete?: (fullText: string) => void
     onError?: (error: string) => void
   }) => Promise<{ success: boolean; error?: string }>
+  // V2 API additions
+  initialize: () => Promise<{ success: boolean }>
+  stream: (options: {
+    requestId: string
+    modelId: string
+    messages: Array<{ role: string; content: string }>
+    providers: Record<string, string>
+    system?: string
+    tools?: Record<string, { description: string; parameters: Record<string, unknown> }>
+    maxSteps?: number
+    enableReasoning?: boolean
+    mcpTools?: Array<{ name: string; description?: string; inputSchema: { type: string; properties?: Record<string, unknown>; required?: string[] }; serverId: string }>
+    projectFolder?: string
+  }) => Promise<{ success: boolean; requestId: string }>
+  generate: (options: {
+    modelId: string
+    messages: Array<{ role: string; content: string }>
+    providers: Record<string, string>
+    system?: string
+    tools?: Record<string, { description: string; parameters: Record<string, unknown> }>
+    maxSteps?: number
+    mcpTools?: Array<{ name: string; description?: string; inputSchema: { type: string; properties?: Record<string, unknown>; required?: string[] }; serverId: string }>
+    projectFolder?: string
+  }) => Promise<{
+    success: boolean
+    text?: string
+    toolCalls?: Array<{ toolCallId: string; toolName: string; args: unknown }>
+    toolResults?: Array<{ toolCallId: string; toolName: string; result: unknown }>
+    finishReason?: string
+    error?: string
+  }>
+  executeMCPTool: (serverId: string, toolName: string, args: Record<string, unknown>) => Promise<{
+    success: boolean
+    content?: Array<{ type: string; text?: string }>
+    error?: string
+  }>
+  getModels: () => Promise<{ models: string[]; providers: string[] }>
+  getProvider: (modelId: string) => Promise<{ provider: string | null }>
+  onTextChunk: (callback: (data: { requestId: string; chunk: string }) => void) => () => void
+  onStepFinish: (callback: (data: {
+    requestId: string
+    text: string
+    toolCalls: Array<{ toolCallId: string; toolName: string; args: unknown }>
+    toolResults: Array<{ toolCallId: string; toolName: string; result: unknown }>
+  }) => void) => () => void
+  onComplete: (callback: (data: {
+    requestId: string
+    text: string
+    reasoning?: string
+    toolCalls?: Array<{ toolCallId: string; toolName: string; args: unknown }>
+    toolResults?: Array<{ toolCallId: string; toolName: string; result: unknown }>
+    finishReason: string
+  }) => void) => () => void
+  onError: (callback: (data: { requestId: string; error: string }) => void) => () => void
+  removeAllListeners: () => void
+  webSearch: (query: string, maxResults?: number) => Promise<{
+    success: boolean
+    query?: string
+    results?: Array<{ title: string; url: string; snippet: string }>
+    count?: number
+    error?: string
+  }>
+}
+
+// Agent SDK API (Claude 4.5+ models with extended thinking and streaming)
+interface ElectronAgentSdkAPI {
+  stream: (options: {
+    requestId: string
+    modelId: string
+    messages: Array<{ role: string; content: string }>
+    system?: string
+    maxThinkingTokens?: number
+    projectFolder?: string
+    mcpTools?: Array<{ name: string; description?: string; inputSchema: { type: string; properties?: Record<string, unknown>; required?: string[] }; serverId: string }>
+  }) => Promise<void>
+  sendMessage: (text: string) => Promise<void>
+  stop: () => Promise<boolean>
+  reset: () => Promise<void>
+  isActive: () => Promise<boolean>
+  supportsModel: (modelId: string) => Promise<boolean>
+  onTextChunk: (callback: (data: { requestId: string; chunk: string }) => void) => () => void
+  onThinkingStart: (callback: (data: { requestId: string; index: number }) => void) => () => void
+  onThinkingChunk: (callback: (data: { requestId: string; chunk: string; index: number }) => void) => () => void
+  onToolStart: (callback: (data: { requestId: string; toolCallId: string; toolName: string; index: number }) => void) => () => void
+  onToolInputDelta: (callback: (data: { requestId: string; toolCallId: string; delta: string; index: number }) => void) => () => void
+  onToolResult: (callback: (data: { requestId: string; toolCallId: string; result: string; isError: boolean }) => void) => () => void
+  onBlockStop: (callback: (data: { requestId: string; index: number }) => void) => () => void
+  onComplete: (callback: (data: { requestId: string; text: string; thinking?: string }) => void) => () => void
+  onError: (callback: (data: { requestId: string; error: string }) => void) => () => void
+  onInterrupted: (callback: (data: { requestId: string }) => void) => () => void
+  removeAllListeners: () => void
 }
 
 // Fast Apply types (Local LLM for instant code merging) - Pro Feature
@@ -582,6 +673,7 @@ interface ElectronAPI {
   git: ElectronGitAPI
   files: ElectronFilesAPI
   aiSdk: ElectronAISdkAPI
+  agentSdk?: ElectronAgentSdkAPI
   oauth: ElectronOAuthAPI
   codex: ElectronCodexAPI
   api: ElectronApiAPI
