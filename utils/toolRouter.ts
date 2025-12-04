@@ -411,7 +411,8 @@ const toolHandlerRegistry: Record<string, ToolHandler> = {
 }
 
 /**
- * Dispatch a tool call to the appropriate handler
+ * Dispatch a tool call to the appropriate handler (legacy fire-and-forget pattern)
+ * @deprecated Use executeToolCall for async/await pattern
  */
 export function dispatchToolCall(
   call: ToolCall,
@@ -427,6 +428,72 @@ export function dispatchToolCall(
 }
 
 /**
+ * Execute a tool call and return the result (async/await pattern)
+ * This is the new preferred pattern that enables proper agentic loops
+ */
+export async function executeToolCall(
+  call: ToolCall,
+  handlers: ToolHandlers
+): Promise<ToolResponse> {
+  return new Promise((resolve) => {
+    // Create a sendResponse that captures the result
+    const captureResponse: SendResponse = (_id, _name, response) => {
+      resolve(response)
+    }
+
+    const handler = toolHandlerRegistry[call.name]
+    if (handler) {
+      // Handle both sync and async handlers
+      const result = handler(call, handlers, captureResponse)
+      // If handler is async and returns a promise, we still rely on captureResponse
+      // being called, but we also handle the case where it might throw
+      if (result instanceof Promise) {
+        result.catch((err) => {
+          resolve({
+            error: err instanceof Error ? err.message : 'Unknown error in tool handler',
+          })
+        })
+      }
+    } else {
+      resolve({ error: `Unknown tool: ${call.name}` })
+    }
+  })
+}
+
+/**
+ * Execute multiple tool calls and return all results
+ * Executes in parallel by default for better performance
+ */
+export async function executeToolCalls(
+  calls: ToolCall[],
+  handlers: ToolHandlers,
+  options: { parallel?: boolean } = {}
+): Promise<Array<{ id: string; name: string; response: ToolResponse }>> {
+  const { parallel = true } = options
+
+  if (parallel) {
+    const results = await Promise.all(
+      calls.map(async (call) => ({
+        id: call.id,
+        name: call.name,
+        response: await executeToolCall(call, handlers),
+      }))
+    )
+    return results
+  } else {
+    const results: Array<{ id: string; name: string; response: ToolResponse }> = []
+    for (const call of calls) {
+      results.push({
+        id: call.id,
+        name: call.name,
+        response: await executeToolCall(call, handlers),
+      })
+    }
+    return results
+  }
+}
+
+/**
  * Create a tool router with bound handlers
  */
 export function createToolRouter(handlers: ToolHandlers) {
@@ -434,6 +501,9 @@ export function createToolRouter(handlers: ToolHandlers) {
     dispatch: (call: ToolCall, sendResponse: SendResponse) => {
       dispatchToolCall(call, handlers, sendResponse)
     },
+    execute: (call: ToolCall) => executeToolCall(call, handlers),
+    executeAll: (calls: ToolCall[], options?: { parallel?: boolean }) =>
+      executeToolCalls(calls, handlers, options),
     handlers,
   }
 }
