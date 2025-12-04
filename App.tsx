@@ -7,7 +7,7 @@ import { SelectedElement, Message as ChatMessage, ToolUsage } from './types';
 import { TabState, createNewTab } from './types/tab';
 import { TabBar, Tab, TabType } from './components/TabBar';
 import { KanbanTab, TodosTab, NotesTab } from './components/tabs';
-import { NewTabPage } from './components/NewTabPage';
+import { NewTabPage, addToRecentProjects, getRecentProject } from './components/NewTabPage';
 import { KanbanColumn, TodoItem } from './types/tab';
 import { ProjectSetupFlow } from './components/ProjectSetupFlow';
 import { SettingsDialog, AppSettings, DEFAULT_SETTINGS, getFontSizeValue } from './components/SettingsDialog';
@@ -649,7 +649,7 @@ export default function App() {
   const [gitLoading, setGitLoading] = useState<string | null>(null);
 
   // Project Setup Flow State
-  const [setupProject, setSetupProject] = useState<{ path: string; name: string } | null>(null);
+  const [setupProject, setSetupProject] = useState<{ path: string; name: string; port?: number } | null>(null);
 
   // Web Search Results State (for console log error searching)
   interface SearchResult {
@@ -5560,13 +5560,17 @@ If you're not sure what the user wants, ask for clarification.
   // Handle opening a project from new tab page - triggers setup flow
   const handleOpenProject = useCallback((projectPath: string, projectName: string) => {
     console.log('Starting project setup flow:', projectPath, projectName);
-    setSetupProject({ path: projectPath, name: projectName });
+    // Get saved port from recent projects
+    const recent = getRecentProject(projectPath);
+    setSetupProject({ path: projectPath, name: projectName, port: recent?.port });
   }, []);
 
   // Handle setup flow completion - actually opens the browser
-  const handleSetupComplete = useCallback((url: string) => {
+  const handleSetupComplete = useCallback((url: string, port: number) => {
     if (setupProject) {
       updateCurrentTab({ url, title: setupProject.name, projectPath: setupProject.path });
+      // Save port to recent projects
+      addToRecentProjects(setupProject.name, setupProject.path, port);
       // URL input is synced via useEffect when tab.url changes
       setSetupProject(null);
     }
@@ -5611,6 +5615,7 @@ If you're not sure what the user wants, ask for clarification.
             <ProjectSetupFlow
               projectPath={setupProject.path}
               projectName={setupProject.name}
+              initialPort={setupProject.port}
               isDarkMode={isDarkMode}
               onComplete={handleSetupComplete}
               onCancel={handleSetupCancel}

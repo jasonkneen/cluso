@@ -29,8 +29,9 @@ interface ProjectInfo {
 interface ProjectSetupFlowProps {
   projectPath: string
   projectName: string
+  initialPort?: number // Use saved port if available
   isDarkMode: boolean
-  onComplete: (url: string) => void
+  onComplete: (url: string, port: number) => void
   onCancel: () => void
 }
 
@@ -159,6 +160,7 @@ const DEFAULT_PORTS: Record<string, number> = {
 export function ProjectSetupFlow({
   projectPath,
   projectName,
+  initialPort,
   isDarkMode,
   onComplete,
   onCancel
@@ -403,8 +405,9 @@ export function ProjectSetupFlow({
   }, [hasRun, runSetup])
 
   const handleLaunch = () => {
-    const url = `http://localhost:${projectInfo.port || 3000}`
-    onComplete(url)
+    const port = projectInfo.port || initialPort || 3000
+    const url = `http://localhost:${port}`
+    onComplete(url, port)
   }
 
   const getStepIcon = (status: SetupStep['status']) => {
@@ -532,9 +535,9 @@ export function ProjectSetupFlow({
       </div>
 
       {/* Port info subtle hint */}
-      {isComplete && projectInfo.port && (
+      {isComplete && (
         <p className={`mt-4 text-xs ${isDarkMode ? 'text-neutral-600' : 'text-stone-400'}`}>
-          localhost:{projectInfo.port}
+          localhost:{projectInfo.port || initialPort || 3000}
         </p>
       )}
     </div>

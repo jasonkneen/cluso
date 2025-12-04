@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Folder, Clock, X, Plus } from 'lucide-react'
+import { Folder, Clock, X, Plus, Pencil, Check } from 'lucide-react'
 import { debugLog } from '../utils/debug'
 
 // Cluso logo SVG component
@@ -39,6 +39,7 @@ function ClusoLogo({ className }: { className?: string }) {
 export interface RecentProject {
   name: string
   path: string
+  port?: number // dev server port
   lastOpened: number // timestamp
 }
 
@@ -68,16 +69,23 @@ function saveRecentProjects(projects: RecentProject[]): void {
 }
 
 // Add or update a project in the recent list
-export function addToRecentProjects(name: string, path: string): void {
+export function addToRecentProjects(name: string, path: string, port?: number): void {
   const projects = loadRecentProjects()
+  // Get existing port if updating
+  const existing = projects.find(p => p.path === path)
   // Remove if already exists
   const filtered = projects.filter(p => p.path !== path)
-  // Add to front with updated timestamp
+  // Add to front with updated timestamp, preserve port if not provided
   const updated = [
-    { name, path, lastOpened: Date.now() },
+    { name, path, port: port ?? existing?.port, lastOpened: Date.now() },
     ...filtered
   ].slice(0, MAX_RECENT_PROJECTS)
   saveRecentProjects(updated)
+}
+
+// Get a recent project by path
+export function getRecentProject(path: string): RecentProject | undefined {
+  return loadRecentProjects().find(p => p.path === path)
 }
 
 // Remove a project from recent list
@@ -85,6 +93,15 @@ export function removeFromRecentProjects(path: string): void {
   const projects = loadRecentProjects()
   const filtered = projects.filter(p => p.path !== path)
   saveRecentProjects(filtered)
+}
+
+// Update a project in the recent list
+export function updateRecentProject(originalPath: string, updates: Partial<RecentProject>): void {
+  const projects = loadRecentProjects()
+  const updated = projects.map(p =>
+    p.path === originalPath ? { ...p, ...updates, lastOpened: Date.now() } : p
+  )
+  saveRecentProjects(updated)
 }
 
 interface NewTabPageProps {
@@ -111,6 +128,8 @@ export function NewTabPage({
 }: NewTabPageProps) {
   const [urlInput, setUrlInput] = useState('')
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
+  const [editingProject, setEditingProject] = useState<string | null>(null) // path of project being edited
+  const [editForm, setEditForm] = useState<{ name: string; path: string; port: string }>({ name: '', path: '', port: '' })
 
   // Load recent projects on mount
   useEffect(() => {
@@ -141,6 +160,33 @@ export function NewTabPage({
     e.stopPropagation()
     removeFromRecentProjects(path)
     setRecentProjects(loadRecentProjects())
+  }
+
+  const handleEditProject = (e: React.MouseEvent, project: RecentProject) => {
+    e.stopPropagation()
+    setEditingProject(project.path)
+    setEditForm({
+      name: project.name,
+      path: project.path,
+      port: project.port?.toString() || ''
+    })
+  }
+
+  const handleSaveEdit = (e: React.MouseEvent, originalPath: string) => {
+    e.stopPropagation()
+    const portNum = editForm.port ? parseInt(editForm.port) : undefined
+    updateRecentProject(originalPath, {
+      name: editForm.name,
+      path: editForm.path,
+      port: portNum
+    })
+    setRecentProjects(loadRecentProjects())
+    setEditingProject(null)
+  }
+
+  const handleCancelEdit = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setEditingProject(null)
   }
 
   const handleUrlSubmit = (e: React.FormEvent) => {
@@ -244,49 +290,107 @@ export function NewTabPage({
             {recentProjects.map((project, index) => (
               <div
                 key={project.path}
-                onClick={() => handleProjectClick(project)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => e.key === 'Enter' && handleProjectClick(project)}
                 className={`
-                  w-full flex items-center justify-between px-4 py-3
-                  transition-colors text-left group cursor-pointer
+                  w-full px-4 py-3
+                  transition-colors text-left
                   ${index !== recentProjects.length - 1 ? (isDarkMode ? 'border-b border-neutral-800' : 'border-b border-stone-100') : ''}
+                  ${editingProject === project.path ? '' : 'cursor-pointer group'}
                   ${isDarkMode
                     ? 'hover:bg-neutral-800/50'
                     : 'hover:bg-stone-50'
                   }
                 `}
+                onClick={editingProject === project.path ? undefined : () => handleProjectClick(project)}
               >
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <Folder
-                    size={18}
-                    className={isDarkMode ? 'text-neutral-500' : 'text-stone-400'}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <span className={`block text-sm font-medium truncate ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
-                      {project.name}
-                    </span>
-                    <span className={`block text-xs truncate ${isDarkMode ? 'text-neutral-600' : 'text-stone-400'}`}>
-                      {formatPath(project.path)}
-                    </span>
+                {editingProject === project.path ? (
+                  /* Edit Mode */
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={editForm.name}
+                        onChange={(e) => setEditForm(f => ({ ...f, name: e.target.value }))}
+                        onClick={(e) => e.stopPropagation()}
+                        placeholder="Project name"
+                        className={`flex-1 px-2 py-1 text-sm rounded border ${isDarkMode ? 'bg-neutral-800 border-neutral-700 text-neutral-200' : 'bg-white border-stone-200 text-stone-800'}`}
+                      />
+                      <input
+                        type="number"
+                        value={editForm.port}
+                        onChange={(e) => setEditForm(f => ({ ...f, port: e.target.value }))}
+                        onClick={(e) => e.stopPropagation()}
+                        placeholder="Port"
+                        className={`w-20 px-2 py-1 text-sm rounded border ${isDarkMode ? 'bg-neutral-800 border-neutral-700 text-neutral-200' : 'bg-white border-stone-200 text-stone-800'}`}
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      value={editForm.path}
+                      onChange={(e) => setEditForm(f => ({ ...f, path: e.target.value }))}
+                      onClick={(e) => e.stopPropagation()}
+                      placeholder="Path"
+                      className={`w-full px-2 py-1 text-sm rounded border ${isDarkMode ? 'bg-neutral-800 border-neutral-700 text-neutral-200' : 'bg-white border-stone-200 text-stone-800'}`}
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={handleCancelEdit}
+                        className={`px-2 py-1 text-xs rounded ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={(e) => handleSaveEdit(e, project.path)}
+                        className={`px-2 py-1 text-xs rounded flex items-center gap-1 ${isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-blue-600 text-white hover:bg-blue-500'}`}
+                      >
+                        <Check size={12} /> Save
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-2 ml-3">
-                  <span className={`text-xs whitespace-nowrap ${isDarkMode ? 'text-neutral-600' : 'text-stone-400'}`}>
-                    {formatLastOpened(project.lastOpened)}
-                  </span>
-                  <button
-                    onClick={(e) => handleRemoveProject(e, project.path)}
-                    className={`
-                      opacity-0 group-hover:opacity-100 p-1 rounded
-                      transition-opacity
-                      ${isDarkMode ? 'hover:bg-neutral-700' : 'hover:bg-stone-200'}
-                    `}
-                  >
-                    <X size={14} className={isDarkMode ? 'text-neutral-500' : 'text-stone-400'} />
-                  </button>
-                </div>
+                ) : (
+                  /* View Mode */
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <Folder
+                        size={18}
+                        className={isDarkMode ? 'text-neutral-500' : 'text-stone-400'}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <span className={`block text-sm font-medium truncate ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                          {project.name}
+                        </span>
+                        <span className={`block text-xs truncate ${isDarkMode ? 'text-neutral-600' : 'text-stone-400'}`}>
+                          {formatPath(project.path)}
+                          {project.port && <span className="ml-2 text-blue-500">:{project.port}</span>}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 ml-3">
+                      <span className={`text-xs whitespace-nowrap ${isDarkMode ? 'text-neutral-600' : 'text-stone-400'}`}>
+                        {formatLastOpened(project.lastOpened)}
+                      </span>
+                      <button
+                        onClick={(e) => handleEditProject(e, project)}
+                        className={`
+                          opacity-0 group-hover:opacity-100 p-1 rounded
+                          transition-opacity
+                          ${isDarkMode ? 'hover:bg-neutral-700' : 'hover:bg-stone-200'}
+                        `}
+                      >
+                        <Pencil size={14} className={isDarkMode ? 'text-neutral-500' : 'text-stone-400'} />
+                      </button>
+                      <button
+                        onClick={(e) => handleRemoveProject(e, project.path)}
+                        className={`
+                          opacity-0 group-hover:opacity-100 p-1 rounded
+                          transition-opacity
+                          ${isDarkMode ? 'hover:bg-neutral-700' : 'hover:bg-stone-200'}
+                        `}
+                      >
+                        <X size={14} className={isDarkMode ? 'text-neutral-500' : 'text-stone-400'} />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
