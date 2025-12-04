@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Plus, X, Sun, Moon, Settings, Globe, LayoutGrid, CheckSquare, FileText, Columns3, Zap, FolderOpen } from 'lucide-react'
+import { Plus, X, Sun, Moon, Settings, Globe, LayoutGrid, CheckSquare, FileText, Columns3, Zap, FolderOpen, Eye } from 'lucide-react'
 
 export type TabType = 'browser' | 'kanban' | 'todos' | 'notes'
 
@@ -22,6 +22,7 @@ interface TabBarProps {
   onToggleDarkMode: () => void
   onOpenSettings: () => void
   fastApplyReady?: boolean
+  fileWatcherActive?: boolean
 }
 
 const TAB_TYPES = [
@@ -50,7 +51,8 @@ export function TabBar({
   isDarkMode,
   onToggleDarkMode,
   onOpenSettings,
-  fastApplyReady
+  fastApplyReady,
+  fileWatcherActive
 }: TabBarProps) {
   const [showMenu, setShowMenu] = useState(false)
   const menuTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -236,6 +238,21 @@ export function TabBar({
         className="flex items-center gap-1.5 pr-3 flex-shrink-0"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
+        {/* File Watcher Status Chip */}
+        {fileWatcherActive && (
+          <div
+            className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium backdrop-blur-md transition-all ${
+              isDarkMode
+                ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20 text-emerald-300 border border-emerald-500/30 shadow-lg shadow-emerald-500/10'
+                : 'bg-gradient-to-r from-emerald-100 to-teal-100 text-emerald-700 border border-emerald-300/50 shadow-sm'
+            }`}
+            title="File watcher active - monitoring project for changes"
+          >
+            <Eye size={10} className={isDarkMode ? 'text-emerald-400' : 'text-emerald-600'} />
+            <span>Watch</span>
+          </div>
+        )}
+
         {/* Fast Apply Status Chip */}
         {fastApplyReady && (
           <div

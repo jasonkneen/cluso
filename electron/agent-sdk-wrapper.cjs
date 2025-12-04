@@ -529,27 +529,16 @@ async function streamChat(options) {
           })
         }
 
-        // Message stop - AI finished its turn, end the session
+        // Message stop - AI finished ONE turn (not necessarily the whole session)
+        // In agentic mode with tools, the SDK will continue automatically:
+        // AI outputs → message_stop → tools execute → results sent back → AI continues
+        // So we should NOT abort here - let the agentic loop continue naturally
         else if (event.type === 'message_stop') {
           sendToRenderer('agent-sdk:message-stop', {
             requestId,
           })
-
-          // Send complete event immediately since we're done
-          if (!completeSent) {
-            console.log('[Agent-SDK-Wrapper] Message stop received, sending complete')
-            sendToRenderer('agent-sdk:complete', {
-              requestId,
-              text: fullText,
-              thinking: fullThinking || undefined,
-            })
-            completeSent = true
-          }
-
-          // Signal end of conversation to break out of the for-await loop
-          // The SDK is waiting for the next user message, but we're done
-          shouldAbortSession = true
-          abortGenerator()
+          console.log('[Agent-SDK-Wrapper] Message stop - AI turn complete, waiting for tool results or session end')
+          // Don't send complete or abort - the SDK manages the agentic loop
         }
       }
 

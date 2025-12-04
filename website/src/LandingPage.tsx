@@ -1101,10 +1101,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
 
         {/* Hero Section */}
         <section className="hero">
-          <div className="hero-badge">
+          <a href="#downloads" className="hero-badge" style={{ textDecoration: 'none', color: 'inherit' }}>
             <span className="dot"></span>
-            <span>Download</span>
-          </div>
+            <span>3 Day Trial</span>
+          </a>
 
           <h1>
             The <span className="gradient">AI-powered</span> browser<br />for frontend development
@@ -1248,7 +1248,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                     Free updates for life
                   </li>
                 </ul>
-                <a href="#download" className="btn btn-secondary">Get Started</a>
+                <a href="#downloads" className="btn btn-secondary">3 Day Trial</a>
               </div>
 
               <div className="pricing-card-wrapper">
@@ -1288,7 +1288,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                       Priority support
                     </li>
                   </ul>
-                  <a href="#download" className="btn btn-primary">Start 7 day trial</a>
+                  <a href="#downloads" className="btn btn-primary">Start 7 day trial</a>
                 </div>
               </div>
 
@@ -1329,7 +1329,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                       Team management
                     </li>
                   </ul>
-                  <a href="#download" className="btn btn-primary">Start 7 day trial</a>
+                  <a href="#downloads" className="btn btn-primary">Start 7 day trial</a>
                 </div>
               </div>
             </div>
@@ -1344,7 +1344,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               Download Cluso for free and transform how you build user interfaces.
             </p>
             <div className="cta-buttons">
-              <a href="#download" className="btn btn-primary btn-large" style={{ backgroundColor: 'white', color: 'black' }}>
+              <a href="#downloads" className="btn btn-primary btn-large" style={{ backgroundColor: 'white', color: 'black' }}>
                 Download Now
               </a>
             </div>
@@ -1386,7 +1386,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                 <ul>
                   <li><a href="#features">Features</a></li>
                   <li><a href="#pricing">Pricing</a></li>
-                  <li><a href="#download">Join Waitlist</a></li>
+                  <li><a href="#downloads">Download</a></li>
                 </ul>
               </div>
 

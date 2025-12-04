@@ -694,6 +694,9 @@ export default function App() {
   // Fast Apply Status (Pro Feature)
   const [fastApplyReady, setFastApplyReady] = useState(false);
 
+  // File Watcher Status
+  const [fileWatcherActive, setFileWatcherActive] = useState(false);
+
   // App Settings State - with localStorage persistence
   const [appSettings, setAppSettings] = useState<AppSettings>(() => {
     try {
@@ -3748,14 +3751,25 @@ export default function App() {
   // File watcher - watch project folder for any file changes (from any source)
   // This picks up changes from VS Code, terminal, git, AI tools, etc.
   useEffect(() => {
-    if (!isElectron || !activeTab.projectPath) return;
-    if (!window.electronAPI?.fileWatcher) return;
+    if (!isElectron || !activeTab.projectPath) {
+      setFileWatcherActive(false);
+      return;
+    }
+    if (!window.electronAPI?.fileWatcher) {
+      setFileWatcherActive(false);
+      return;
+    }
 
     const projectPath = activeTab.projectPath;
     console.log('[FileWatcher] Starting watch on project:', projectPath);
 
     // Start watching the project folder
-    window.electronAPI.fileWatcher.start(projectPath);
+    window.electronAPI.fileWatcher.start(projectPath).then((result: { success: boolean }) => {
+      if (result.success) {
+        setFileWatcherActive(true);
+        console.log('[FileWatcher] Watcher active for:', projectPath);
+      }
+    });
 
     // Listen for file change events
     const removeListener = window.electronAPI.fileWatcher.onChange((event: {
@@ -3765,13 +3779,6 @@ export default function App() {
       projectPath: string;
     }) => {
       console.log('[FileWatcher] File changed:', event.type, event.relativePath);
-
-      // Map watcher event types to our drawer types
-      const typeMap: Record<string, 'write' | 'create' | 'delete'> = {
-        'add': 'create',
-        'change': 'write',
-        'unlink': 'delete',
-      };
 
       // Add to edited files drawer
       addEditedFile({
@@ -3788,6 +3795,7 @@ export default function App() {
     // Cleanup: stop watching when project changes or unmounts
     return () => {
       console.log('[FileWatcher] Stopping watch on project:', projectPath);
+      setFileWatcherActive(false);
       removeListener();
       window.electronAPI?.fileWatcher?.stop(projectPath);
     };
@@ -5503,9 +5511,8 @@ If you're not sure what the user wants, ask for clarification.
       setIsStreaming(false);
       setStreamingMessage(null);
       setAgentProcessing(false);
-      // Failsafe: ensure isAIGenerating is also reset by calling cancel
-      // This handles cases where the complete event wasn't received properly
-      cancelAI();
+      // Note: Don't call cancelAI() here - it causes race conditions with tool approvals
+      // The generating state is already managed by the stream completion callbacks
     }
   };
 
@@ -5866,6 +5873,7 @@ If you're not sure what the user wants, ask for clarification.
         onToggleDarkMode={toggleDarkMode}
         onOpenSettings={() => setIsSettingsOpen(true)}
         fastApplyReady={fastApplyReady}
+        fileWatcherActive={fileWatcherActive}
       />
 
       {/* Main Content Area */}
