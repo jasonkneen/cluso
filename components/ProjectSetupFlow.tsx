@@ -437,11 +437,13 @@ export function ProjectSetupFlow({
         {projectPath}
       </p>
 
-      {/* Tech Stack Chips */}
+      {/* Tech Stack Chips - deduplicated by name */}
       <div className="flex flex-wrap justify-center content-start gap-2 mb-8 h-[80px] max-w-md overflow-hidden">
-        {visibleChips.map((chip, index) => (
+        {visibleChips
+          .filter((chip, index, arr) => arr.findIndex(c => c.name === chip.name) === index)
+          .map((chip, index) => (
           <span
-            key={`${chip.name}-${index}`}
+            key={chip.name}
             className={`
               px-3 py-1.5 text-xs font-medium rounded-full border
               animate-in fade-in zoom-in-95 duration-200

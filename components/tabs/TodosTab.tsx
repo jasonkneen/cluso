@@ -345,10 +345,16 @@ export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: Todo
                     </span>
                   </div>
                   <div className={`flex items-center gap-2 mt-1 text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-                    {item.source === 'agent' ? (
-                      <span className="flex items-center gap-1">
-                        <Bot size={10} />
-                        {item.agentName || 'AI Agent'}
+                    {/* Agent chip */}
+                    {item.agent && item.agent !== 'user' ? (
+                      <span
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                        style={{
+                          backgroundColor: `${agents[item.agent]?.color || AGENT_COLORS[item.agent] || '#6B7280'}20`,
+                          color: agents[item.agent]?.color || AGENT_COLORS[item.agent] || '#6B7280',
+                        }}
+                      >
+                        {agents[item.agent]?.icon || '🤖'} {agents[item.agent]?.name || item.agent}
                       </span>
                     ) : (
                       <span className="flex items-center gap-1">
@@ -360,6 +366,11 @@ export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: Todo
                       <Clock size={10} />
                       {new Date(item.createdAt).toLocaleDateString()}
                     </span>
+                    {item.source && item.source !== 'local' && (
+                      <span className={`text-[10px] ${isDarkMode ? 'text-neutral-600' : 'text-stone-300'}`}>
+                        {item.source}
+                      </span>
+                    )}
                   </div>
                 </div>
 

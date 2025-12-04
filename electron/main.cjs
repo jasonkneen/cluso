@@ -2362,14 +2362,63 @@ function createWindow() {
     callback(isAllowed)
   })
 
-  // Block dangerous navigation in webviews (file://, javascript:, data: URIs)
-  mainWindow.webContents.on('will-navigate', (event, url) => {
-    const parsed = new URL(url)
-    const blockedProtocols = ['file:', 'javascript:', 'data:', 'vbscript:']
-    if (blockedProtocols.includes(parsed.protocol)) {
-      console.warn(`Blocked navigation to dangerous URL: ${url}`)
-      event.preventDefault()
+  // Helper to check if URL is local (localhost, file://, etc.)
+  const isLocalUrl = (url) => {
+    try {
+      const parsed = new URL(url)
+      const localHosts = ['localhost', '127.0.0.1', '0.0.0.0', '[::1]']
+      return (
+        parsed.protocol === 'file:' ||
+        localHosts.includes(parsed.hostname) ||
+        parsed.hostname.endsWith('.local') ||
+        parsed.hostname.endsWith('.localhost')
+      )
+    } catch {
+      // If URL parsing fails, treat as local (relative paths, etc.)
+      return true
     }
+  }
+
+  // Block dangerous navigation in main window (file://, javascript:, data: URIs)
+  // AND prevent navigating away from local URLs
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const parsed = new URL(url)
+      const blockedProtocols = ['javascript:', 'data:', 'vbscript:']
+      if (blockedProtocols.includes(parsed.protocol)) {
+        console.warn(`Blocked navigation to dangerous URL: ${url}`)
+        event.preventDefault()
+        return
+      }
+    } catch {
+      // URL parsing failed, allow it
+    }
+  })
+
+  // Handle webview navigation - open external URLs in system browser
+  mainWindow.webContents.on('did-attach-webview', (event, webContents) => {
+    // Block external URL navigation in webviews - open in system browser instead
+    webContents.on('will-navigate', (navEvent, url) => {
+      if (!isLocalUrl(url)) {
+        console.log(`[Webview] External URL detected, opening in system browser: ${url}`)
+        navEvent.preventDefault()
+        shell.openExternal(url).catch((err) => {
+          console.error('Failed to open external URL:', err)
+        })
+      }
+    })
+
+    // Handle new window requests (target="_blank", window.open, etc.) in webviews
+    webContents.setWindowOpenHandler(({ url }) => {
+      if (!isLocalUrl(url)) {
+        console.log(`[Webview] New window request for external URL, opening in system browser: ${url}`)
+        shell.openExternal(url).catch((err) => {
+          console.error('Failed to open external URL:', err)
+        })
+      }
+      // Always deny new windows - external links open in system browser
+      return { action: 'deny' }
+    })
   })
 
   mainWindow.once('ready-to-show', () => {
