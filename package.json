@@ -28,7 +28,7 @@
     "@ai-sdk/mcp": "^0.0.11",
     "@ai-sdk/openai": "^2.0.74",
     "@ai-sdk/react": "^2.0.104",
-    "@anthropic-ai/claude-agent-sdk": "^0.1.55",
+    "@anthropic-ai/claude-agent-sdk": "^0.1.58",
     "@google/genai": "^1.30.0",
     "@modelcontextprotocol/sdk": "^1.23.0",
     "@radix-ui/react-collapsible": "^1.1.12",

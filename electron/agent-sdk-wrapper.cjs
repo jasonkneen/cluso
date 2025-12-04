@@ -91,9 +91,25 @@ function supportsThinking(modelId) {
 // ============================================================================
 
 /**
- * Resolve the Claude Code CLI path from the SDK
+ * Resolve the Claude Code CLI path
+ * Prefers the global CLI (which has working auth) over the SDK's bundled CLI
  */
 function resolveClaudeCodeCli() {
+  // Prefer global claude CLI which has working OAuth auth
+  const globalPaths = [
+    '/usr/local/bin/claude',
+    path.join(os.homedir(), '.npm', 'bin', 'claude'),
+    path.join(os.homedir(), '.local', 'bin', 'claude'),
+  ]
+
+  for (const globalPath of globalPaths) {
+    if (existsSync(globalPath)) {
+      console.log('[Agent-SDK-Wrapper] Using global CLI:', globalPath)
+      return globalPath
+    }
+  }
+
+  // Fall back to SDK's bundled CLI
   const requireModule = createRequire(__filename)
   const cliPath = requireModule.resolve('@anthropic-ai/claude-agent-sdk/cli.js')
 
@@ -101,15 +117,37 @@ function resolveClaudeCodeCli() {
   if (cliPath.includes('app.asar')) {
     const unpackedPath = cliPath.replace('app.asar', 'app.asar.unpacked')
     if (existsSync(unpackedPath)) {
+      console.log('[Agent-SDK-Wrapper] Using unpacked SDK CLI:', unpackedPath)
       return unpackedPath
     }
   }
+  console.log('[Agent-SDK-Wrapper] Using SDK CLI:', cliPath)
   return cliPath
 }
 
 // ============================================================================
 // Message Generator (Async)
 // ============================================================================
+
+/**
+ * Wrap a message in the CLI's expected format
+ */
+function wrapMessage(message) {
+  // If message has 'role' and 'content', wrap it in the CLI format
+  if (message.role && message.content) {
+    return {
+      type: message.role, // "user" or "assistant"
+      session_id: currentSessionId || '',
+      message: {
+        role: message.role,
+        content: message.content,
+      },
+      parent_tool_use_id: null,
+    }
+  }
+  // Otherwise return as-is (might already be wrapped)
+  return message
+}
 
 /**
  * Async generator that yields messages from the queue
@@ -119,7 +157,7 @@ async function* messageGenerator() {
     if (messageQueue.length > 0) {
       const { message, resolve } = messageQueue.shift()
       resolve()
-      yield message
+      yield wrapMessage(message)
     } else {
       // Wait for next message
       await new Promise(resolve => {
