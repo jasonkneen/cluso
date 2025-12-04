@@ -18,6 +18,7 @@ import { useAIChat, getProviderForModel, ProviderConfig, MCPToolDefinition, toCo
 import type { CoreMessage } from './hooks/useAIChat';
 import { useCodingAgent, CodingContext, FileModificationEvent } from './hooks/useCodingAgent';
 import { useMCP } from './hooks/useMCP';
+import { useSelectorAgent } from './hooks/useSelectorAgent';
 import { useToolTracker } from './hooks/useToolTracker';
 import { generateTurnId } from './utils/turnUtils';
 import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler';
@@ -1542,6 +1543,73 @@ export default function App() {
       return 'Error scanning page: ' + (err as Error).message;
     }
   }, [isWebviewReady, activeTabId]);
+
+  // Selector Agent - persistent claude-agent-sdk session for fast element selection
+  const {
+    isActive: selectorAgentActive,
+    isPrimed: selectorAgentPrimed,
+    isWaiting: selectorAgentWaiting,
+    initialize: initializeSelectorAgent,
+    primeContext: primeSelectorContext,
+    selectElement: requestElementSelection,
+    latestResult: selectorResult,
+    error: selectorAgentError,
+  } = useSelectorAgent({
+    cwd: projectPath || undefined,
+    onSelectionResult: useCallback((result) => {
+      console.log('[SelectorAgent] Selection result:', result);
+      if (result.selector) {
+        // Use the existing handleAiElementSelect flow
+        handleAiElementSelect(result.selector, result.reasoning);
+      } else if (result.suggestions?.length) {
+        console.log('[SelectorAgent] No match, suggestions:', result.suggestions);
+      }
+    }, [handleAiElementSelect]),
+    onError: useCallback((err) => {
+      console.error('[SelectorAgent] Error:', err);
+    }, []),
+  });
+
+  // Initialize selector agent when Electron is available
+  useEffect(() => {
+    if (isElectron && !selectorAgentActive) {
+      initializeSelectorAgent().then(success => {
+        if (success) {
+          console.log('[SelectorAgent] Initialized successfully');
+        }
+      });
+    }
+  }, [isElectron, selectorAgentActive, initializeSelectorAgent]);
+
+  // Prime selector agent with page context when page elements are fetched
+  const primeAgentWithPageContext = useCallback(async () => {
+    if (!selectorAgentActive) return;
+
+    const pageElements = await handleGetPageElements('all');
+    if (pageElements && !pageElements.startsWith('Error')) {
+      const webview = webviewRefs.current.get(activeTabId);
+      const pageUrl = webview ? await webview.executeJavaScript('window.location.href').catch(() => '') : '';
+      const pageTitle = webview ? await webview.executeJavaScript('document.title').catch(() => '') : '';
+
+      await primeSelectorContext({
+        pageElements,
+        pageUrl,
+        pageTitle,
+      });
+      console.log('[SelectorAgent] Context primed');
+    }
+  }, [selectorAgentActive, handleGetPageElements, primeSelectorContext, activeTabId]);
+
+  // Auto-prime selector agent when page loads
+  useEffect(() => {
+    if (selectorAgentActive && isWebviewReady && !selectorAgentPrimed) {
+      // Debounce priming slightly to ensure page is stable
+      const timer = setTimeout(() => {
+        primeAgentWithPageContext();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [selectorAgentActive, isWebviewReady, selectorAgentPrimed, primeAgentWithPageContext]);
 
   // Handle patch_source_file tool - writes changes to actual source files
   const handlePatchSourceFile = useCallback(async (
