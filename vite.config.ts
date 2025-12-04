@@ -30,6 +30,11 @@ export default defineConfig(({ mode }) => {
         emptyOutDir: true,
         sourcemap: true,
       },
+      optimizeDeps: {
+        // Pre-bundle shiki to avoid 504 errors during HMR
+        // Shiki dynamically imports themes/languages which can cause stale dep issues
+        include: ['shiki'],
+      },
       css: {
         devSourcemap: true,
       }

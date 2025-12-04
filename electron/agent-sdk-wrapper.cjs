@@ -296,18 +296,16 @@ async function streamChat(options) {
     mcpTools = [],
   } = options
 
-  // Check if already processing - reset stale state if detected
+  // Check if already processing - clean up stale state from previous failed sessions
   if (isProcessing || querySession) {
+    console.log('[Agent-SDK-Wrapper] Cleaning up stale session state')
     // Reset state to prevent deadlock from previous failed sessions
     isProcessing = false
     querySession = null
     currentRequestId = null
     streamIndexToToolId.clear()
-    sendToRenderer('agent-sdk:error', {
-      requestId,
-      error: 'Session already active. Please wait or stop the current request.',
-    })
-    return
+    resetMessageQueue()
+    // Don't return - allow the new request to proceed after cleanup
   }
 
   // Validate model support
@@ -400,14 +398,23 @@ async function streamChat(options) {
             if (part.type === 'text') {
               userContent.push({ type: 'text', text: part.text })
             } else if (part.type === 'image') {
-              userContent.push({
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: part.mimeType || 'image/png',
-                  data: part.data,
-                },
-              })
+              // Handle both formats:
+              // Format 1 (from App.tsx): { type: 'image', image: { base64Data, mimeType } }
+              // Format 2 (legacy): { type: 'image', mimeType, data }
+              const imageData = part.image?.base64Data || part.data
+              const mimeType = part.image?.mimeType || part.mimeType || 'image/png'
+
+              if (imageData) {
+                userContent.push({
+                  type: 'image',
+                  source: {
+                    type: 'base64',
+                    media_type: mimeType,
+                    data: imageData,
+                  },
+                })
+                console.log('[Agent-SDK-Wrapper] Added image to message, mimeType:', mimeType)
+              }
             }
           }
         }
@@ -497,11 +504,15 @@ async function streamChat(options) {
           })
         }
 
-        // Message stop
+        // Message stop - AI finished its turn, end the session
         else if (event.type === 'message_stop') {
           sendToRenderer('agent-sdk:message-stop', {
             requestId,
           })
+          // Signal end of conversation to break out of the for-await loop
+          // The SDK is waiting for the next user message, but we're done
+          shouldAbortSession = true
+          abortGenerator()
         }
       }
 

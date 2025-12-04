@@ -248,7 +248,7 @@ const getShortModelName = (name: string): string => {
 };
 
 // Default model - Claude Haiku 4.5 for fast, efficient responses
-const DEFAULT_MODEL = { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', Icon: Zap, provider: 'claude-code' };
+const DEFAULT_MODEL = { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', Icon: ClaudeIcon, provider: 'claude-code' };
 
 // Legacy MODELS constant for backwards compatibility
 const MODELS = [
@@ -856,7 +856,7 @@ export default function App() {
   const [isGeneratingSourcePatch, setIsGeneratingSourcePatch] = useState(false)
 
   // Initialize AI Chat hook with streaming support
-  const { generate: generateAI, stream: streamAI, cancel: cancelAI, isLoading: isAILoading } = useAIChat({
+  const { generate: generateAI, stream: streamAI, cancel: cancelAI, isLoading: isAILoading, isGenerating: isAIGenerating } = useAIChat({
     onError: (err) => console.error('[AI SDK] Error:', err),
     onTextDelta: (delta) => {
       // Update streaming message content as chunks arrive
@@ -5259,6 +5259,11 @@ If you're not sure what the user wants, ask for clarification.
         timestamp: new Date(),
         model: selectedModel.name
       }]);
+    } finally {
+      // Always clean up streaming state, even on error
+      setIsStreaming(false);
+      setStreamingMessage(null);
+      setAgentProcessing(false);
     }
   };
 
@@ -7734,8 +7739,8 @@ If you're not sure what the user wants, ask for clarification.
                               <Camera size={18} />
                           </button>
 
-                          {/* Stop button (visible during streaming) */}
-                          {(isAILoading || isStreaming) && (
+                          {/* Stop button (visible only during active generation, not idle connection) */}
+                          {(isAIGenerating || isStreaming) && (
                               <button
                                   onClick={() => {
                                       cancelAI()
@@ -7755,7 +7760,7 @@ If you're not sure what the user wants, ask for clarification.
                               onClick={() => processPrompt(input)}
                               disabled={!input.trim()}
                               className={`p-1.5 rounded-lg transition-colors ml-1 disabled:opacity-30 disabled:cursor-not-allowed ${isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-800'}`}
-                              title={isAILoading || isStreaming ? "Queue message" : "Send message"}
+                              title={isAIGenerating || isStreaming ? "Queue message" : "Send message"}
                           >
                               <ArrowUp size={14} />
                           </button>

@@ -744,6 +744,13 @@ const styles = `
     color: var(--text-secondary);
   }
 
+  .pricing-card .original-price {
+    font-size: 1rem;
+    color: var(--text-muted);
+    text-decoration: line-through;
+    margin-right: 0.5rem;
+  }
+
   .pricing-card .price-note {
     font-size: 0.85rem;
     color: var(--text-muted);
@@ -1306,7 +1313,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                 <span className="coming-soon">Coming Soon</span>
                 <div className="pricing-card blurred">
                   <h3>Team</h3>
-                  <div className="price">$49<span>/mo</span></div>
+                  <div className="price"><span className="original-price">$99</span>$49<span>/mo</span></div>
                   <p className="price-note">Per seat, billed annually</p>
                   <ul>
                     <li>

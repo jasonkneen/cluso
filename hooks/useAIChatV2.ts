@@ -230,6 +230,7 @@ export function getProviderForModel(modelId: string): ProviderType | null {
 
 export function useAIChatV2(options: UseAIChatOptions = {}) {
   const [isLoading, setIsLoading] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false) // True only while AI is actively responding
   const [error, setError] = useState<Error | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
 
@@ -327,6 +328,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     cleanupFnsRef.current = []
 
     setIsLoading(true)
+    setIsGenerating(true) // Start of active generation
     setError(null)
 
     const requestId = crypto.randomUUID()
@@ -380,6 +382,17 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
           if (data.requestId !== requestId) return
           debugLog.aiChat.log(`[Agent SDK] Tool started: ${data.toolName} (${data.toolCallId})`)
           pendingToolInputs.set(data.toolCallId, { name: data.toolName, partialJson: '' })
+
+          // Call onStepFinish to update tool chips in UI (same as Vercel AI SDK does)
+          onStepFinish?.({
+            text: fullText,
+            toolCalls: [{
+              type: 'tool-call',
+              toolCallId: data.toolCallId,
+              toolName: data.toolName,
+              args: {},
+            }],
+          })
         })
 
         const removeToolInputDelta = agentSdk.onToolInputDelta((data: { requestId: string; toolCallId: string; delta: string; index: number }) => {
@@ -445,6 +458,12 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
           })
 
           pendingToolInputs.delete(data.toolCallId)
+
+          // Call onStepFinish to update tool chips status in UI
+          onStepFinish?.({
+            text: fullText,
+            toolResults: [toolResult],
+          })
         })
 
         const removeBlockStop = agentSdk.onBlockStop((data: { requestId: string; index: number }) => {
@@ -485,6 +504,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
             timestamp: new Date(),
           })
 
+          setIsGenerating(false) // AI finished responding
           setIsLoading(false)
           currentRequestIdRef.current = null
 
@@ -514,6 +534,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
           const err = new Error(data.error)
           setError(err)
           optionsRef.current.onError?.(err)
+          setIsGenerating(false) // AI stopped due to error
           setIsLoading(false)
           currentRequestIdRef.current = null
 
@@ -524,6 +545,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
           if (data.requestId !== requestId) return
 
           debugLog.aiChat.log('[Agent SDK] Session interrupted')
+          setIsGenerating(false) // AI was interrupted
           // Don't resolve - wait for complete/error
         })
 
@@ -553,6 +575,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
         }).catch((err: Error) => {
           setError(err)
           optionsRef.current.onError?.(err)
+          setIsGenerating(false)
           setIsLoading(false)
           resolve({ text: null })
         })
@@ -668,6 +691,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
           timestamp: new Date(),
         })
 
+        setIsGenerating(false) // AI finished responding
         setIsLoading(false)
         currentRequestIdRef.current = null
 
@@ -691,6 +715,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
         const err = new Error(data.error)
         setError(err)
         optionsRef.current.onError?.(err)
+        setIsGenerating(false) // AI stopped due to error
         setIsLoading(false)
         currentRequestIdRef.current = null
 
@@ -900,6 +925,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     currentRequestIdRef.current = null
 
     // Reset loading state
+    setIsGenerating(false)
     setIsLoading(false)
 
     // Notify via callback
@@ -913,6 +939,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     generate,
     cancel,
     isLoading,
+    isGenerating, // True only while AI is actively responding (for stop button)
     error,
     isInitialized,
   }
