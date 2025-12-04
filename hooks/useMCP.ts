@@ -12,6 +12,13 @@ import type {
   MCPServerCapabilities,
 } from '../types/mcp'
 import { jsonSchemaToZod as sharedJsonSchemaToZod } from '../utils/zodSchema'
+import {
+  discoverMCPServers,
+  mergeServerConfigs,
+  isDiscoveryAvailable,
+  MCPDiscoveryResult,
+  DiscoveredMCPServerConfig,
+} from '../utils/mcpDiscovery'
 
 /**
  * Hook options
@@ -21,10 +28,16 @@ export interface UseMCPOptions {
   initialServers?: MCPServerConfig[]
   /** Auto-connect enabled servers on mount */
   autoConnect?: boolean
+  /** Enable auto-discovery from .mcp.json files */
+  autoDiscover?: boolean
+  /** Project path for auto-discovery */
+  projectPath?: string
   /** Event callback */
   onEvent?: (event: MCPEvent) => void
   /** Error callback */
   onError?: (error: Error, serverId?: string) => void
+  /** Callback when servers are discovered */
+  onServersDiscovered?: (results: MCPDiscoveryResult[]) => void
 }
 
 /**
@@ -49,10 +62,14 @@ export interface UseMCPReturn {
   callTool: (serverId: string, toolName: string, args: Record<string, unknown>) => Promise<MCPToolResult>
   /** Refresh tools from a server */
   refreshTools: (serverId: string) => Promise<MCPTool[]>
+  /** Re-run MCP auto-discovery */
+  rediscover: () => Promise<void>
   /** Check if any server is connecting */
   isConnecting: boolean
   /** Check if we're in Electron environment with MCP support */
   isAvailable: boolean
+  /** Check if auto-discovery is available */
+  isDiscoveryAvailable: boolean
 }
 
 /**
@@ -70,7 +87,15 @@ const createEmptyState = (config: MCPServerConfig): MCPServerState => ({
  * Hook for managing MCP server connections
  */
 export function useMCP(options: UseMCPOptions = {}): UseMCPReturn {
-  const { initialServers = [], autoConnect = false, onEvent, onError } = options
+  const {
+    initialServers = [],
+    autoConnect = false,
+    autoDiscover = false,
+    projectPath,
+    onEvent,
+    onError,
+    onServersDiscovered,
+  } = options
 
   // Server states
   const [servers, setServers] = useState<Record<string, MCPServerState>>(() => {
@@ -80,6 +105,9 @@ export function useMCP(options: UseMCPOptions = {}): UseMCPReturn {
     }
     return initial
   })
+
+  // Track if discovery has been run
+  const discoveryRanRef = useRef(false)
 
   // Track if we're in Electron with MCP support
   const [isAvailable, setIsAvailable] = useState(false)
@@ -192,6 +220,62 @@ export function useMCP(options: UseMCPOptions = {}): UseMCPReturn {
     // Only run on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAvailable])
+
+  /**
+   * Run MCP server auto-discovery
+   */
+  const runDiscovery = useCallback(async () => {
+    if (!autoDiscover || !isDiscoveryAvailable()) return
+
+    try {
+      const discovered = await discoverMCPServers(projectPath)
+      if (discovered.length > 0) {
+        // Notify about discovered servers
+        onServersDiscovered?.(discovered)
+
+        // Merge with existing servers and update state
+        const merged = mergeServerConfigs(initialServers, discovered)
+        setServers(prev => {
+          const updated = { ...prev }
+          for (const config of merged) {
+            if (!updated[config.id]) {
+              updated[config.id] = createEmptyState(config)
+            }
+          }
+          return updated
+        })
+
+        // Auto-connect discovered servers if enabled
+        if (autoConnect) {
+          for (const config of merged) {
+            const discoveredConfig = config as DiscoveredMCPServerConfig
+            if (discoveredConfig.autoConnect && config.enabled) {
+              connect(config).catch(err => {
+                onError?.(err instanceof Error ? err : new Error(String(err)), config.id)
+              })
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[useMCP] Auto-discovery failed:', err)
+    }
+  }, [autoDiscover, projectPath, initialServers, autoConnect, onServersDiscovered, onError])
+
+  // Run auto-discovery on mount or when project path changes
+  useEffect(() => {
+    if (!autoDiscover || !isAvailable || discoveryRanRef.current) return
+    discoveryRanRef.current = true
+    runDiscovery()
+  }, [autoDiscover, isAvailable, projectPath, runDiscovery])
+
+  /**
+   * Re-run MCP discovery manually
+   */
+  const rediscover = useCallback(async () => {
+    discoveryRanRef.current = false
+    await runDiscovery()
+  }, [runDiscovery])
 
   /**
    * Connect to an MCP server
@@ -410,8 +494,10 @@ export function useMCP(options: UseMCPOptions = {}): UseMCPReturn {
     updateServer,
     callTool,
     refreshTools,
+    rediscover,
     isConnecting,
     isAvailable,
+    isDiscoveryAvailable: isDiscoveryAvailable(),
   }
 }
 
