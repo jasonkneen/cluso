@@ -173,6 +173,7 @@ async function startStreamingSession(options) {
       options: {
         model: modelId,
         maxThinkingTokens: 32_000,
+        // Only read project-level config (.mcp.json), NOT user-level (Claude Desktop)
         settingSources: ['project'],
         permissionMode: 'acceptEdits',
         allowedTools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch'],

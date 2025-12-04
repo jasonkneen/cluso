@@ -296,8 +296,13 @@ async function streamChat(options) {
     mcpTools = [],
   } = options
 
-  // Check if already processing
+  // Check if already processing - reset stale state if detected
   if (isProcessing || querySession) {
+    // Reset state to prevent deadlock from previous failed sessions
+    isProcessing = false
+    querySession = null
+    currentRequestId = null
+    streamIndexToToolId.clear()
     sendToRenderer('agent-sdk:error', {
       requestId,
       error: 'Session already active. Please wait or stop the current request.',
@@ -362,6 +367,8 @@ async function streamChat(options) {
       options: {
         model: normalizedModel,
         maxThinkingTokens: thinkingBudget,
+        // Only read project-level config (.mcp.json), NOT user-level (Claude Desktop)
+        // This prevents MCP servers with draft-07 schemas from causing API errors
         settingSources: ['project'],
         permissionMode: 'acceptEdits',
         allowedTools,

@@ -255,6 +255,7 @@ async function initializeSession(options = {}) {
       options: {
         model: SELECTOR_MODEL_ID,
         maxThinkingTokens: 0, // Haiku doesn't support thinking
+        // Only read project-level config (.mcp.json), NOT user-level (Claude Desktop)
         settingSources: ['project'],
         permissionMode: 'acceptEdits',
         allowedTools: [], // Selector agent doesn't need tools, just analysis
