@@ -215,6 +215,24 @@ export function SettingsDialog({
   const [codexTestResult, setCodexTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [codexTestLoading, setCodexTestLoading] = useState(false)
 
+  // MCP Discovery state
+  interface DiscoveredServer {
+    name: string
+    source: string
+    config: {
+      type: string
+      command?: string
+      args?: string[]
+      url?: string
+    }
+    transport: MCPStdioTransport | MCPSSETransport
+    tools: { name: string; displayName: string; description?: string }[] | null
+    error: string | null
+  }
+  const [discoveredServers, setDiscoveredServers] = useState<Record<string, DiscoveredServer>>({})
+  const [isDiscovering, setIsDiscovering] = useState(false)
+  const [disabledServers, setDisabledServers] = useState<Set<string>>(new Set())
+
   // Check Claude Code OAuth status on mount and when dialog opens
   useEffect(() => {
     if (isOpen && window.electronAPI?.oauth) {
@@ -252,7 +270,52 @@ export function SettingsDialog({
         }
       })
     }
+
+    // Auto-discover MCP servers when dialog opens
+    if (isOpen && window.electronAPI?.mcp?.discover) {
+      discoverMcpServers()
+    }
   }, [isOpen])
+
+  // Discover MCP servers from Claude Desktop, project, etc.
+  const discoverMcpServers = async () => {
+    if (!window.electronAPI?.mcp?.discover) return
+
+    setIsDiscovering(true)
+    try {
+      // Get project path from files API if available
+      let projectPath = undefined
+      if (window.electronAPI?.files?.getCwd) {
+        try {
+          const result = await window.electronAPI.files.getCwd()
+          if (result?.path) projectPath = result.path
+        } catch {}
+      }
+
+      const result = await window.electronAPI.mcp.discover(projectPath)
+      if (result.success && result.discovered) {
+        setDiscoveredServers(result.discovered)
+        console.log('Discovered MCP servers:', result.discovered)
+      }
+    } catch (err) {
+      console.error('Failed to discover MCP servers:', err)
+    } finally {
+      setIsDiscovering(false)
+    }
+  }
+
+  // Toggle server enabled/disabled
+  const toggleServerEnabled = (serverName: string) => {
+    setDisabledServers(prev => {
+      const next = new Set(prev)
+      if (next.has(serverName)) {
+        next.delete(serverName)
+      } else {
+        next.add(serverName)
+      }
+      return next
+    })
+  }
 
   if (!isOpen) return null
 
@@ -1257,31 +1320,162 @@ export function SettingsDialog({
                   Connect to Model Context Protocol servers for extended AI capabilities
                 </p>
               </div>
-              <button
-                onClick={() => {
-                  const newId = `mcp_${Date.now()}`
-                  const newConnection: MCPServerConnection = {
-                    id: newId,
-                    name: 'New MCP Server',
-                    type: 'mcp',
-                    transport: { type: 'stdio', command: 'npx', args: ['-y', '@your/mcp-server'] },
-                    enabled: false,
-                    status: 'disconnected',
-                  }
-                  updateSettings({
-                    connections: [...settings.connections, newConnection],
-                  })
-                }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                  isDarkMode
-                    ? 'bg-purple-500/10 text-purple-400 hover:bg-purple-500/20'
-                    : 'bg-purple-50 text-purple-600 hover:bg-purple-100'
-                }`}
-              >
-                <Plus size={14} />
-                Add Server
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Refresh Discovery Button */}
+                <button
+                  onClick={discoverMcpServers}
+                  disabled={isDiscovering}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    isDarkMode
+                      ? 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+                      : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                  } ${isDiscovering ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  <RefreshCw size={14} className={isDiscovering ? 'animate-spin' : ''} />
+                  {isDiscovering ? 'Discovering...' : 'Refresh'}
+                </button>
+                {/* Add Server Button */}
+                <button
+                  onClick={() => {
+                    const newId = `mcp_${Date.now()}`
+                    const newConnection: MCPServerConnection = {
+                      id: newId,
+                      name: 'New MCP Server',
+                      type: 'mcp',
+                      transport: { type: 'stdio', command: 'npx', args: ['-y', '@your/mcp-server'] },
+                      enabled: false,
+                      status: 'disconnected',
+                    }
+                    updateSettings({
+                      connections: [...settings.connections, newConnection],
+                    })
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    isDarkMode
+                      ? 'bg-purple-500/10 text-purple-400 hover:bg-purple-500/20'
+                      : 'bg-purple-50 text-purple-600 hover:bg-purple-100'
+                  }`}
+                >
+                  <Plus size={14} />
+                  Add Server
+                </button>
+              </div>
             </div>
+
+            {/* Discovered Servers Section */}
+            {Object.keys(discoveredServers).length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className={`text-sm font-medium ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                    Discovered Servers ({Object.keys(discoveredServers).length})
+                  </p>
+                </div>
+                {Object.entries(discoveredServers).map(([key, server]) => {
+                  const baseName = server.name
+                  const isServerEnabled = !disabledServers.has(baseName)
+                  const isStdio = server.config.type === 'stdio'
+
+                  return (
+                    <div
+                      key={key}
+                      className={`p-4 rounded-xl border transition-opacity ${
+                        isServerEnabled
+                          ? isDarkMode
+                            ? 'border-blue-500/30 bg-blue-500/5'
+                            : 'border-blue-200 bg-blue-50/50'
+                          : isDarkMode
+                            ? 'border-neutral-700 bg-neutral-800/30 opacity-60'
+                            : 'border-stone-200 bg-stone-50 opacity-60'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                              {baseName}
+                            </span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase tracking-wide ${
+                              isDarkMode
+                                ? 'bg-neutral-700 text-neutral-300'
+                                : 'bg-stone-200 text-stone-600'
+                            }`}>
+                              {server.source}
+                            </span>
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${
+                              isStdio
+                                ? isDarkMode ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'
+                                : isDarkMode ? 'bg-orange-500/10 text-orange-400' : 'bg-orange-50 text-orange-600'
+                            }`}>
+                              {isStdio ? 'STDIO' : 'SSE'}
+                            </span>
+                          </div>
+                          <p className={`mt-1 text-xs truncate ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                            {isStdio
+                              ? `${server.config.command}${server.config.args?.length ? ` ${server.config.args.join(' ')}` : ''}`
+                              : server.config.url
+                            }
+                          </p>
+                          {/* Tool chips */}
+                          {server.tools && server.tools.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {server.tools.slice(0, 5).map((tool) => (
+                                <span
+                                  key={tool.name}
+                                  className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                    isDarkMode
+                                      ? 'bg-neutral-700 text-neutral-400'
+                                      : 'bg-stone-200 text-stone-500'
+                                  }`}
+                                  title={tool.description}
+                                >
+                                  {tool.displayName}
+                                </span>
+                              ))}
+                              {server.tools.length > 5 && (
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                  isDarkMode
+                                    ? 'bg-neutral-700 text-neutral-400'
+                                    : 'bg-stone-200 text-stone-500'
+                                }`}>
+                                  +{server.tools.length - 5} more
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {server.error && (
+                            <p className={`mt-1 text-xs ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>
+                              {server.error}
+                            </p>
+                          )}
+                        </div>
+                        {/* Enable/Disable toggle */}
+                        <button
+                          onClick={() => toggleServerEnabled(baseName)}
+                          className={`relative w-10 h-5 rounded-full transition-colors ${
+                            isServerEnabled
+                              ? 'bg-blue-500'
+                              : isDarkMode ? 'bg-neutral-600' : 'bg-stone-300'
+                          }`}
+                        >
+                          <span
+                            className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                              isServerEnabled ? 'left-5' : 'left-0.5'
+                            }`}
+                          />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Configured Servers Section Header */}
+            {settings.connections.filter(c => c.type === 'mcp').length > 0 && (
+              <p className={`text-sm font-medium ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                Configured Servers ({settings.connections.filter(c => c.type === 'mcp').length})
+              </p>
+            )}
 
             {/* MCP Server List */}
             <div className="space-y-3">
@@ -1370,6 +1564,28 @@ export function SettingsDialog({
                                 isDarkMode ? 'text-neutral-500' : 'text-stone-400'
                               }`}>
                                 <Wrench size={10} />
+                                {mcpConn.toolCount} tools
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {/* Connect/Disconnect/Cancel Button */}
+                        {window.electronAPI?.mcp && (
+                          <button
+                            onClick={async () => {
+                              const mcp = window.electronAPI?.mcp
+                              if (!mcp) return
+
+                              if (mcpConn.status === 'connected' || mcpConn.status === 'connecting') {
+                                // Disconnect or Cancel
+                                await mcp.disconnect(mcpConn.id)
+                                updateSettings({
+                                  connections: settings.connections.map(c =>
+                                    c.id === mcpConn.id ? { ...c, status: 'disconnected', toolCount: undefined, error: undefined } : c
+                                  ) as Connection[],
+                                })
                                 {mcpConn.toolCount} tools
                               </span>
                             )}

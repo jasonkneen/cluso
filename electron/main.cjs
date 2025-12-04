@@ -1988,6 +1988,28 @@ function registerMCPHandlers() {
       return { success: false, status: {}, error: error instanceof Error ? error.message : 'Failed to get status' }
     }
   })
+
+  // Discover MCP servers from Claude Desktop, project, etc.
+  ipcMain.handle('mcp:discover', async (_event, projectPath) => {
+    try {
+      const discovered = await mcp.discoverMcpServers(projectPath)
+      return { success: true, discovered }
+    } catch (error) {
+      console.error('[MCP] Discovery error:', error)
+      return { success: false, discovered: {}, error: error instanceof Error ? error.message : 'Failed to discover servers' }
+    }
+  })
+
+  // Probe a discovered server to get its tools
+  ipcMain.handle('mcp:probe', async (_event, serverConfig) => {
+    try {
+      const result = await mcp.probeServer(serverConfig)
+      return { success: true, ...result }
+    } catch (error) {
+      console.error('[MCP] Probe error:', error)
+      return { success: false, tools: null, error: error instanceof Error ? error.message : 'Failed to probe server' }
+    }
+  })
 }
 
 // ============================================

@@ -232,6 +232,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getPrompt: (serverId, name, args) => ipcRenderer.invoke('mcp:get-prompt', { serverId, name, arguments: args }),
     // Get status of all connections
     getStatus: () => ipcRenderer.invoke('mcp:get-status'),
+    // Discover MCP servers from Claude Desktop, project .mcp.json, etc.
+    discover: (projectPath) => ipcRenderer.invoke('mcp:discover', projectPath),
+    // Probe a discovered server to get its tools
+    probe: (serverConfig) => ipcRenderer.invoke('mcp:probe', serverConfig),
     // Listen for MCP events
     onEvent: (callback) => {
       ipcRenderer.on('mcp:event', (_event, mcpEvent) => callback(mcpEvent))
