@@ -39,6 +39,20 @@ const mockElectronAPI = {
     listTools: vi.fn().mockResolvedValue({ tools: [] }),
     getStatus: vi.fn().mockResolvedValue({}),
   },
+  selectorAgent: {
+    init: vi.fn().mockResolvedValue({ success: true }),
+    prime: vi.fn().mockResolvedValue({ success: true }),
+    select: vi.fn().mockResolvedValue({ success: true }),
+    send: vi.fn().mockResolvedValue({ success: true }),
+    isActive: vi.fn().mockResolvedValue({ active: false }),
+    getContextState: vi.fn().mockResolvedValue({ isPrimed: false, pageUrl: null, pageTitle: null, lastPrimedAt: null }),
+    reset: vi.fn().mockResolvedValue({ success: true }),
+    interrupt: vi.fn().mockResolvedValue({ success: true }),
+    onTextChunk: vi.fn().mockReturnValue(() => {}),
+    onSelectionResult: vi.fn().mockReturnValue(() => {}),
+    onReady: vi.fn().mockReturnValue(() => {}),
+    onError: vi.fn().mockReturnValue(() => {}),
+  },
   isElectron: true,
 }
 
