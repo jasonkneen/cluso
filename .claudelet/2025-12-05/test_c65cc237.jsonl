@@ -1,0 +1,3 @@
+{"timestamp":"2025-12-05T20:20:06.721Z","sessionId":"c65cc237-8f37-4f97-bdcf-60c4e7019864","eventType":"session_start","data":{"sessionId":"c65cc237-8f37-4f97-bdcf-60c4e7019864","theme":"session","startedAt":"2025-12-05T20:20:06.721Z"}}
+{"timestamp":"2025-12-05T20:20:06.721Z","sessionId":"c65cc237-8f37-4f97-bdcf-60c4e7019864","eventType":"user_message","data":{"text":"hello?","attachments":[],"message":{"role":"user","content":[{"type":"text","text":"hello?"}]}}}
+{"timestamp":"2025-12-05T20:27:34.211Z","sessionId":"c65cc237-8f37-4f97-bdcf-60c4e7019864","eventType":"user_message","data":{"text":"test","attachments":[],"message":{"role":"user","content":[{"type":"text","text":"test"}]}}}

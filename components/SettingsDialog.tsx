@@ -29,11 +29,17 @@ import {
   AlertCircle,
   Play,
   Square,
+  Palette,
+  Server,
+  Download,
+  HardDrive,
 } from 'lucide-react'
 import { debugLog } from '../utils/debug'
 import { FastApplySettings } from './FastApplySettings'
+import { CodeIndexSettings } from './CodeIndexSettings'
+import { useTheme } from '../hooks/useTheme'
 
-type SettingsSection = 'general' | 'display' | 'providers' | 'models' | 'connections' | 'pro'
+type SettingsSection = 'general' | 'display' | 'providers' | 'models' | 'mcp' | 'lsp' | 'themes' | 'codeindex' | 'pro'
 
 export interface Provider {
   id: string
@@ -122,23 +128,26 @@ export const DEFAULT_SETTINGS: AppSettings = {
     { id: 'anthropic', name: 'Anthropic', apiKey: '', enabled: false },
   ],
   models: [
-    { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro', provider: 'google', enabled: true },
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'google', enabled: true },
-    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'google', enabled: true },
-    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'google', enabled: true },
-    { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', enabled: false },
-    { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai', enabled: false },
+    // Claude Code OAuth models (recommended for Agent SDK)
+    { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', provider: 'claude-code', enabled: true },
+    { id: 'claude-opus-4-5', name: 'Claude Opus 4.5', provider: 'claude-code', enabled: true },
+    { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', provider: 'claude-code', enabled: true },
+    // Claude legacy API models
     { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'anthropic', enabled: false },
     { id: 'claude-3-opus', name: 'Claude 3 Opus', provider: 'anthropic', enabled: false },
-    // Claude Code OAuth models
-    { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', provider: 'claude-code', enabled: false },
-    { id: 'claude-opus-4-5', name: 'Claude Opus 4.5', provider: 'claude-code', enabled: false },
-    { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', provider: 'claude-code', enabled: false },
+    // OpenAI models
+    { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', enabled: false },
+    { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai', enabled: false },
     // Codex OAuth models (ChatGPT Plus/Pro)
     { id: 'gpt-5.1', name: 'GPT-5.1', provider: 'codex', enabled: false },
     { id: 'gpt-5.1-mini', name: 'GPT-5.1 Mini', provider: 'codex', enabled: false },
     { id: 'gpt-5.1-nano', name: 'GPT-5.1 Nano', provider: 'codex', enabled: false },
     { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex', provider: 'codex', enabled: false },
+    // Google Gemini models
+    { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro', provider: 'google', enabled: true },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'google', enabled: true },
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'google', enabled: true },
+    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'google', enabled: true },
   ],
   connections: [
     {
@@ -158,6 +167,7 @@ interface SettingsDialogProps {
   onToggleDarkMode: () => void
   settings: AppSettings
   onSettingsChange: (settings: AppSettings) => void
+  projectPath?: string  // Current project path from activeTab
 }
 
 const SECTIONS: { id: SettingsSection; label: string; icon: React.ReactNode }[] = [
@@ -165,7 +175,10 @@ const SECTIONS: { id: SettingsSection; label: string; icon: React.ReactNode }[] 
   { id: 'display', label: 'Display', icon: <Monitor size={18} /> },
   { id: 'providers', label: 'Providers', icon: <Cpu size={18} /> },
   { id: 'models', label: 'Models', icon: <Brain size={18} /> },
-  { id: 'connections', label: 'Connections', icon: <Plug size={18} /> },
+  { id: 'mcp', label: 'MCP Servers', icon: <Server size={18} /> },
+  { id: 'lsp', label: 'Language Servers', icon: <Terminal size={18} /> },
+  { id: 'themes', label: 'Themes', icon: <Palette size={18} /> },
+  { id: 'codeindex', label: 'Code Index', icon: <HardDrive size={18} /> },
   { id: 'pro', label: 'Pro Features', icon: <Zap size={18} /> },
 ]
 
@@ -175,6 +188,25 @@ const FONT_SIZE_MAP: Record<FontSize, string> = {
   large: '18px',
 }
 
+// Helper function to adjust hex color brightness
+function adjustBrightness(hex: string, percent: number): string {
+  // Remove # if present
+  hex = hex.replace(/^#/, '')
+
+  // Parse RGB
+  let r = parseInt(hex.substring(0, 2), 16)
+  let g = parseInt(hex.substring(2, 4), 16)
+  let b = parseInt(hex.substring(4, 6), 16)
+
+  // Adjust brightness
+  r = Math.min(255, Math.max(0, Math.round(r + (r * percent / 100))))
+  g = Math.min(255, Math.max(0, Math.round(g + (g * percent / 100))))
+  b = Math.min(255, Math.max(0, Math.round(b + (b * percent / 100))))
+
+  // Convert back to hex
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+}
+
 export function SettingsDialog({
   isOpen,
   onClose,
@@ -182,9 +214,11 @@ export function SettingsDialog({
   onToggleDarkMode,
   settings,
   onSettingsChange,
+  projectPath,
 }: SettingsDialogProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general')
   const [showApiKeys, setShowApiKeys] = useState<Record<string, boolean>>({})
+  const { currentTheme, setTheme, themes } = useTheme()
 
   // OAuth state
   const [oauthLoading, setOauthLoading] = useState(false)
@@ -206,6 +240,32 @@ export function SettingsDialog({
   const [codexLoading, setCodexLoading] = useState(false)
   const [codexTestResult, setCodexTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [codexTestLoading, setCodexTestLoading] = useState(false)
+
+  // MCP Discovery state
+  interface DiscoveredServer {
+    name: string
+    source: string
+    config: {
+      type: string
+      command?: string
+      args?: string[]
+      url?: string
+    }
+    transport: MCPStdioTransport | MCPSSETransport
+    tools: { name: string; displayName: string; description?: string }[] | null
+    error: string | null
+  }
+  const [discoveredServers, setDiscoveredServers] = useState<Record<string, DiscoveredServer>>({})
+  const [isDiscovering, setIsDiscovering] = useState(false)
+  const [disabledServers, setDisabledServers] = useState<Set<string>>(new Set())
+
+  // LSP Server state
+  const [lspServers, setLspServers] = useState<LSPServerStatus[]>([])
+  const [isLoadingLsp, setIsLoadingLsp] = useState(false)
+  const [installingServers, setInstallingServers] = useState<Set<string>>(new Set())
+  const [lspCacheInfo, setLspCacheInfo] = useState<{ cacheSize: number; cacheDir: string } | null>(null)
+
+  // Project path for Code Index is passed via prop (from activeTab.projectPath)
 
   // Check Claude Code OAuth status on mount and when dialog opens
   useEffect(() => {
@@ -244,7 +304,145 @@ export function SettingsDialog({
         }
       })
     }
+
+    // Auto-discover MCP servers when dialog opens
+    if (isOpen && window.electronAPI?.mcp?.discover) {
+      discoverMcpServers()
+    }
+
+    // Load LSP server status when dialog opens
+    if (isOpen && window.electronAPI?.lsp?.getStatus) {
+      loadLspStatus()
+      loadLspCacheInfo()
+    }
   }, [isOpen])
+
+  // Discover MCP servers from Claude Desktop, project, etc.
+  const discoverMcpServers = async () => {
+    if (!window.electronAPI?.mcp?.discover) return
+
+    setIsDiscovering(true)
+    try {
+      // Get project path from files API if available
+      let projectPath = undefined
+      if (window.electronAPI?.files?.getCwd) {
+        try {
+          const result = await window.electronAPI.files.getCwd()
+          if (result?.path) projectPath = result.path
+        } catch {}
+      }
+
+      const result = await window.electronAPI.mcp.discover(projectPath)
+      if (result.success && result.discovered) {
+        setDiscoveredServers(result.discovered)
+        console.log('Discovered MCP servers:', result.discovered)
+      }
+    } catch (err) {
+      console.error('Failed to discover MCP servers:', err)
+    } finally {
+      setIsDiscovering(false)
+    }
+  }
+
+  // Load LSP server status
+  const loadLspStatus = async () => {
+    if (!window.electronAPI?.lsp?.getStatus) return
+
+    setIsLoadingLsp(true)
+    try {
+      const result = await window.electronAPI.lsp.getStatus()
+      if (result.success && result.data) {
+        setLspServers(result.data)
+      }
+    } catch (err) {
+      console.error('Failed to load LSP status:', err)
+    } finally {
+      setIsLoadingLsp(false)
+    }
+  }
+
+  // Toggle LSP server enabled/disabled
+  const toggleLspServer = async (serverId: string, enabled: boolean) => {
+    if (!window.electronAPI?.lsp?.setServerEnabled) return
+
+    try {
+      await window.electronAPI.lsp.setServerEnabled(serverId, enabled)
+      // Refresh status
+      loadLspStatus()
+    } catch (err) {
+      console.error('Failed to toggle LSP server:', err)
+    }
+  }
+
+  // Install an LSP server
+  const installLspServer = async (serverId: string) => {
+    if (!window.electronAPI?.lsp?.installServer) return
+
+    setInstallingServers(prev => new Set([...prev, serverId]))
+    try {
+      const result = await window.electronAPI.lsp.installServer(serverId)
+      if (result.success) {
+        // Refresh status after install
+        await loadLspStatus()
+        await loadLspCacheInfo()
+      } else {
+        console.error('Failed to install LSP server:', result.error)
+      }
+    } catch (err) {
+      console.error('Failed to install LSP server:', err)
+    } finally {
+      setInstallingServers(prev => {
+        const next = new Set(prev)
+        next.delete(serverId)
+        return next
+      })
+    }
+  }
+
+  // Load LSP cache info
+  const loadLspCacheInfo = async () => {
+    if (!window.electronAPI?.lsp?.getCacheInfo) return
+
+    try {
+      const result = await window.electronAPI.lsp.getCacheInfo()
+      if (result.success && result.data) {
+        setLspCacheInfo({
+          cacheSize: result.data.cacheSize,
+          cacheDir: result.data.cacheDir,
+        })
+      }
+    } catch (err) {
+      console.error('Failed to load LSP cache info:', err)
+    }
+  }
+
+  // Clear LSP cache
+  const clearLspCache = async () => {
+    if (!window.electronAPI?.lsp?.clearCache) return
+
+    try {
+      const result = await window.electronAPI.lsp.clearCache()
+      if (result.success) {
+        await loadLspCacheInfo()
+        await loadLspStatus()
+      }
+    } catch (err) {
+      console.error('Failed to clear LSP cache:', err)
+    }
+  }
+
+  // Toggle server enabled/disabled
+  const toggleServerEnabled = (serverName: string) => {
+    setDisabledServers(prev => {
+      const next = new Set(prev)
+      if (next.has(serverName)) {
+        next.delete(serverName)
+      } else {
+        next.add(serverName)
+      }
+      return next
+    })
+  }
 
   if (!isOpen) return null
 
@@ -1236,7 +1434,7 @@ export function SettingsDialog({
           </div>
         )
 
-      case 'connections':
+      case 'mcp':
         return (
           <div className="space-y-4">
             {/* Header with Add button */}
@@ -1249,31 +1447,162 @@ export function SettingsDialog({
                   Connect to Model Context Protocol servers for extended AI capabilities
                 </p>
               </div>
-              <button
-                onClick={() => {
-                  const newId = `mcp_${Date.now()}`
-                  const newConnection: MCPServerConnection = {
-                    id: newId,
-                    name: 'New MCP Server',
-                    type: 'mcp',
-                    transport: { type: 'stdio', command: 'npx', args: ['-y', '@your/mcp-server'] },
-                    enabled: false,
-                    status: 'disconnected',
-                  }
-                  updateSettings({
-                    connections: [...settings.connections, newConnection],
-                  })
-                }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                  isDarkMode
-                    ? 'bg-purple-500/10 text-purple-400 hover:bg-purple-500/20'
-                    : 'bg-purple-50 text-purple-600 hover:bg-purple-100'
-                }`}
-              >
-                <Plus size={14} />
-                Add Server
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Refresh Discovery Button */}
+                <button
+                  onClick={discoverMcpServers}
+                  disabled={isDiscovering}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    isDarkMode
+                      ? 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+                      : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                  } ${isDiscovering ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  <RefreshCw size={14} className={isDiscovering ? 'animate-spin' : ''} />
+                  {isDiscovering ? 'Discovering...' : 'Refresh'}
+                </button>
+                {/* Add Server Button */}
+                <button
+                  onClick={() => {
+                    const newId = `mcp_${Date.now()}`
+                    const newConnection: MCPServerConnection = {
+                      id: newId,
+                      name: 'New MCP Server',
+                      type: 'mcp',
+                      transport: { type: 'stdio', command: 'npx', args: ['-y', '@your/mcp-server'] },
+                      enabled: false,
+                      status: 'disconnected',
+                    }
+                    updateSettings({
+                      connections: [...settings.connections, newConnection],
+                    })
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    isDarkMode
+                      ? 'bg-purple-500/10 text-purple-400 hover:bg-purple-500/20'
+                      : 'bg-purple-50 text-purple-600 hover:bg-purple-100'
+                  }`}
+                >
+                  <Plus size={14} />
+                  Add Server
+                </button>
+              </div>
             </div>
+
+            {/* Discovered Servers Section */}
+            {Object.keys(discoveredServers).length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className={`text-sm font-medium ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                    Discovered Servers ({Object.keys(discoveredServers).length})
+                  </p>
+                </div>
+                {Object.entries(discoveredServers).map(([key, server]) => {
+                  const baseName = server.name
+                  const isServerEnabled = !disabledServers.has(baseName)
+                  const isStdio = server.config.type === 'stdio'
+
+                  return (
+                    <div
+                      key={key}
+                      className={`p-4 rounded-xl border transition-opacity ${
+                        isServerEnabled
+                          ? isDarkMode
+                            ? 'border-blue-500/30 bg-blue-500/5'
+                            : 'border-blue-200 bg-blue-50/50'
+                          : isDarkMode
+                            ? 'border-neutral-700 bg-neutral-800/30 opacity-60'
+                            : 'border-stone-200 bg-stone-50 opacity-60'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                              {baseName}
+                            </span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase tracking-wide ${
+                              isDarkMode
+                                ? 'bg-neutral-700 text-neutral-300'
+                                : 'bg-stone-200 text-stone-600'
+                            }`}>
+                              {server.source}
+                            </span>
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${
+                              isStdio
+                                ? isDarkMode ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'
+                                : isDarkMode ? 'bg-orange-500/10 text-orange-400' : 'bg-orange-50 text-orange-600'
+                            }`}>
+                              {isStdio ? 'STDIO' : 'SSE'}
+                            </span>
+                          </div>
+                          <p className={`mt-1 text-xs truncate ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                            {isStdio
+                              ? `${server.config.command}${server.config.args?.length ? ` ${server.config.args.join(' ')}` : ''}`
+                              : server.config.url
+                            }
+                          </p>
+                          {/* Tool chips */}
+                          {server.tools && server.tools.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {server.tools.slice(0, 5).map((tool) => (
+                                <span
+                                  key={tool.name}
+                                  className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                    isDarkMode
+                                      ? 'bg-neutral-700 text-neutral-400'
+                                      : 'bg-stone-200 text-stone-500'
+                                  }`}
+                                  title={tool.description}
+                                >
+                                  {tool.displayName}
+                                </span>
+                              ))}
+                              {server.tools.length > 5 && (
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                  isDarkMode
+                                    ? 'bg-neutral-700 text-neutral-400'
+                                    : 'bg-stone-200 text-stone-500'
+                                }`}>
+                                  +{server.tools.length - 5} more
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {server.error && (
+                            <p className={`mt-1 text-xs ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>
+                              {server.error}
+                            </p>
+                          )}
+                        </div>
+                        {/* Enable/Disable toggle */}
+                        <button
+                          onClick={() => toggleServerEnabled(baseName)}
+                          className={`relative w-10 h-5 rounded-full transition-colors ${
+                            isServerEnabled
+                              ? 'bg-blue-500'
+                              : isDarkMode ? 'bg-neutral-600' : 'bg-stone-300'
+                          }`}
+                        >
+                          <span
+                            className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                              isServerEnabled ? 'left-5' : 'left-0.5'
+                            }`}
+                          />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Configured Servers Section Header */}
+            {settings.connections.filter(c => c.type === 'mcp').length > 0 && (
+              <p className={`text-sm font-medium ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                Configured Servers ({settings.connections.filter(c => c.type === 'mcp').length})
+              </p>
+            )}
 
             {/* MCP Server List */}
             <div className="space-y-3">
@@ -1679,6 +2008,353 @@ export function SettingsDialog({
           </div>
         )
 
+      case 'lsp':
+        return (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                  Language Servers
+                </h3>
+                <p className={`text-xs mt-1 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                  LSP servers provide code intelligence in the background
+                </p>
+              </div>
+              <button
+                onClick={loadLspStatus}
+                disabled={isLoadingLsp}
+                className={`p-2 rounded-lg transition-colors ${
+                  isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'
+                } ${isLoadingLsp ? 'animate-spin' : ''}`}
+              >
+                <RefreshCw size={16} />
+              </button>
+            </div>
+
+            {/* Server List */}
+            <div className="space-y-3">
+              {isLoadingLsp && lspServers.length === 0 ? (
+                <div className={`p-4 text-center ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                  <Loader2 size={20} className="animate-spin mx-auto mb-2" />
+                  <p className="text-sm">Loading language servers...</p>
+                </div>
+              ) : lspServers.length === 0 ? (
+                <div className={`p-4 text-center ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                  <Terminal size={24} className="mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No language servers available</p>
+                </div>
+              ) : (
+                lspServers.map(server => (
+                  <div
+                    key={server.id}
+                    className={`p-4 rounded-lg border ${
+                      isDarkMode ? 'bg-neutral-800/50 border-neutral-700' : 'bg-stone-50 border-stone-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {/* Status indicator */}
+                        <div className={`w-2 h-2 rounded-full ${
+                          server.running
+                            ? 'bg-green-500'
+                            : server.installed
+                            ? 'bg-yellow-500'
+                            : 'bg-neutral-500'
+                        }`} />
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                              {server.name}
+                            </span>
+                            {server.running && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                                isDarkMode ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'
+                              }`}>
+                                Running
+                              </span>
+                            )}
+                            {!server.installed && server.installable && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                                isDarkMode ? 'bg-yellow-500/20 text-yellow-400' : 'bg-yellow-100 text-yellow-700'
+                              }`}>
+                                Not installed
+                              </span>
+                            )}
+                          </div>
+                          <div className={`text-xs mt-0.5 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                            {server.extensions.join(', ')}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {/* Install button for uninstalled servers */}
+                        {!server.installed && server.installable && (
+                          <button
+                            onClick={() => installLspServer(server.id)}
+                            disabled={installingServers.has(server.id)}
+                            className={`px-2.5 py-1 text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors ${
+                              installingServers.has(server.id)
+                                ? isDarkMode ? 'bg-neutral-700 text-neutral-400' : 'bg-stone-200 text-stone-400'
+                                : isDarkMode
+                                ? 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
+                                : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                            }`}
+                          >
+                            {installingServers.has(server.id) ? (
+                              <>
+                                <Loader2 size={12} className="animate-spin" />
+                                Installing...
+                              </>
+                            ) : (
+                              <>
+                                <Download size={12} />
+                                Install
+                              </>
+                            )}
+                          </button>
+                        )}
+
+                        {/* Enable/disable toggle */}
+                        <button
+                          onClick={() => toggleLspServer(server.id, !server.enabled)}
+                          className={`w-10 h-6 rounded-full transition-colors relative ${
+                            server.enabled
+                              ? 'bg-blue-500'
+                              : isDarkMode ? 'bg-neutral-600' : 'bg-stone-300'
+                          }`}
+                        >
+                          <span
+                            className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                              server.enabled ? 'left-5' : 'left-1'
+                            }`}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Running instances */}
+                    {server.running && server.instances.length > 0 && (
+                      <div className={`mt-3 pt-3 border-t ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
+                        <div className="space-y-1">
+                          {server.instances.map((instance, idx) => (
+                            <div
+                              key={idx}
+                              className={`flex items-center justify-between text-xs ${
+                                isDarkMode ? 'text-neutral-400' : 'text-stone-500'
+                              }`}
+                            >
+                              <span className="font-mono truncate max-w-[200px]" title={instance.root}>
+                                {instance.root.split('/').pop()}
+                              </span>
+                              <div className="flex items-center gap-3">
+                                <span>{instance.openDocuments} files</span>
+                                {instance.diagnosticCount > 0 && (
+                                  <span className={`flex items-center gap-1 ${
+                                    isDarkMode ? 'text-yellow-400' : 'text-yellow-600'
+                                  }`}>
+                                    <AlertCircle size={12} />
+                                    {instance.diagnosticCount}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Cache Info */}
+            {lspCacheInfo && lspCacheInfo.cacheSize > 0 && (
+              <div className={`p-4 rounded-lg border ${
+                isDarkMode ? 'bg-neutral-800/50 border-neutral-700' : 'bg-stone-50 border-stone-200'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <HardDrive size={16} className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'} />
+                    <div>
+                      <div className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                        LSP Cache
+                      </div>
+                      <div className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                        {(lspCacheInfo.cacheSize / 1024 / 1024).toFixed(1)} MB used
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={clearLspCache}
+                    className={`px-2.5 py-1 text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors ${
+                      isDarkMode
+                        ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                        : 'bg-red-100 text-red-700 hover:bg-red-200'
+                    }`}
+                  >
+                    <Trash2 size={12} />
+                    Clear Cache
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Info Box */}
+            <div className={`p-3 rounded-lg ${
+              isDarkMode ? 'bg-blue-500/10 border border-blue-500/20' : 'bg-blue-50 border border-blue-100'
+            }`}>
+              <p className={`text-xs ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
+                <strong>Language Servers</strong> provide real-time diagnostics, completions, and code navigation.
+                They run in the background and activate automatically based on file types.
+              </p>
+            </div>
+          </div>
+        )
+
+      case 'themes': {
+        // Helper to detect if a theme is light or dark based on background luminance
+        const isLightTheme = (theme: typeof themes[0]) => {
+          if (!theme.colors) return false
+          const bg = theme.colors.background
+          const r = parseInt(bg.slice(1, 3), 16)
+          const g = parseInt(bg.slice(3, 5), 16)
+          const b = parseInt(bg.slice(5, 7), 16)
+          const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+          return luminance > 0.5
+        }
+
+        const systemTheme = themes.find(t => t.id === 'system-default')
+        const darkThemes = themes.filter(t => t.id !== 'system-default' && !isLightTheme(t))
+        const lightThemes = themes.filter(t => t.id !== 'system-default' && isLightTheme(t))
+
+        const renderThemeButton = (theme: typeof themes[0]) => {
+          const isSelected = currentTheme.id === theme.id
+          const previewBg = theme.colors?.background || (isDarkMode ? '#1a1b26' : '#d6d3d1')
+          const previewFg = theme.colors?.foreground || (isDarkMode ? '#c0caf5' : '#171717')
+          const previewPrimary = theme.colors?.primary || '#7aa2f7'
+          const previewAccent = theme.colors?.accent || '#7dcfff'
+
+          return (
+            <button
+              key={theme.id}
+              onClick={() => setTheme(theme.id)}
+              className="relative p-3 rounded-xl border-2 transition-all text-left"
+              style={{
+                borderColor: isSelected ? primaryColor : borderColor,
+                boxShadow: isSelected ? `0 0 0 3px ${primaryColor}33` : 'none',
+              }}
+            >
+              {/* Theme Preview */}
+              <div
+                className="h-16 rounded-lg mb-2 relative overflow-hidden"
+                style={{ backgroundColor: previewBg }}
+              >
+                {/* Preview elements */}
+                <div className="absolute inset-2 flex flex-col gap-1">
+                  <div
+                    className="h-2 w-3/4 rounded"
+                    style={{ backgroundColor: previewFg, opacity: 0.8 }}
+                  />
+                  <div
+                    className="h-2 w-1/2 rounded"
+                    style={{ backgroundColor: previewPrimary }}
+                  />
+                  <div className="flex gap-1 mt-auto">
+                    <div
+                      className="h-3 w-8 rounded"
+                      style={{ backgroundColor: previewPrimary }}
+                    />
+                    <div
+                      className="h-3 w-6 rounded"
+                      style={{ backgroundColor: previewAccent }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Theme Info */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium" style={{ color: fgColor }}>
+                    {theme.name}
+                  </span>
+                  <p className="text-xs" style={{ color: mutedFg }}>
+                    {theme.description}
+                  </p>
+                </div>
+                {isSelected && (
+                  <CheckCircle size={16} style={{ color: primaryColor }} className="flex-shrink-0" />
+                )}
+              </div>
+            </button>
+          )
+        }
+
+        return (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-sm font-medium mb-2" style={{ color: fgColor }}>
+                Application Theme
+              </h3>
+              <p className="text-xs mb-4" style={{ color: mutedFg }}>
+                Choose a color theme for the application. Themes change the overall look and feel.
+              </p>
+            </div>
+
+            {/* System Default */}
+            {systemTheme && (
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: mutedFg }}>
+                  Automatic
+                </h4>
+                <div className="grid grid-cols-2 gap-3">
+                  {renderThemeButton(systemTheme)}
+                </div>
+              </div>
+            )}
+
+            {/* Dark Themes */}
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: mutedFg }}>
+                Dark Themes
+              </h4>
+              <div className="grid grid-cols-2 gap-3">
+                {darkThemes.map(renderThemeButton)}
+              </div>
+            </div>
+
+            {/* Light Themes */}
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: mutedFg }}>
+                Light Themes
+              </h4>
+              <div className="grid grid-cols-2 gap-3">
+                {lightThemes.map(renderThemeButton)}
+              </div>
+            </div>
+
+            {/* Info Box */}
+            <div
+              className="p-3 rounded-lg border"
+              style={{
+                backgroundColor: `${primaryColor}10`,
+                borderColor: `${primaryColor}30`,
+              }}
+            >
+              <p className="text-xs" style={{ color: primaryColor }}>
+                <strong>Tip:</strong> Select "System Default" to automatically follow your system's light/dark mode preference.
+              </p>
+            </div>
+          </div>
+        )
+      }
+
+      case 'codeindex':
+        return (
+          <CodeIndexSettings isDarkMode={isDarkMode} projectPath={projectPath} />
+        )
+
       case 'pro':
         return (
           <FastApplySettings isDarkMode={isDarkMode} isPro={true} />
@@ -1688,6 +2364,17 @@ export function SettingsDialog({
         return null
     }
   }
+
+  // Get theme colors - use custom theme colors if available, otherwise fallback to dark/light mode defaults
+  // CRITICAL: Light mode default background MUST be #d6d3d1 (stone-300) to match the title bar
+  const themeColors = currentTheme.colors
+  const bgColor = themeColors?.background || (isDarkMode ? '#171717' : '#d6d3d1')
+  const fgColor = themeColors?.foreground || (isDarkMode ? '#f5f5f5' : '#171717')
+  const borderColor = themeColors?.border || (isDarkMode ? '#404040' : '#a8a29e')
+  const primaryColor = themeColors?.primary || (isDarkMode ? '#3b82f6' : '#2563eb')
+  // Sidebar slightly darker/lighter than main background
+  const sidebarBg = themeColors ? adjustBrightness(themeColors.background, -10) : (isDarkMode ? '#262626' : '#c4c0bc')
+  const mutedFg = themeColors ? adjustBrightness(themeColors.foreground, -30) : (isDarkMode ? '#a3a3a3' : '#57534e')
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -1699,61 +2386,58 @@ export function SettingsDialog({
 
       {/* Dialog */}
       <div
-        className={`relative w-full max-w-3xl h-[600px] rounded-2xl shadow-2xl flex overflow-hidden ${
-          isDarkMode ? 'bg-neutral-900' : 'bg-white'
-        }`}
+        className="relative w-full max-w-5xl h-[700px] rounded-2xl shadow-2xl flex overflow-hidden"
+        style={{ backgroundColor: bgColor, color: fgColor }}
       >
         {/* Sidebar */}
-        <div className={`w-52 flex-shrink-0 border-r ${
-          isDarkMode ? 'bg-neutral-800/50 border-neutral-700' : 'bg-stone-50 border-stone-200'
-        }`}>
-          <div className={`p-4 border-b ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
-            <h2 className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-stone-900'}`}>
+        <div
+          className="w-52 flex-shrink-0 border-r"
+          style={{ backgroundColor: sidebarBg, borderColor }}
+        >
+          <div className="px-5 py-4 border-b" style={{ borderColor }}>
+            <h2 className="text-lg font-semibold" style={{ color: fgColor }}>
               Settings
             </h2>
           </div>
 
           <nav className="p-2">
-            {SECTIONS.map((section) => (
-              <button
-                key={section.id}
-                onClick={() => setActiveSection(section.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors ${
-                  activeSection === section.id
-                    ? isDarkMode
-                      ? 'bg-neutral-700 text-white'
-                      : 'bg-stone-200 text-stone-900'
-                    : isDarkMode
-                      ? 'text-neutral-400 hover:bg-neutral-700/50 hover:text-neutral-200'
-                      : 'text-stone-500 hover:bg-stone-100 hover:text-stone-700'
-                }`}
-              >
-                {section.icon}
-                <span className="text-sm font-medium">{section.label}</span>
-                {activeSection === section.id && (
-                  <ChevronRight size={14} className="ml-auto" />
-                )}
-              </button>
-            ))}
+            {SECTIONS.map((section) => {
+              const isActive = activeSection === section.id
+              return (
+                <button
+                  key={section.id}
+                  onClick={() => setActiveSection(section.id)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors"
+                  style={{
+                    backgroundColor: isActive ? (themeColors ? adjustBrightness(bgColor, 15) : (isDarkMode ? '#404040' : '#e7e5e4')) : 'transparent',
+                    color: isActive ? fgColor : mutedFg,
+                  }}
+                >
+                  {section.icon}
+                  <span className="text-sm font-medium">{section.label}</span>
+                  {isActive && (
+                    <ChevronRight size={14} className="ml-auto" />
+                  )}
+                </button>
+              )
+            })}
           </nav>
         </div>
 
         {/* Content */}
         <div className="flex-1 flex flex-col">
           {/* Header */}
-          <div className={`flex items-center justify-between p-4 border-b ${
-            isDarkMode ? 'border-neutral-700' : 'border-stone-200'
-          }`}>
-            <h3 className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-stone-900'}`}>
+          <div
+            className="flex items-center justify-between p-4 border-b"
+            style={{ borderColor }}
+          >
+            <h3 className="text-lg font-medium" style={{ color: fgColor }}>
               {SECTIONS.find(s => s.id === activeSection)?.label}
             </h3>
             <button
               onClick={onClose}
-              className={`p-2 rounded-lg transition-colors ${
-                isDarkMode
-                  ? 'hover:bg-neutral-700 text-neutral-400'
-                  : 'hover:bg-stone-100 text-stone-500'
-              }`}
+              className="p-2 rounded-lg transition-colors"
+              style={{ color: mutedFg }}
             >
               <X size={18} />
             </button>

@@ -2,15 +2,17 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useLiveGemini } from './hooks/useLiveGemini';
 import { useGit } from './hooks/useGit';
+import { useTheme } from './hooks/useTheme';
 import { INJECTION_SCRIPT } from './utils/iframe-injection';
 import { SelectedElement, Message as ChatMessage, ToolUsage } from './types';
 import { TabState, createNewTab } from './types/tab';
 import { TabBar, Tab, TabType } from './components/TabBar';
 import { KanbanTab, TodosTab, NotesTab } from './components/tabs';
-import { NewTabPage } from './components/NewTabPage';
+import { NewTabPage, addToRecentProjects, getRecentProject } from './components/NewTabPage';
 import { KanbanColumn, TodoItem } from './types/tab';
 import { ProjectSetupFlow } from './components/ProjectSetupFlow';
 import { SettingsDialog, AppSettings, DEFAULT_SETTINGS, getFontSizeValue } from './components/SettingsDialog';
+import { MgrepOnboardingDemo } from './components/MgrepOnboarding';
 import { CodeBlock, CodeBlockCopyButton } from '@/components/ai-elements/code-block';
 import { Tool, ToolContent, ToolHeader, ToolOutput } from '@/components/ai-elements/tool';
 import { MessageResponse } from '@/components/ai-elements/message';
@@ -80,12 +82,45 @@ import {
   Square,
   Move,
   Copy,
+  // Intent icons
+  BookOpen,
+  BarChart2,
+  GitCompare,
+  Map as MapIcon,
+  FileEdit,
+  TestTube,
+  ShieldCheck,
+  Upload,
+  Wrench,
+  MessageSquare,
+  Hammer,
 } from 'lucide-react';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
 import { generateSourcePatch, SourcePatch } from './utils/generateSourcePatch';
 
 // --- Helper Functions ---
+
+// Helper function to get luminance of a hex color (0-1 scale)
+function getLuminance(hex: string): number {
+  hex = hex.replace(/^#/, '');
+  const r = parseInt(hex.substring(0, 2), 16) / 255;
+  const g = parseInt(hex.substring(2, 4), 16) / 255;
+  const b = parseInt(hex.substring(4, 6), 16) / 255;
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+// Helper function to adjust hex color brightness for theme variations
+function adjustBrightness(hex: string, percent: number): string {
+  hex = hex.replace(/^#/, '');
+  let r = parseInt(hex.substring(0, 2), 16);
+  let g = parseInt(hex.substring(2, 4), 16);
+  let b = parseInt(hex.substring(4, 6), 16);
+  r = Math.min(255, Math.max(0, Math.round(r + (r * percent / 100))));
+  g = Math.min(255, Math.max(0, Math.round(g + (g * percent / 100))));
+  b = Math.min(255, Math.max(0, Math.round(b + (b * percent / 100))));
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
 
 // Instant UI Update - uses Gemini Flash for fast DOM modifications
 interface UIUpdateResult {
@@ -98,7 +133,8 @@ interface UIUpdateResult {
 async function generateUIUpdate(
   element: SelectedElement,
   userRequest: string,
-  apiKey: string
+  apiKey: string,
+  modelId: string = 'gemini-2.0-flash-001'  // Default fallback, but should be passed explicitly
 ): Promise<UIUpdateResult> {
   const google = createGoogleGenerativeAI({ apiKey });
 
@@ -135,10 +171,10 @@ Examples:
 - "red and say Click Me" → {"cssChanges": {"color": "red"}, "textChange": "Click Me", "description": "Changed color to red and text to Click Me"}`;
 
   try {
-    console.log('[UI Update] Calling Gemini 2.0 Flash for UI changes...');
+    console.log(`[UI Update] Calling ${modelId} for UI changes...`);
     console.log('[UI Update] API Key present:', !!apiKey, 'length:', apiKey?.length);
     const result = await generateText({
-      model: google('gemini-2.0-flash-001'),
+      model: google(modelId),
       prompt,
       maxTokens: 200,
     });
@@ -227,6 +263,7 @@ const MODEL_ICONS: Record<string, IconComponent> = {
 const PROVIDER_ICONS: Record<string, IconComponent> = {
   'google': GeminiIcon,
   'openai': OpenAIIcon,
+  'codex': OpenAIIcon,  // Codex OAuth uses OpenAI icon
   'anthropic': AnthropicIcon,
   'claude-code': ClaudeIcon,
 };
@@ -236,8 +273,22 @@ const getModelIcon = (modelId: string, providerId: string): IconComponent => {
   return MODEL_ICONS[modelId] || PROVIDER_ICONS[providerId] || Sparkles;
 };
 
+// Helper to get short model name (removes provider prefix for compact display)
+const getShortModelName = (name: string): string => {
+  // Remove "Claude " prefix for Anthropic models
+  if (name.startsWith('Claude ')) return name.slice(7)
+  // Remove "Gemini " prefix for Google models
+  if (name.startsWith('Gemini ')) return name.slice(7)
+  // Keep others as-is (GPT-4o, etc are already short)
+  return name
+};
+
+// Default model - Claude Haiku 4.5 for fast, efficient responses
+const DEFAULT_MODEL = { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', Icon: ClaudeIcon, provider: 'claude-code' };
+
 // Legacy MODELS constant for backwards compatibility
 const MODELS = [
+  DEFAULT_MODEL,
   { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro', Icon: Sparkles },
   { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', Icon: Zap },
   { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', Icon: Rocket },
@@ -264,6 +315,11 @@ interface WebviewElement extends HTMLElement {
 }
 
 export default function App() {
+  // Window state - for multi-window project locking
+  const [windowId, setWindowId] = useState<number | null>(null);
+  const [lockedProjectPath, setLockedProjectPath] = useState<string | null>(null);
+  const [lockedProjectName, setLockedProjectName] = useState<string | null>(null);
+
   // Tab State - manages multiple browser tabs
   // First tab starts with the default URL so browser loads immediately
   const [tabs, setTabs] = useState<TabState[]>(() => [{
@@ -284,6 +340,17 @@ export default function App() {
   }, []);
 
   const handleCloseTab = useCallback((tabId: string) => {
+    // Find the tab to check if it's a project tab
+    const tabToClose = tabs.find(t => t.id === tabId);
+
+    // If it's a project tab, show confirmation
+    if (tabToClose?.projectPath) {
+      const confirmed = window.confirm(
+        `Close project "${tabToClose.title || 'Untitled'}"?\n\nThis will close the project and clear its chat history.`
+      );
+      if (!confirmed) return;
+    }
+
     setTabs(prev => {
       const filtered = prev.filter(t => t.id !== tabId);
       if (filtered.length === 0) {
@@ -298,10 +365,25 @@ export default function App() {
       }
       return filtered;
     });
-  }, [activeTabId]);
+
+    // Clear chat history for the closed tab (especially for project tabs)
+    if (tabToClose?.projectPath) {
+      setMessages([]);
+      setSelectedFiles([]);
+      setSelectedElement(null);
+    }
+  }, [activeTabId, tabs]);
 
   const handleSelectTab = useCallback((tabId: string) => {
     setActiveTabId(tabId);
+  }, []);
+
+  const handleReorderTabs = useCallback((reorderedTabs: Tab[]) => {
+    // Map the reordered Tab[] back to TabState[] preserving all properties
+    setTabs(prev => {
+      const tabMap = new Map(prev.map(t => [t.id, t]));
+      return reorderedTabs.map(t => tabMap.get(t.id)!).filter(Boolean);
+    });
   }, []);
 
   // Sync URL input when switching tabs
@@ -398,6 +480,116 @@ export default function App() {
   const tabDataLoadedRef = useRef(false); // Prevent double-loading in StrictMode
   useEffect(() => { tabsRef.current = tabs; }, [tabs]);
   useEffect(() => { activeTabIdRef.current = activeTabId; }, [activeTabId]);
+
+  // Initialize window info on mount (for multi-window project locking)
+  useEffect(() => {
+    async function initWindowInfo() {
+      if (!window.electronAPI?.window) return;
+
+      try {
+        const info = await window.electronAPI.window.getInfo();
+        if (info.windowId) {
+          setWindowId(info.windowId);
+        }
+        if (info.projectPath) {
+          setLockedProjectPath(info.projectPath);
+          setLockedProjectName(info.projectName);
+          console.log(`[Window] Window ${info.windowId} locked to project: ${info.projectPath}`);
+        }
+      } catch (e) {
+        console.warn('[Window] Failed to get window info:', e);
+      }
+    }
+
+    initWindowInfo();
+
+    // Also listen for window info sent on ready-to-show
+    const unsubscribe = window.electronAPI?.window?.onInfo?.((info) => {
+      if (info.windowId) setWindowId(info.windowId);
+      if (info.projectPath) {
+        setLockedProjectPath(info.projectPath);
+        setLockedProjectName(info.projectName);
+      }
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, []);
+
+  // Track which projects have mgrep initialized (persistent across tab switches)
+  const mgrepInitializedProjects = useRef<Set<string>>(new Set())
+
+  // Auto-initialize mgrep when project loads - BUT ONLY ONCE PER PROJECT
+  useEffect(() => {
+    const projectPath = activeTab?.projectPath
+    if (!projectPath || !window.electronAPI?.mgrep) return
+
+    // Check if already handled for this project
+    if (mgrepInitializedProjects.current.has(projectPath)) {
+      console.log('[mgrep] Already handled for:', projectPath)
+      return
+    }
+
+    let isCancelled = false
+
+    // Check if this project needs initialization
+    const checkStatus = async () => {
+      try {
+        const result = await Promise.race([
+          window.electronAPI.mgrep.getStatus(projectPath),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+        ]) as any
+
+        if (isCancelled) return
+
+        if (result.success && result.status && !result.status.ready) {
+          // Not initialized yet - check if user wants to enable indexing
+          const hasSeenPrompt = localStorage.getItem('mgrep-onboarding-seen')
+          if (!hasSeenPrompt) {
+            // First time - show onboarding with demo (but only once per app session)
+            const onboardingShown = mgrepInitializedProjects.current.has('__onboarding_shown__')
+            if (!onboardingShown) {
+              setTimeout(() => {
+                if (!isCancelled) setShowMgrepOnboarding(true)
+              }, 1500)
+              mgrepInitializedProjects.current.add('__onboarding_shown__')
+            }
+            return
+          }
+
+          // Auto-init if user previously opted in
+          const autoInit = localStorage.getItem('mgrep-auto-init')
+          if (autoInit === 'true') {
+            console.log('[mgrep] Initializing for:', projectPath)
+            window.electronAPI.mgrep.initialize(projectPath).then(() => {
+              // Mark as initialized - won't init again even if we switch back to this tab
+              mgrepInitializedProjects.current.add(projectPath)
+              console.log('[mgrep] ✓ Initialized for:', projectPath)
+            }).catch(err => {
+              console.error('[mgrep] Auto-init failed:', err)
+            })
+          } else {
+            // User opted out - mark as "handled" so we don't keep checking
+            mgrepInitializedProjects.current.add(projectPath)
+          }
+        } else if (result.success && result.status && result.status.ready) {
+          // Already initialized - mark it so we don't check again
+          mgrepInitializedProjects.current.add(projectPath)
+          console.log('[mgrep] Already ready for:', projectPath)
+        }
+      } catch (err) {
+        console.error('[mgrep] Status check failed:', err)
+      }
+    }
+
+    checkStatus()
+
+    // NO CLEANUP - let initialization persist across tab switches
+    return () => {
+      isCancelled = true
+    }
+  }, [activeTab?.projectPath])
 
   const handleUpdateKanbanColumns = useCallback((columns: KanbanColumn[]) => {
     console.log('[TabData] handleUpdateKanbanColumns called, columns:', columns.length);
@@ -525,6 +717,7 @@ export default function App() {
     url: t.url,
     favicon: t.favicon,
     type: t.type || 'browser',
+    isProject: !!t.projectPath, // Mark project tabs with folder icon
   }));
 
   // Browser State
@@ -536,7 +729,7 @@ export default function App() {
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
-  const [previewIntent, setPreviewIntent] = useState<{ type: string; label: string } | null>(null);
+  const [previewIntent, setPreviewIntent] = useState<{ type: string; label: string; secondaryTypes?: string[]; secondaryLabels?: string[] } | null>(null);
 
   // Selection States
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
@@ -591,8 +784,8 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Model State
-  const [selectedModel, setSelectedModel] = useState(MODELS[0]);
+  // Model State - default to Claude Haiku 4.5
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
 
   // Popup Input State
@@ -630,7 +823,7 @@ export default function App() {
   const [gitLoading, setGitLoading] = useState<string | null>(null);
 
   // Project Setup Flow State
-  const [setupProject, setSetupProject] = useState<{ path: string; name: string } | null>(null);
+  const [setupProject, setSetupProject] = useState<{ path: string; name: string; port?: number } | null>(null);
 
   // Web Search Results State (for console log error searching)
   interface SearchResult {
@@ -654,11 +847,39 @@ export default function App() {
     return false;
   });
 
+  // Theme context - get current theme colors
+  const { currentTheme } = useTheme();
+  const themeColors = currentTheme.colors;
+
+  // Detect if current theme is dark based on background luminance
+  const isThemeDark = themeColors ? getLuminance(themeColors.background) < 0.5 : isDarkMode;
+
+  // Panel colors derived from theme - used for all content panels
+  // For dark themes: panels should be LIGHTER than background (creates depth)
+  // For light themes: panels should be white/light
+  const panelBg = themeColors?.background
+    ? adjustBrightness(themeColors.background, isThemeDark ? 25 : 3)
+    : (isDarkMode ? '#262626' : '#ffffff');
+  const panelBorder = themeColors?.border || (isDarkMode ? '#404040' : '#e7e5e4');
+  const panelText = themeColors?.foreground || (isDarkMode ? '#f5f5f5' : '#171717');
+  const panelMuted = themeColors?.foreground
+    ? adjustBrightness(themeColors.foreground, isThemeDark ? -30 : 30)
+    : (isDarkMode ? '#a3a3a3' : '#78716c');
+  const headerBg = themeColors?.background
+    ? adjustBrightness(themeColors.background, isThemeDark ? 10 : -3)
+    : (isDarkMode ? '#1a1a1a' : '#fafaf9');
+
   // Settings Dialog State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Fast Apply Status (Pro Feature)
   const [fastApplyReady, setFastApplyReady] = useState(false);
+
+  // File Watcher Status
+  const [fileWatcherActive, setFileWatcherActive] = useState(false);
+
+  // Mgrep Onboarding State
+  const [showMgrepOnboarding, setShowMgrepOnboarding] = useState(false);
 
   // App Settings State - with localStorage persistence
   const [appSettings, setAppSettings] = useState<AppSettings>(() => {
@@ -712,9 +933,37 @@ export default function App() {
     }
   }, [appSettings]);
 
-  // Get all models from settings with availability status
+  // Close onboarding modal when project changes (but not on initial load)
+  const prevProjectPathRef = useRef<string | null | undefined>(undefined)
+  useEffect(() => {
+    const currentPath = activeTab?.projectPath
+
+    // Skip on first mount
+    if (prevProjectPathRef.current === undefined) {
+      prevProjectPathRef.current = currentPath
+      return
+    }
+
+    // Only close if project actually changed (not just same project reloading)
+    if (prevProjectPathRef.current !== currentPath && showMgrepOnboarding) {
+      setShowMgrepOnboarding(false)
+    }
+
+    prevProjectPathRef.current = currentPath
+  }, [activeTab?.projectPath, showMgrepOnboarding])
+
+  // Provider order: Claude first, then OpenAI, then Gemini
+  const providerSortOrder: Record<string, number> = {
+    'claude-code': 1,  // Claude Code OAuth (recommended)
+    'anthropic': 2,    // Claude legacy API
+    'openai': 3,       // OpenAI API
+    'codex': 4,        // Codex OAuth (ChatGPT Plus/Pro)
+    'google': 5,       // Gemini (last)
+  };
+
+  // Get all models from settings with availability status, sorted by provider
   const displayModels = useMemo(() => {
-    return appSettings.models.map(settingsModel => {
+    const models = appSettings.models.map(settingsModel => {
       const provider = appSettings.providers.find(p => p.id === settingsModel.provider);
 
       // For claude-code and codex, check OAuth status instead of provider API key
@@ -736,6 +985,13 @@ export default function App() {
         isEnabled: settingsModel.enabled,
         isProviderConfigured,
       };
+    });
+
+    // Sort by provider: Claude → OpenAI → Gemini
+    return models.sort((a, b) => {
+      const orderA = providerSortOrder[a.provider] || 99;
+      const orderB = providerSortOrder[b.provider] || 99;
+      return orderA - orderB;
     });
   }, [appSettings.models, appSettings.providers, appSettings.claudeCodeAuthenticated, appSettings.codexAuthenticated]);
 
@@ -806,7 +1062,7 @@ export default function App() {
   const [isGeneratingSourcePatch, setIsGeneratingSourcePatch] = useState(false)
 
   // Initialize AI Chat hook with streaming support
-  const { generate: generateAI, stream: streamAI, cancel: cancelAI, isLoading: isAILoading } = useAIChat({
+  const { generate: generateAI, stream: streamAI, cancel: cancelAI, isLoading: isAILoading, isGenerating: isAIGenerating } = useAIChat({
     onError: (err) => console.error('[AI SDK] Error:', err),
     onTextDelta: (delta) => {
       // Update streaming message content as chunks arrive
@@ -856,12 +1112,33 @@ export default function App() {
       const hasError = toolResult.result && typeof toolResult.result === 'object' && 'error' in toolResult.result;
       if (hasError) {
         const errorMsg = String((toolResult.result as any).error);
-        const toolError = createToolError(toolResult.toolCallId, 'tool', new Error(errorMsg));
+        const toolName = toolResult.toolName?.replace(/^mcp_[^_]+_/, '') || 'tool';
+        const toolError = createToolError(toolResult.toolCallId, toolName, new Error(errorMsg));
         const display = formatErrorForDisplay(toolError);
         console.log(`[Tool Error] ${display.title}: ${display.description}`);
         toolTracker.trackError(toolResult.toolCallId, errorMsg)
       } else {
         toolTracker.trackSuccess(toolResult.toolCallId, toolResult.result)
+
+        // Track file modifications from Agent SDK tools (Write, Edit, MultiEdit)
+        // These bypass our local tools, so we need to track them here
+        const toolName = toolResult.toolName?.toLowerCase() || '';
+        if (toolName.includes('write') || toolName.includes('edit')) {
+          const result = toolResult.result as Record<string, unknown> | undefined;
+          // Try to extract file path from result or args
+          const filePath = result?.path || result?.file_path || result?.filePath;
+          if (typeof filePath === 'string') {
+            console.log('[Tool Result] File modification detected:', toolName, filePath);
+            // Note: We can't get originalContent here as the file is already modified
+            // The edited files drawer will show but undo will need git revert
+            fileModificationHandlerRef.current({
+              type: 'write',
+              path: filePath,
+              // originalContent is undefined - file already modified by SDK
+              newContent: undefined, // We don't have the new content either
+            });
+          }
+        }
       }
     },
   });
@@ -1037,6 +1314,24 @@ export default function App() {
   const [selectedLogIndices, setSelectedLogIndices] = useState<Set<number>>(new Set());
   const lastClickedLogIndex = useRef<number | null>(null);
 
+  // Debug Mode - shows all activity in console panel
+  const [debugMode, setDebugMode] = useState(false);
+
+  // Debug logger that shows in both console.log and the console panel when debug mode is on
+  const debugLog = useCallback((prefix: string, message: string, data?: unknown) => {
+    const fullMessage = data !== undefined
+      ? `[${prefix}] ${message}: ${typeof data === 'object' ? JSON.stringify(data, null, 2) : data}`
+      : `[${prefix}] ${message}`;
+    console.log(fullMessage);
+    if (debugMode) {
+      setConsoleLogs(prev => [...prev.slice(-199), {
+        type: 'info',
+        message: fullMessage,
+        timestamp: new Date()
+      }]);
+    }
+  }, [debugMode]);
+
   // AI Element Selection State (pending confirmation)
   const [aiSelectedElement, setAiSelectedElement] = useState<{
     selector: string;
@@ -1146,7 +1441,7 @@ export default function App() {
     isMoveActiveRef.current = isMoveActive;
   }, [isMoveActive]);
 
-  // Auto-switch to Gemini 2.5 Flash and disable thinking when inspector is active
+  // Auto-switch to Claude Haiku 4.5 (or fallback to fast model) when inspector is active
   useEffect(() => {
     if (isInspectorActive) {
       // Save current settings before switching
@@ -1155,20 +1450,24 @@ export default function App() {
         thinkingLevel: thinkingLevel,
       };
 
-      // Find Gemini 2.5 Flash model
-      const geminiFlashModel = displayModels.find(m =>
+      // Prefer Claude Haiku 4.5 for fast tooling, fallback to other fast models
+      const fastModel = displayModels.find(m =>
+        m.id === 'claude-haiku-4-5' && m.isAvailable
+      ) || displayModels.find(m =>
+        m.id.includes('haiku') && m.isAvailable
+      ) || displayModels.find(m =>
         m.id.includes('gemini-2') && m.id.includes('flash') && m.isAvailable
       ) || displayModels.find(m =>
-        m.id.includes('gemini') && m.id.includes('flash') && m.isAvailable
+        m.id.includes('flash') && m.isAvailable
       );
 
-      if (geminiFlashModel) {
-        console.log('[Inspector] Switching to fast model:', geminiFlashModel.id);
+      if (fastModel) {
+        console.log('[Inspector] Switching to fast model:', fastModel.id);
         setSelectedModel({
-          id: geminiFlashModel.id,
-          name: geminiFlashModel.name,
-          provider: geminiFlashModel.provider,
-          Icon: geminiFlashModel.Icon,
+          id: fastModel.id,
+          name: fastModel.name,
+          provider: fastModel.provider,
+          Icon: fastModel.Icon,
         });
       }
 
@@ -1277,27 +1576,51 @@ export default function App() {
   }, []);
 
   // Reject pending code change - undo and clear
-  const handleRejectChange = useCallback(() => {
+  const handleRejectChange = useCallback(async () => {
     const webview = webviewRefs.current.get(activeTabId);
     console.log('[Exec] Rejecting change, pendingChange:', pendingChange);
     console.log('[Exec] undoCode:', pendingChange?.undoCode);
     console.log('[Exec] webview:', !!webview);
 
+    let undoSucceeded = false;
+
     if (pendingChange?.undoCode && webview) {
       console.log('[Exec] Rejecting - running undo code:', pendingChange.undoCode);
-      webview.executeJavaScript(pendingChange.undoCode)
-        .then(() => console.log('[Exec] Undo executed successfully'))
-        .catch((err: Error) => console.error('[Exec] Undo error:', err));
+      try {
+        await webview.executeJavaScript(pendingChange.undoCode);
+        console.log('[Exec] Undo executed successfully');
+        undoSucceeded = true;
+      } catch (err) {
+        console.error('[Exec] Undo error:', err);
+      }
     } else {
       console.log('[Exec] No undo code available or no webview');
     }
+
+    // If undo failed and we have a webview, reload the page as fallback
+    if (!undoSucceeded && webview) {
+      console.log('[Exec] Undo failed - reloading page as fallback');
+      try {
+        (webview as Electron.WebviewTag).reload();
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          role: 'system',
+          content: 'Changes discarded. Page reloaded to restore state.',
+          timestamp: new Date()
+        }]);
+      } catch (e) {
+        console.error('[Exec] Failed to reload:', e);
+      }
+    } else {
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        role: 'system',
+        content: 'Changes discarded.',
+        timestamp: new Date()
+      }]);
+    }
+
     setPendingChange(null);
-    setMessages(prev => [...prev, {
-      id: Date.now().toString(),
-      role: 'system',
-      content: 'Changes discarded.',
-      timestamp: new Date()
-    }]);
   }, [pendingChange, activeTabId]);
 
   // Browser navigation functions - update active tab's URL
@@ -1307,10 +1630,22 @@ export default function App() {
       finalUrl = 'http://' + finalUrl;
     }
     console.log('Navigating to:', finalUrl);
+
+    // Check if any existing tab has this URL with a projectPath - inherit it
+    const matchingProjectTab = tabs.find(t =>
+      t.projectPath && t.url && t.url.toLowerCase() === finalUrl.toLowerCase()
+    );
+
     // Update both display URL and tab's navigation URL
     setUrlInput(finalUrl);
-    updateCurrentTab({ url: finalUrl });
-  }, [updateCurrentTab]);
+    if (matchingProjectTab && !activeTab.projectPath) {
+      // Inherit projectPath from matching project tab
+      console.log('Inheriting projectPath from matching tab:', matchingProjectTab.projectPath);
+      updateCurrentTab({ url: finalUrl, projectPath: matchingProjectTab.projectPath });
+    } else {
+      updateCurrentTab({ url: finalUrl });
+    }
+  }, [updateCurrentTab, tabs, activeTab.projectPath]);
 
   const handleUrlSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -2271,8 +2606,10 @@ export default function App() {
   // Load directory listing for @ command
   const loadDirectoryFiles = useCallback(async (dirPath?: string) => {
     if (!isElectron || !window.electronAPI?.files) return;
+    console.log('[@ Files] Loading directory:', dirPath || '(default)');
     const result = await window.electronAPI.files.listDirectory(dirPath);
     if (result.success && result.data) {
+      console.log('[@ Files] Loaded', result.data.length, 'files from:', dirPath || '(default)');
       setDirectoryFiles(result.data);
       if (dirPath) {
         setCurrentDirectory(dirPath);
@@ -2288,15 +2625,16 @@ export default function App() {
     setAutocompleteIndex(0);
   }, [currentDirectory, loadDirectoryFiles]);
 
-  // Navigate back to parent directory
+  // Navigate back to parent directory - use project path as root
   const navigateBack = useCallback(() => {
     const newStack = [...directoryStack];
     const parentDir = newStack.pop();
     setDirectoryStack(newStack);
-    loadDirectoryFiles(parentDir || undefined);
+    // If no parent in stack, go back to project root (or system root if no project)
+    loadDirectoryFiles(parentDir || activeTab.projectPath || undefined);
     setFileSearchQuery('');
     setAutocompleteIndex(0);
-  }, [directoryStack, loadDirectoryFiles]);
+  }, [directoryStack, loadDirectoryFiles, activeTab.projectPath]);
 
   // Handle @ command - select a file from the list
   const handleFileSelect = useCallback(async (filePath: string) => {
@@ -2306,7 +2644,24 @@ export default function App() {
     if (result.success && result.data) {
       const { path, content } = result.data;
       setSelectedFiles(prev => [...prev, { path, content }]);
-      setInput(''); // Clear @ command
+
+      // Replace the @query with the file reference in the input
+      // Find the last @ and replace from there to the end (or to the next space)
+      setInput(prevInput => {
+        const lastAtIndex = prevInput.lastIndexOf('@');
+        if (lastAtIndex === -1) return ''; // Fallback: clear input
+
+        // Get everything before the @
+        const beforeAt = prevInput.substring(0, lastAtIndex);
+
+        // Create a short display name for the file reference
+        const fileName = path.split('/').pop() || path;
+
+        // Return the text before @ + a reference marker (file is now in selectedFiles)
+        // Add a space after so user can continue typing
+        return `${beforeAt}[${fileName}] `;
+      });
+
       setShowFileAutocomplete(false);
       setFileSearchQuery('');
       setAutocompleteIndex(0);
@@ -2354,19 +2709,31 @@ export default function App() {
     setInput(value);
     setAutocompleteIndex(0);
 
-    // Detect @ command for file selection
-    if (value.startsWith('@')) {
-      const query = value.substring(1);
-      console.log('[Input] @ detected, query:', query);
-      setFileSearchQuery(query);
-      setShowFileAutocomplete(true);
-      setShowCommandAutocomplete(false);
-      // Load files on first @
-      if (value === '@') {
-        loadDirectoryFiles();
+    // Detect @ command for file selection - works ANYWHERE in input
+    // Find the last @ symbol to get the current query
+    const lastAtIndex = value.lastIndexOf('@');
+    if (lastAtIndex !== -1) {
+      // Check if there's a space after the @ (means user finished typing file ref)
+      const afterAt = value.substring(lastAtIndex + 1);
+      const hasSpaceAfter = afterAt.includes(' ');
+      if (!hasSpaceAfter) {
+        const query = afterAt;
+        console.log('[Input] @ detected at position', lastAtIndex, 'query:', query);
+        setFileSearchQuery(query);
+        setShowFileAutocomplete(true);
+        setShowCommandAutocomplete(false);
+        // Load files on first @ - use project path if available
+        if (query === '') {
+          console.log('[@ Files] First @, using project path:', activeTab.projectPath || '(none)');
+          loadDirectoryFiles(activeTab.projectPath || undefined);
+        }
+      } else {
+        // User has moved past the @ reference, hide autocomplete
+        setShowFileAutocomplete(false);
+        setFileSearchQuery('');
       }
     }
-    // Detect / command for prompt selection
+    // Detect / command for prompt selection - ONLY at start of input
     else if (value.startsWith('/')) {
       const query = value.substring(1);
       console.log('[Input] / detected, query:', query);
@@ -2385,27 +2752,52 @@ export default function App() {
     if (value.trim().length >= 3 && !value.startsWith('@') && !value.startsWith('/')) {
       const { intent } = processCodingMessage(value);
       const intentLabels: Record<string, string> = {
+        // Code operations
         code_edit: 'Edit Code',
-        code_create: 'Create File',
+        code_create: 'Create',
         code_delete: 'Delete',
         code_explain: 'Explain',
         code_refactor: 'Refactor',
         file_operation: 'File Op',
-        question: 'Question',
-        ui_inspect: 'Inspect UI',
+        // UI operations
+        ui_inspect: 'Inspect',
         ui_modify: 'Modify UI',
+        ui_build: 'Build UI',
+        // Research & Analysis
+        research: 'Research',
+        analyze: 'Analyze',
+        compare: 'Compare',
+        // Planning & Architecture
+        plan: 'Plan',
+        document: 'Document',
+        // Testing & Quality
+        test: 'Test',
         debug: 'Debug',
+        review: 'Review',
+        // DevOps
+        deploy: 'Deploy',
+        configure: 'Configure',
+        // Communication
+        question: 'Question',
+        chat: 'Chat',
         unknown: '',
       };
       if (intent.type !== 'unknown' && intent.confidence > 0.2) {
-        setPreviewIntent({ type: intent.type, label: intentLabels[intent.type] });
+        // Filter secondary intents - remove primary type to avoid duplicates
+        const dedupedSecondary = (intent.secondaryTypes || []).filter(t => t !== intent.type && t !== 'unknown');
+        setPreviewIntent({
+          type: intent.type,
+          label: intentLabels[intent.type] || intent.type,
+          secondaryTypes: dedupedSecondary,
+          secondaryLabels: dedupedSecondary.map(t => intentLabels[t] || t),
+        });
       } else {
         setPreviewIntent(null);
       }
     } else {
       setPreviewIntent(null);
     }
-  }, [loadDirectoryFiles, processCodingMessage]);
+  }, [loadDirectoryFiles, processCodingMessage, activeTab.projectPath]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -3017,21 +3409,29 @@ export default function App() {
       } else if (channel === 'inline-edit-accept') {
         // Handle inline text edit acceptance
         const data = args[0] as { oldText: string; newText: string; element: SelectedElement };
-        console.log('[Inline Edit] Accepted:', { old: data.oldText?.substring(0, 30), new: data.newText?.substring(0, 30) });
+        console.log('[Inline Edit] Accepted:', {
+          old: data.oldText?.substring(0, 30),
+          new: data.newText?.substring(0, 30),
+          hasSourceLocation: !!data.element?.sourceLocation,
+          sourceFile: data.element?.sourceLocation?.sources?.[0]?.file
+        });
 
-        // Get current selected element and project path from refs
-        const currentSelectedElement = selectedElementRef.current;
+        // Use element from message (now includes source location from when editing started)
+        // Fall back to ref if message doesn't have source location (backwards compat)
+        const elementWithSource = data.element?.sourceLocation?.sources?.[0]
+          ? data.element
+          : selectedElementRef.current;
         const currentTab = tabsRef.current.find(t => t.id === tabId);
         const projectPath = currentTab?.projectPath;
 
         // Trigger source patch with the text change
-        if (currentSelectedElement?.sourceLocation?.sources?.[0] && projectPath) {
+        if (elementWithSource?.sourceLocation?.sources?.[0] && projectPath) {
           const textChangePayload = { oldText: data.oldText, newText: data.newText };
 
           const approvalId = `inline-${Date.now()}`;
           setPendingDOMApproval({
             id: approvalId,
-            element: currentSelectedElement,
+            element: elementWithSource,
             cssChanges: {},
             textChange: data.newText,
             description: `Change text: "${data.oldText?.substring(0, 20)}..." → "${data.newText?.substring(0, 20)}..."`,
@@ -3043,7 +3443,7 @@ export default function App() {
 
           prepareDomPatch(
             approvalId,
-            currentSelectedElement,
+            elementWithSource,
             {},
             `Change text to "${data.newText?.substring(0, 30)}..."`,
             '',
@@ -3054,9 +3454,9 @@ export default function App() {
           );
         } else {
           console.log('[Inline Edit] Cannot create source patch - missing source location or project path', {
-            hasSourceLocation: !!currentSelectedElement?.sourceLocation?.sources?.[0],
+            hasSourceLocation: !!elementWithSource?.sourceLocation?.sources?.[0],
             projectPath,
-            element: currentSelectedElement?.tagName
+            element: elementWithSource?.tagName
           });
         }
 
@@ -3209,6 +3609,7 @@ export default function App() {
   }, [selectedLogIndices, consoleLogs]);
 
   // Sync coding agent context when selections change
+  // Remove updateCodingContext from dependencies to prevent infinite loops
   useEffect(() => {
     updateCodingContext({
       selectedElement: selectedElement || null,
@@ -3220,7 +3621,8 @@ export default function App() {
       projectPath: activeTab?.projectPath || null,
       recentMessages: messages.slice(-10) as any[],
     });
-  }, [selectedElement, selectedFiles, selectedLogs, activeTab?.projectPath, messages, updateCodingContext]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedElement, selectedFiles, selectedLogs, activeTab?.projectPath, messages]);
 
   // Clear selected logs when console is cleared
   const handleClearConsole = useCallback(() => {
@@ -3426,6 +3828,29 @@ export default function App() {
           })
           .catch((err: Error) => console.error('[Undo] Error:', err));
       }
+    } else if (file.isFileModification) {
+      // File was modified but we don't have originalContent - use git to restore
+      console.log('[Undo] Using git checkoutFile to restore:', path);
+      const { api: electronAPI } = getElectronAPI();
+      if (electronAPI?.git?.checkoutFile) {
+        try {
+          const result = await electronAPI.git.checkoutFile(path);
+          if (result.success) {
+            console.log('[Undo] File restored via git checkoutFile');
+            setEditedFiles(prev => prev.filter(f => f.path !== path));
+          } else {
+            console.error('[Undo] Git checkoutFile failed:', result.error);
+            // Still remove from list - user will need to manually revert
+            setEditedFiles(prev => prev.filter(f => f.path !== path));
+          }
+        } catch (err) {
+          console.error('[Undo] Git checkoutFile error:', err);
+          setEditedFiles(prev => prev.filter(f => f.path !== path));
+        }
+      } else {
+        console.warn('[Undo] Git checkoutFile not available, cannot restore file');
+        setEditedFiles(prev => prev.filter(f => f.path !== path));
+      }
     } else {
       // No undo mechanism, just remove from list
       setEditedFiles(prev => prev.filter(f => f.path !== path));
@@ -3440,10 +3865,15 @@ export default function App() {
     const filesToUndo = [...editedFiles].reverse();
 
     for (const file of filesToUndo) {
-      // Handle file-based undo
+      // Handle file-based undo with original content
       if (file.isFileModification && file.originalContent !== undefined) {
         if (electronAPI?.files?.writeFile) {
           await electronAPI.files.writeFile(file.path, file.originalContent).catch(() => {});
+        }
+      } else if (file.isFileModification) {
+        // No original content - use git to restore
+        if (electronAPI?.git?.checkoutFile) {
+          await electronAPI.git.checkoutFile(file.path).catch(() => {});
         }
       } else if (file.undoCode && webview) {
         // Handle DOM-based undo
@@ -3494,11 +3924,119 @@ export default function App() {
         originalContent: event.originalContent,
         isFileModification: true,
       });
-
-      // Auto-open the drawer when files are modified by tools
-      setIsEditedFilesDrawerOpen(true);
     };
   }, [addEditedFile]);
+
+  // Listen for Agent SDK file modifications (from main process tools)
+  // These come from write_file, create_file, delete_file in ai-sdk-wrapper
+  useEffect(() => {
+    if (!isElectron || !window.electronAPI?.agentSdk?.onFileModified) return;
+
+    const removeListener = window.electronAPI.agentSdk.onFileModified((event: {
+      type: 'write' | 'create' | 'delete';
+      path: string;
+      originalContent?: string;
+      newContent?: string;
+    }) => {
+      console.log('[Agent SDK File Modified]', event.type, event.path);
+
+      // Calculate additions/deletions
+      let additions = 0;
+      let deletions = 0;
+
+      if (event.type === 'write' && event.originalContent && event.newContent) {
+        const oldLines = event.originalContent.split('\n').length;
+        const newLines = event.newContent.split('\n').length;
+        additions = Math.max(0, newLines - oldLines);
+        deletions = Math.max(0, oldLines - newLines);
+        if (additions === 0 && deletions === 0) {
+          additions = 1;
+          deletions = 1;
+        }
+      } else if (event.type === 'create' && event.newContent) {
+        additions = event.newContent.split('\n').length;
+      } else if (event.type === 'delete' && event.originalContent) {
+        deletions = event.originalContent.split('\n').length;
+      }
+
+      // Add to edited files drawer
+      addEditedFile({
+        path: event.path,
+        additions,
+        deletions,
+        originalContent: event.originalContent,
+        isFileModification: true,
+      });
+    });
+
+    return removeListener;
+  }, [isElectron, addEditedFile]);
+
+  // Track which projects have active watchers (persistent across tab switches)
+  const activeWatchersRef = useRef<Set<string>>(new Set())
+
+  // File watcher - global listener (runs once, never cleaned up)
+  useEffect(() => {
+    if (!isElectron || !window.electronAPI?.fileWatcher) {
+      return;
+    }
+
+    // Set up global listener for all file changes
+    const removeListener = window.electronAPI.fileWatcher.onChange((event: {
+      type: 'add' | 'change' | 'unlink';
+      path: string;
+      relativePath: string;
+      projectPath: string;
+    }) => {
+      console.log('[FileWatcher] File changed:', event.type, event.relativePath);
+
+      // Add to edited files drawer
+      addEditedFile({
+        path: event.path,
+        additions: event.type === 'add' ? 1 : event.type === 'change' ? 1 : 0,
+        deletions: event.type === 'unlink' ? 1 : event.type === 'change' ? 1 : 0,
+        isFileModification: true,
+      });
+    });
+
+    // DON'T cleanup - let watchers run until app closes
+    // This is intentional to avoid start/stop churn
+    return () => {
+      console.log('[FileWatcher] App unmounting')
+      removeListener();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isElectron])
+
+  // Start watcher for current project if not already watching
+  useEffect(() => {
+    const projectPath = activeTab.projectPath
+    if (!isElectron || !projectPath || !window.electronAPI?.fileWatcher) {
+      setFileWatcherActive(false);
+      return;
+    }
+
+    // Check if we're already watching this project
+    if (activeWatchersRef.current.has(projectPath)) {
+      console.log('[FileWatcher] Already watching:', projectPath)
+      setFileWatcherActive(true);
+      return;
+    }
+
+    // Start new watcher for this project (never stopped until app exit)
+    console.log('[FileWatcher] Starting watcher for:', projectPath)
+    window.electronAPI.fileWatcher.start(projectPath).then((result: { success: boolean }) => {
+      if (result.success) {
+        activeWatchersRef.current.add(projectPath)
+        setFileWatcherActive(true);
+        console.log('[FileWatcher] ✓ Watching:', projectPath)
+      }
+    }).catch(err => {
+      console.error('[FileWatcher] Start failed:', err)
+    });
+
+    // NO CLEANUP - watchers stay active until app closes
+  }, [isElectron, activeTab.projectPath]);
 
   // Sync Inspector State with Webview
   useEffect(() => {
@@ -3534,18 +4072,29 @@ export default function App() {
       return;
     }
 
+    // Check if webview is actually ready to receive messages
+    // getWebContentsId() throws if webview isn't fully attached and ready
+    try {
+      webview.getWebContentsId();
+    } catch (e) {
+      console.log('[Inspector Sync] Skipping: webview not ready to receive messages');
+      return;
+    }
+
     console.log('[Inspector Sync] Sending inspector modes to webview:', { isInspectorActive, isScreenshotActive, isMoveActive });
     try {
       webview.send('set-inspector-mode', isInspectorActive);
       webview.send('set-screenshot-mode', isScreenshotActive);
       webview.send('set-move-mode', isMoveActive);
+
+      if (!isInspectorActive && !isMoveActive) {
+        setSelectedElement(null);
+        setShowElementChat(false);
+        // Clear canvas indicators when modes are deactivated
+        webview.send('clear-selection');
+      }
     } catch (e) {
       console.warn('[Inspector Sync] Failed to send to webview:', e);
-    }
-
-    if (!isInspectorActive && !isMoveActive) {
-      setSelectedElement(null);
-      setShowElementChat(false);
     }
   }, [isInspectorActive, isScreenshotActive, isMoveActive, isElectron, isWebviewReady, activeTabId]);
 
@@ -3881,14 +4430,22 @@ ${f.content}
       | { type: 'text'; text: string }
       | { type: 'image'; image: { base64Data: string; mimeType?: string } };
 
+    // Get project context
+    const projectPath = activeTab?.projectPath;
+    const projectName = projectPath ? projectPath.split('/').pop() : null;
+
     let fullPromptText = `
 Current Page: ${urlInput}
 ${pageTitle ? `Page Title: ${pageTitle}` : ''}
+${projectPath ? `Project Folder: ${projectPath}` : ''}
+${projectName ? `Project Name: ${projectName}` : ''}
 
 User Request: ${userMessage.content}
 ${elementContext}
 ${fileContext}
 ${screenshotElement ? `Context: User selected element for visual reference: <${screenshotElement.tagName}>` : ''}
+
+${projectPath ? `IMPORTANT: The source files for this page are in ${projectPath}. Use the Read and Glob tools to explore the project structure and find relevant source files before making changes.` : ''}
     `;
 
     if (attachLogs && logs.length > 0) {
@@ -3919,26 +4476,31 @@ ${screenshotElement ? `Context: User selected element for visual reference: <${s
     if (wantsModification) {
       fullPromptText += `
 Instructions:
-You are an AI UI assistant that can modify web pages in real-time.
+You are an AI UI assistant that can modify web pages. The user has selected an element to focus on.
 
-When the user asks you to change, modify, or update something on the page:
-1. Output a JSON code block with BOTH forward and undo JavaScript for IMMEDIATE PREVIEW
-2. Use the format: \`\`\`json-exec {"code": "...", "undo": "..."}\`\`\`
-3. The "code" will be executed immediately, "undo" restores the original
-4. For QUICK edits: Just provide the json-exec preview. Don't call tools.
-5. Only use 'write_file' to save to source code if user explicitly says "save", "commit", or "make permanent".
+CRITICAL WORKFLOW FOR SOURCE CODE CHANGES:
+1. FIRST: Use the Read tool to read the ENTIRE source file (the component/page containing this element)
+2. UNDERSTAND the full context - how this element fits in the page structure, what styles affect it, what props/data it uses
+3. THEN make your changes, considering how they impact the whole page
+4. The selected element is just the FOCUS AREA - you need the full file context to make good edits
 
-Examples:
-- Change text: \`\`\`json-exec {"code": "document.querySelector('#myId').textContent = 'New'", "undo": "document.querySelector('#myId').textContent = 'Old'"}\`\`\`
-- Change style: \`\`\`json-exec {"code": "document.querySelector('.btn').style.backgroundColor = 'red'", "undo": "document.querySelector('.btn').style.backgroundColor = 'blue'"}\`\`\`
-- XPath example: \`\`\`json-exec {"code": "document.evaluate('${selectedElement?.xpath || ''}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue.textContent = 'New'", "undo": "document.evaluate('${selectedElement?.xpath || ''}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue.textContent = 'Original'"}\`\`\`
+For QUICK DOM PREVIEWS (temporary, not saved):
+- Output: \`\`\`json-exec {"code": "...", "undo": "..."}\`\`\`
+- The "code" executes immediately, "undo" restores original
+- Use for quick style/text changes before committing to source
 
-For the selected element, you can use:
+For SOURCE CODE EDITS (permanent):
+1. READ the full source file first using the Read tool
+2. Understand the component structure and how the element is rendered
+3. Use the Edit tool to modify the source, preserving the overall structure
+4. NEVER guess at the source code - always read it first
+
+Selected Element Context:
 - XPath: ${selectedElement?.xpath || 'N/A'}
 - ID: ${selectedElement?.id || 'N/A'}
 - Classes: ${selectedElement?.className || 'N/A'}
 
-IMPORTANT: Always provide the ORIGINAL value in the "undo" code so the user can preview before/after.
+IMPORTANT: The selected element HTML above is just a snippet. For source edits, you MUST read the full file to understand the complete context. Don't assume the structure - READ IT.
 
 Be concise. Confirm what you changed.
       `;
@@ -3955,8 +4517,15 @@ If you're not sure what the user wants, ask for clarification.
       { type: 'text', text: fullPromptText },
     ];
 
-    // Add all attached images
-    attachedImages.forEach(img => {
+    // Add all attached images with explicit numbering for multi-image context
+    attachedImages.forEach((img, index) => {
+      // Add a text label before each image when multiple images are attached
+      if (attachedImages.length > 1) {
+        userContentParts.push({
+          type: 'text',
+          text: `\n[Image ${index + 1} of ${attachedImages.length}]:`,
+        });
+      }
       const base64Data = img.split(',')[1];
       const mimeType = img.split(';')[0].split(':')[1] || 'image/png';
       userContentParts.push({
@@ -3971,6 +4540,8 @@ If you're not sure what the user wants, ask for clarification.
     setAttachLogs(false);
     setAttachedImages([]);
     setScreenshotElement(null);
+    setCapturedScreenshot(null); // Clear screenshot thumbnail
+    setShowScreenshotPreview(false); // Close preview modal if open
     setAttachedSearchResults(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
 
@@ -4525,7 +5096,7 @@ If you're not sure what the user wants, ask for clarification.
               role: 'assistant',
               content: `Preview: ${description}`,
               timestamp: new Date(),
-              model: 'gemini-2.0-flash',
+              model: selectedModel.id,
               intent: 'ui_modify',
             };
             setMessages(prev => [...prev, successMessage]);
@@ -4569,10 +5140,10 @@ If you're not sure what the user wants, ask for clarification.
           console.log('[Instant UI] NO sourceLocation on selectedElement!');
         }
 
-        // Phase 1: Instant DOM update with Gemini Flash
-        setStreamingMessage(prev => prev ? { ...prev, content: `🎯 Analyzing \`<${selectedElement.tagName.toLowerCase()}>\` element...\n\n⚡ Generating CSS changes with Gemini Flash...` } : null);
-        
-        const uiResult = await generateUIUpdate(selectedElement, userMessage.content, googleProvider.apiKey);
+        // Phase 1: Instant DOM update using selected model
+        setStreamingMessage(prev => prev ? { ...prev, content: `🎯 Analyzing \`<${selectedElement.tagName.toLowerCase()}>\` element...\n\n⚡ Generating CSS changes with ${selectedModel.name}...` } : null);
+
+        const uiResult = await generateUIUpdate(selectedElement, userMessage.content, googleProvider.apiKey, selectedModel.id);
         const hasCssChanges = Object.keys(uiResult.cssChanges).length > 0;
         const hasTextChange = !!uiResult.textChange;
         const hasAnyChange = hasCssChanges || hasTextChange;
@@ -4672,7 +5243,7 @@ If you're not sure what the user wants, ask for clarification.
               role: 'assistant',
               content: `Preview: ${uiResult.description}`,
               timestamp: new Date(),
-              model: 'gemini-2.0-flash',
+              model: selectedModel.id,
               intent: 'ui_modify',
             };
             setMessages(prev => [...prev, feedbackMessage]);
@@ -4748,7 +5319,7 @@ If you're not sure what the user wants, ask for clarification.
               role: 'assistant',
               content: `Failed to apply preview: ${e instanceof Error ? e.message : 'Unknown error'}`,
               timestamp: new Date(),
-              model: 'gemini-2.0-flash',
+              model: selectedModel.id,
               intent: 'ui_modify',
             };
             setMessages(prev => [...prev, errorMessage]);
@@ -4763,7 +5334,7 @@ If you're not sure what the user wants, ask for clarification.
             role: 'assistant',
             content: `No changes to apply for: "${userMessage.content}"`,
             timestamp: new Date(),
-            model: 'gemini-2.0-flash',
+            model: selectedModel.id,
             intent: 'ui_modify',
           };
           setMessages(prev => [...prev, noChangeMessage]);
@@ -4859,8 +5430,8 @@ If you're not sure what the user wants, ask for clarification.
           toolCalls: [],
         });
 
-        // Track accumulated tool calls for display
-        const accumulatedToolCalls: Array<{ name: string; status: 'running' | 'done' | 'error'; result?: unknown }> = [];
+        // Track accumulated tool calls for display - must include id for proper UI mapping
+        const accumulatedToolCalls: Array<{ id: string; name: string; args: unknown; status: 'running' | 'done' | 'error'; result?: unknown }> = [];
 
         // Use streaming API for real-time response
         console.log('[AI SDK] Starting stream...');
@@ -4873,7 +5444,7 @@ If you're not sure what the user wants, ask for clarification.
           providers: providerConfigs,
           system: shouldUseTools ? agentSystemPrompt : undefined,
           tools: shouldUseTools ? tools : undefined,
-          maxSteps: 6, // Reduced for faster responses
+          maxSteps: 15, // Allow more steps for complex file operations
           enableReasoning: thinkingLevel !== 'off',
           mcpTools: mcpToolDefinitions, // Pass MCP tools separately
           projectFolder: activeTab?.projectPath || undefined,
@@ -4893,10 +5464,11 @@ If you're not sure what the user wants, ask for clarification.
             // Update streaming message with tool activity
             if (step?.toolCalls && step.toolCalls.length > 0) {
               for (const tc of step.toolCalls) {
+                const toolId = tc.toolCallId || `tool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
                 const toolName = tc.toolName?.replace(/^mcp_[^_]+_/, '') || 'tool';
-                const existing = accumulatedToolCalls.find(t => t.name === toolName && t.status === 'running');
+                const existing = accumulatedToolCalls.find(t => t.id === toolId);
                 if (!existing) {
-                  accumulatedToolCalls.push({ name: toolName, status: 'running' });
+                  accumulatedToolCalls.push({ id: toolId, name: toolName, args: tc.args || {}, status: 'running' });
                 }
               }
             }
@@ -4904,8 +5476,12 @@ If you're not sure what the user wants, ask for clarification.
             // Mark tools as done when results come in
             if (step?.toolResults && step.toolResults.length > 0) {
               for (const tr of step.toolResults) {
+                const toolId = tr.toolCallId;
                 const toolName = tr.toolName?.replace(/^mcp_[^_]+_/, '') || 'tool';
-                const existing = accumulatedToolCalls.find(t => t.name === toolName && t.status === 'running');
+                // Match by ID first, then by name (fallback for tools without IDs)
+                const existing = toolId
+                  ? accumulatedToolCalls.find(t => t.id === toolId)
+                  : accumulatedToolCalls.find(t => t.name === toolName && t.status === 'running');
                 if (existing) {
                   existing.status = (tr.result as any)?.error ? 'error' : 'done';
                   existing.result = tr.result;
@@ -4913,7 +5489,7 @@ If you're not sure what the user wants, ask for clarification.
               }
             }
 
-            // Update streaming message to show tool activity
+            // Update streaming message to show tool activity with full structure
             const toolSummary = accumulatedToolCalls.map(t => {
               const icon = t.status === 'running' ? '⏳' : t.status === 'error' ? '❌' : '✓';
               return `${icon} ${t.name}`;
@@ -4923,7 +5499,13 @@ If you're not sure what the user wants, ask for clarification.
               setStreamingMessage(prev => prev ? {
                 ...prev,
                 content: streamedTextBuffer || `Working: ${toolSummary}`,
-                toolCalls: accumulatedToolCalls.map(t => ({ name: t.name, status: t.status }))
+                toolCalls: accumulatedToolCalls.map(t => ({
+                  id: t.id,
+                  name: t.name,
+                  args: t.args,
+                  status: t.status === 'done' ? 'complete' : t.status,
+                  result: t.result
+                }))
               } : null);
             }
           },
@@ -4936,8 +5518,11 @@ If you're not sure what the user wants, ask for clarification.
         });
 
         // Stream complete - finalize the message
+        console.log('[AI SDK] Stream complete, clearing streaming state');
         setIsStreaming(false);
         setAgentProcessing(false);
+        // Clear streaming message immediately to remove spinning indicators
+        setStreamingMessage(null);
 
         let resolvedText = (result.text || streamedTextBuffer || '').trim();
         if (!resolvedText && result.toolResults && result.toolResults.length > 0) {
@@ -4990,13 +5575,20 @@ If you're not sure what the user wants, ask for clarification.
           resolvedText = summaries || 'Tasks completed.';
         }
         if (!resolvedText) {
-          resolvedText = 'No response generated.';
+          // Check if tools were used via accumulatedToolCalls (Agent SDK path)
+          if (accumulatedToolCalls.length > 0) {
+            const toolSummary = accumulatedToolCalls
+              .map(t => `✓ ${t.name}${t.status === 'error' ? ' (error)' : ''}`)
+              .join('\n');
+            resolvedText = `Done.\n\n${toolSummary}`;
+          } else {
+            resolvedText = 'No response generated.';
+          }
         }
         text = resolvedText;
 
-        // Get the final streaming message state for tool usage
-        const finalStreamingMessage = streamingMessage;
-        setStreamingMessage(null);
+        // Note: streamingMessage was already cleared above to remove spinning indicators
+        // finalStreamingMessage would be null now, but we don't need it since result contains tool info
 
         // If we got reasoning, log it
         if (result.reasoning) {
@@ -5160,6 +5752,13 @@ If you're not sure what the user wants, ask for clarification.
         timestamp: new Date(),
         model: selectedModel.name
       }]);
+    } finally {
+      // Always clean up streaming state, even on error
+      setIsStreaming(false);
+      setStreamingMessage(null);
+      setAgentProcessing(false);
+      // Note: Don't call cancelAI() here - it causes race conditions with tool approvals
+      // The generating state is already managed by the stream completion callbacks
     }
   };
 
@@ -5384,7 +5983,7 @@ If you're not sure what the user wants, ask for clarification.
       role: 'assistant',
       content: `Approved: ${pendingDOMApproval.description}. Updating source code...`,
       timestamp: new Date(),
-      model: 'gemini-2.0-flash',
+      model: selectedModel.id,
       intent: 'ui_modify',
     }]);
 
@@ -5474,15 +6073,36 @@ If you're not sure what the user wants, ask for clarification.
   }, [pendingDOMApproval, activeTabId]);
 
   // Handle opening a project from new tab page - triggers setup flow
-  const handleOpenProject = useCallback((projectPath: string, projectName: string) => {
+  const handleOpenProject = useCallback(async (projectPath: string, projectName: string) => {
     console.log('Starting project setup flow:', projectPath, projectName);
-    setSetupProject({ path: projectPath, name: projectName });
-  }, []);
+
+    // Lock this window to the project (if not already locked)
+    if (!lockedProjectPath && window.electronAPI?.window) {
+      const lockResult = await window.electronAPI.window.lockProject(projectPath, projectName);
+      if (lockResult.success) {
+        setLockedProjectPath(projectPath);
+        setLockedProjectName(projectName);
+        console.log(`[Window] Locked to project: ${projectPath}`);
+      } else if (lockResult.error?.includes('already open in another window')) {
+        // Focus the other window instead
+        if (lockResult.existingWindowId) {
+          await window.electronAPI.window.focus(lockResult.existingWindowId);
+        }
+        return; // Don't open project in this window
+      }
+    }
+
+    // Get saved port from recent projects
+    const recent = getRecentProject(projectPath);
+    setSetupProject({ path: projectPath, name: projectName, port: recent?.port });
+  }, [lockedProjectPath]);
 
   // Handle setup flow completion - actually opens the browser
-  const handleSetupComplete = useCallback((url: string) => {
+  const handleSetupComplete = useCallback((url: string, port: number) => {
     if (setupProject) {
       updateCurrentTab({ url, title: setupProject.name, projectPath: setupProject.path });
+      // Save port to recent projects
+      addToRecentProjects(setupProject.name, setupProject.path, port);
       // URL input is synced via useEffect when tab.url changes
       setSetupProject(null);
     }
@@ -5502,8 +6122,14 @@ If you're not sure what the user wants, ask for clarification.
   // Check if current tab is "new tab" (no URL)
   const isNewTabPage = !activeTab.url;
 
+  // Background color - MUST match title bar. This is THE source of truth.
+  const appBgColor = themeColors?.background || (isDarkMode ? '#171717' : '#d6d3d1');
+
   return (
-    <div className={`flex flex-col h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'dark bg-neutral-900 text-neutral-100' : 'bg-stone-300 text-neutral-900'}`}>
+    <div
+      className={`flex flex-col h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'dark text-neutral-100' : 'text-neutral-900'}`}
+      style={{ backgroundColor: appBgColor }}
+    >
 
       {/* Tab Bar - at the very top with traffic light area */}
       <TabBar
@@ -5512,10 +6138,12 @@ If you're not sure what the user wants, ask for clarification.
         onTabSelect={handleSelectTab}
         onTabClose={handleCloseTab}
         onNewTab={handleNewTab}
+        onReorderTabs={handleReorderTabs}
         isDarkMode={isDarkMode}
         onToggleDarkMode={toggleDarkMode}
         onOpenSettings={() => setIsSettingsOpen(true)}
         fastApplyReady={fastApplyReady}
+        fileWatcherActive={fileWatcherActive}
       />
 
       {/* Main Content Area */}
@@ -5523,17 +6151,24 @@ If you're not sure what the user wants, ask for clarification.
 
         {/* --- Left Pane: Browser, New Tab Page, Kanban, Todos, Notes, or Project Setup --- */}
         {setupProject ? (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
+          <div
+            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+          >
             <ProjectSetupFlow
               projectPath={setupProject.path}
               projectName={setupProject.name}
+              initialPort={setupProject.port}
               isDarkMode={isDarkMode}
               onComplete={handleSetupComplete}
               onCancel={handleSetupCancel}
             />
           </div>
         ) : activeTab.type === 'kanban' ? (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
+          <div
+            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+          >
             <KanbanTab
               columns={activeTab.kanbanData?.columns || []}
               boardTitle={activeTab.kanbanData?.boardTitle || 'New Board'}
@@ -5543,7 +6178,10 @@ If you're not sure what the user wants, ask for clarification.
             />
           </div>
         ) : activeTab.type === 'todos' ? (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
+          <div
+            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+          >
             <TodosTab
               items={activeTab.todosData?.items || []}
               isDarkMode={isDarkMode}
@@ -5551,7 +6189,10 @@ If you're not sure what the user wants, ask for clarification.
             />
           </div>
         ) : activeTab.type === 'notes' ? (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
+          <div
+            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+          >
             <NotesTab
               content={activeTab.notesData?.content || ''}
               isDarkMode={isDarkMode}
@@ -5559,18 +6200,28 @@ If you're not sure what the user wants, ask for clarification.
             />
           </div>
         ) : isNewTabPage ? (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
+          <div
+            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+          >
             <NewTabPage
               onOpenProject={handleOpenProject}
               onOpenUrl={handleOpenUrl}
               isDarkMode={isDarkMode}
+              lockedProjectPath={lockedProjectPath}
             />
           </div>
         ) : (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
+          <div
+            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+          >
 
             {/* Browser Toolbar */}
-            <div className={`h-12 border-b flex items-center gap-2 px-3 flex-shrink-0 ${isDarkMode ? 'border-neutral-700 bg-neutral-800' : 'border-stone-100 bg-stone-50'}`}>
+            <div
+              className="h-12 border-b flex items-center gap-2 px-3 flex-shrink-0"
+              style={{ borderColor: panelBorder, backgroundColor: headerBg }}
+            >
           {/* Navigation Buttons */}
           <div className="flex items-center gap-1">
             <button
@@ -5633,9 +6284,15 @@ If you're not sure what the user wants, ask for clarification.
               <input
                 type="text"
                 value={urlInput}
-                onChange={(e) => setUrlInput(e.target.value)}
-                className={`w-full h-8 px-3 pr-8 text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 ${isDarkMode ? 'bg-neutral-700 border-neutral-600 text-neutral-100 placeholder-neutral-400' : 'bg-white border border-stone-200'}`}
+                onChange={(e) => !activeTab.projectPath && setUrlInput(e.target.value)}
+                readOnly={!!activeTab.projectPath}
+                className={`w-full h-8 px-3 pr-8 text-sm rounded-full focus:outline-none ${
+                  activeTab.projectPath
+                    ? `cursor-default ${isDarkMode ? 'bg-neutral-800 border-neutral-700 text-neutral-400' : 'bg-stone-100 border-stone-200 text-stone-500'}`
+                    : `focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 ${isDarkMode ? 'bg-neutral-700 border-neutral-600 text-neutral-100 placeholder-neutral-400' : 'bg-white border border-stone-200'}`
+                }`}
                 placeholder="Enter URL..."
+                title={activeTab.projectPath ? `Locked to project: ${activeTab.projectPath}` : 'Enter URL...'}
               />
               {isLoading && (
                 <div className="absolute right-2 top-1/2 -translate-y-1/2">
@@ -6059,6 +6716,9 @@ If you're not sure what the user wants, ask for clarification.
                                     <button onClick={() => {
                                         setShowElementChat(false);
                                         setSelectedElement(null);
+                                        // Clear canvas indicators
+                                        const webview = webviewRefs.current.get(activeTabId);
+                                        webview?.send('clear-selection');
                                     }} className={isDarkMode ? 'hover:text-neutral-200' : 'hover:text-stone-900'}>
                                         <X size={14} />
                                     </button>
@@ -6388,10 +7048,13 @@ If you're not sure what the user wants, ask for clarification.
 
         {/* --- Right Pane: Chat --- */}
       {isSidebarOpen && (
-      <div className={`flex flex-col rounded-xl shadow-sm flex-shrink-0 border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`} style={{ width: sidebarWidth, minWidth: 430 }}>
+      <div
+        className="flex flex-col rounded-xl shadow-sm flex-shrink-0 border"
+        style={{ width: sidebarWidth, minWidth: 430, backgroundColor: panelBg, borderColor: panelBorder }}
+      >
 
           {/* Git Header */}
-          <div className={`h-12 border-b flex items-center justify-between px-3 flex-shrink-0 ${isDarkMode ? 'border-neutral-700' : 'border-stone-100'}`}>
+          <div className="h-12 border-b flex items-center justify-between px-3 flex-shrink-0" style={{ borderColor: panelBorder }}>
               <div className="flex items-center gap-2">
                   {/* Branch Selector */}
                   <div className="relative">
@@ -6535,43 +7198,7 @@ If you're not sure what the user wants, ask for clarification.
                   </div>
               )}
 
-              {/* Tool Execution Status - Shows running/completed tools */}
-              {toolTracker.toolCalls.length > 0 && (
-                <div className={`mb-4 p-3 rounded-lg ${isDarkMode ? 'bg-neutral-800' : 'bg-stone-100'}`}>
-                  <div className="text-xs font-medium mb-2 opacity-70">Tools Executing</div>
-                  <div className="space-y-1">
-                    {toolTracker.toolCalls.map(tool => (
-                      <div key={tool.id} className="flex items-center gap-2 text-xs">
-                        {/* Status indicator */}
-                        {tool.status === 'running' && (
-                          <Loader2 size={12} className="animate-spin text-blue-500" />
-                        )}
-                        {tool.status === 'success' && (
-                          <Check size={12} className="text-green-500" />
-                        )}
-                        {tool.status === 'error' && (
-                          <X size={12} className="text-red-500" />
-                        )}
-                        
-                        {/* Tool name */}
-                        <span className="font-mono font-medium">{tool.name}</span>
-                        
-                        {/* Duration (if completed) */}
-                        {tool.duration && (
-                          <span className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'}>
-                            {tool.duration}ms
-                          </span>
-                        )}
-                        
-                        {/* Error message (if failed) */}
-                        {tool.error && (
-                          <span className="text-red-500 text-[11px]">{tool.error}</span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* Tool chips now only shown in messages, not separately at top */}
 
               {messages.map((msg) => (
                   <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
@@ -6594,29 +7221,20 @@ If you're not sure what the user wants, ask for clarification.
                         </details>
                       )}
 
-                      {/* Tool Usage Display for Assistant Messages */}
+                      {/* Tool Usage Display for Assistant Messages - Compact chips */}
                       {msg.role === 'assistant' && msg.toolUsage && msg.toolUsage.length > 0 && (
-                        <div className={`mb-2 w-full space-y-1`}>
+                        <div className="mb-2 flex flex-wrap gap-1.5">
                           {msg.toolUsage.map((tool, idx) => (
                             <div
                               key={tool.id || idx}
-                              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
                                 tool.isError
-                                  ? isDarkMode ? 'bg-red-500/20 text-red-300 border border-red-500/30' : 'bg-red-50 text-red-700 border border-red-200'
-                                  : isDarkMode ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  ? isDarkMode ? 'bg-red-500/20 text-red-300' : 'bg-red-100 text-red-700'
+                                  : isDarkMode ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
                               }`}
                             >
-                              <span className="font-mono font-medium">{tool.name}</span>
-                              {tool.args && Object.keys(tool.args).length > 0 && (
-                                <span className="opacity-70">
-                                  ({Object.entries(tool.args).map(([k, v]) =>
-                                    `${k}: ${typeof v === 'string' ? (v.length > 30 ? v.slice(0, 30) + '...' : v) : JSON.stringify(v)}`
-                                  ).join(', ')})
-                                </span>
-                              )}
-                              <span className="ml-auto">
-                                {tool.isError ? '❌' : '✓'}
-                              </span>
+                              {tool.isError ? <X size={10} /> : <Check size={10} />}
+                              <span className="font-mono">{tool.name}</span>
                             </div>
                           ))}
                         </div>
@@ -6642,34 +7260,24 @@ If you're not sure what the user wants, ask for clarification.
               {/* Streaming Message Display */}
               {isStreaming && streamingMessage && (
                 <div className="flex flex-col items-start">
-                  {/* Streaming Tool Calls */}
+                  {/* Streaming Tool Calls - Compact chips */}
                   {streamingMessage.toolCalls.length > 0 && (
-                    <div className="mb-2 w-full space-y-1">
+                    <div className="mb-2 flex flex-wrap gap-1.5">
                       {streamingMessage.toolCalls.map((tool, idx) => (
                         <div
                           key={tool.id || idx}
-                          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-all ${
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all ${
                             tool.status === 'running'
-                              ? isDarkMode ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-blue-50 text-blue-700 border border-blue-200'
+                              ? isDarkMode ? 'bg-blue-500/20 text-blue-300' : 'bg-blue-100 text-blue-700'
                               : tool.status === 'error'
-                              ? isDarkMode ? 'bg-red-500/20 text-red-300 border border-red-500/30' : 'bg-red-50 text-red-700 border border-red-200'
-                              : isDarkMode ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              ? isDarkMode ? 'bg-red-500/20 text-red-300' : 'bg-red-100 text-red-700'
+                              : isDarkMode ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
                           }`}
                         >
-                          {tool.status === 'running' && (
-                            <Loader2 size={12} className="animate-spin" />
-                          )}
-                          <span className="font-mono font-medium">{tool.name}</span>
-                          {tool.args && Object.keys(tool.args as object).length > 0 && (
-                            <span className="opacity-70 truncate max-w-[200px]">
-                              ({Object.entries(tool.args as object).map(([k, v]) =>
-                                `${k}: ${typeof v === 'string' ? (v.length > 20 ? v.slice(0, 20) + '...' : v) : JSON.stringify(v)}`
-                              ).join(', ')})
-                            </span>
-                          )}
-                          <span className="ml-auto">
-                            {tool.status === 'running' ? '⏳' : tool.status === 'error' ? '❌' : '✓'}
-                          </span>
+                          {tool.status === 'running' && <Loader2 size={10} className="animate-spin" />}
+                          {tool.status === 'done' && <Check size={10} />}
+                          {tool.status === 'error' && <X size={10} />}
+                          <span className="font-mono">{tool.name}</span>
                         </div>
                       ))}
                     </div>
@@ -7217,9 +7825,13 @@ If you're not sure what the user wants, ask for clarification.
                                   <button
                                       onClick={(e) => {
                                         e.stopPropagation();
+                                        // Clear selection state
                                         setSelectedElement(null);
                                         setDisplayedSourceCode(null);
                                         setMoveTargetPosition(null);
+                                        // Clear canvas indicators
+                                        const webview = webviewRefs.current.get(activeTabId);
+                                        webview?.send('clear-selection');
                                       }}
                                       className={`ml-0.5 ${selectedElement.targetPosition ? 'hover:text-orange-900' : 'hover:text-blue-900'}`}
                                   >
@@ -7235,6 +7847,9 @@ If you're not sure what the user wants, ask for clarification.
                                       onClick={() => {
                                           setScreenshotElement(null);
                                           setCapturedScreenshot(null);
+                                          // Clear canvas indicators
+                                          const webview = webviewRefs.current.get(activeTabId);
+                                          webview?.send('clear-selection');
                                       }}
                                       className="ml-0.5 hover:text-purple-900"
                                   >
@@ -7245,26 +7860,68 @@ If you're not sure what the user wants, ask for clarification.
                       </div>
                   )}
 
-                  {/* Intent Preview Chip */}
+                  {/* Intent Preview Chips - supports multiple intents */}
                   {previewIntent && previewIntent.label && (
-                      <div className={`px-3 pt-2`}>
+                      <div className={`px-3 pt-2 flex flex-wrap gap-1.5`}>
+                          {/* Primary intent chip */}
                           <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium ${
                             isDarkMode
                               ? 'bg-gradient-to-r from-violet-500/20 to-purple-500/20 text-violet-300 border border-violet-500/30'
                               : 'bg-gradient-to-r from-violet-50 to-purple-50 text-violet-700 border border-violet-200'
                           }`}>
+                              {/* Code operations */}
                               {previewIntent.type === 'code_edit' && <Pencil size={12} />}
                               {previewIntent.type === 'code_create' && <FilePlus size={12} />}
                               {previewIntent.type === 'code_delete' && <Trash2 size={12} />}
                               {previewIntent.type === 'code_explain' && <Lightbulb size={12} />}
                               {previewIntent.type === 'code_refactor' && <RefreshCw size={12} />}
                               {previewIntent.type === 'file_operation' && <Folder size={12} />}
-                              {previewIntent.type === 'question' && <HelpCircle size={12} />}
+                              {/* UI operations */}
                               {previewIntent.type === 'ui_inspect' && <Search size={12} />}
                               {previewIntent.type === 'ui_modify' && <Palette size={12} />}
+                              {previewIntent.type === 'ui_build' && <Hammer size={12} />}
+                              {/* Research & Analysis */}
+                              {previewIntent.type === 'research' && <BookOpen size={12} />}
+                              {previewIntent.type === 'analyze' && <BarChart2 size={12} />}
+                              {previewIntent.type === 'compare' && <GitCompare size={12} />}
+                              {/* Planning */}
+                              {previewIntent.type === 'plan' && <MapIcon size={12} />}
+                              {previewIntent.type === 'document' && <FileEdit size={12} />}
+                              {/* Testing & Quality */}
+                              {previewIntent.type === 'test' && <TestTube size={12} />}
                               {previewIntent.type === 'debug' && <Bug size={12} />}
+                              {previewIntent.type === 'review' && <ShieldCheck size={12} />}
+                              {/* DevOps */}
+                              {previewIntent.type === 'deploy' && <Upload size={12} />}
+                              {previewIntent.type === 'configure' && <Wrench size={12} />}
+                              {/* Communication */}
+                              {previewIntent.type === 'question' && <HelpCircle size={12} />}
+                              {previewIntent.type === 'chat' && <MessageSquare size={12} />}
                               <span>{previewIntent.label}</span>
                           </div>
+                          {/* Secondary intent chips */}
+                          {previewIntent.secondaryLabels?.map((label, idx) => (
+                              <div key={idx} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium ${
+                                isDarkMode
+                                  ? 'bg-gradient-to-r from-blue-500/15 to-cyan-500/15 text-blue-300 border border-blue-500/25'
+                                  : 'bg-gradient-to-r from-blue-50 to-cyan-50 text-blue-600 border border-blue-200'
+                              }`}>
+                                  {/* Secondary icons */}
+                                  {previewIntent.secondaryTypes?.[idx] === 'research' && <BookOpen size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'analyze' && <BarChart2 size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'compare' && <GitCompare size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'plan' && <MapIcon size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'test' && <TestTube size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'review' && <ShieldCheck size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'debug' && <Bug size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'question' && <HelpCircle size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'ui_modify' && <Palette size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'ui_build' && <Hammer size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'code_edit' && <Pencil size={12} />}
+                                  {previewIntent.secondaryTypes?.[idx] === 'code_create' && <FilePlus size={12} />}
+                                  <span>{label}</span>
+                              </div>
+                          ))}
                       </div>
                   )}
 
@@ -7366,7 +8023,7 @@ If you're not sure what the user wants, ask for clarification.
                                       setFileSearchQuery('');
                                       setDirectoryStack([]);
                                       setCurrentDirectory('');
-                                      loadDirectoryFiles();
+                                      loadDirectoryFiles(activeTab.projectPath || undefined);
                                       setInput('');
                                   }
                                   return;
@@ -7480,13 +8137,13 @@ If you're not sure what the user wants, ask for clarification.
                   </div>
 
                   {/* Input Toolbar */}
-                  <div className={`flex items-center justify-between px-3 py-2 border-t ${isDarkMode ? 'border-neutral-600' : 'border-stone-100'}`}>
-                      <div className="flex items-center gap-1">
+                  <div className={`flex items-center justify-between px-2 py-1.5 border-t ${isDarkMode ? 'border-neutral-600' : 'border-stone-100'}`}>
+                      <div className="flex items-center gap-0.5">
                           {/* Agent Selector */}
                           <div className="relative">
                               <button
                                   onClick={() => !isInspectorActive && setIsModelMenuOpen(!isModelMenuOpen)}
-                                  className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-full border transition ${
+                                  className={`flex items-center gap-1.5 px-2 py-1 text-sm rounded-full border transition ${
                                     isInspectorActive
                                       ? isDarkMode
                                         ? 'border-blue-500/50 bg-blue-500/10 text-blue-300 cursor-not-allowed'
@@ -7495,14 +8152,14 @@ If you're not sure what the user wants, ask for clarification.
                                         ? 'border-neutral-600 hover:bg-neutral-600 text-neutral-200 bg-neutral-700'
                                         : 'border-stone-200 hover:bg-stone-50 text-stone-700 bg-white'
                                   }`}
-                                  title={isInspectorActive ? 'Model locked while inspector is active' : ''}
+                                  title={isInspectorActive ? 'Model locked while inspector is active' : selectedModel.name}
                               >
-                                  <selectedModel.Icon size={16} className="flex-shrink-0" />
-                                  <span className="truncate max-w-[120px]">{selectedModel.name}</span>
+                                  <selectedModel.Icon size={14} className="flex-shrink-0" />
+                                  <span className="truncate max-w-[100px]">{getShortModelName(selectedModel.name)}</span>
                                   {isInspectorActive ? (
-                                    <MousePointer2 size={12} className={isDarkMode ? 'text-blue-400' : 'text-blue-500'} />
+                                    <MousePointer2 size={10} className={isDarkMode ? 'text-blue-400' : 'text-blue-500'} />
                                   ) : (
-                                    <ChevronDown size={12} className={isDarkMode ? 'text-neutral-400' : 'text-stone-400'} />
+                                    <ChevronDown size={10} className={isDarkMode ? 'text-neutral-400' : 'text-stone-400'} />
                                   )}
                               </button>
 
@@ -7510,8 +8167,8 @@ If you're not sure what the user wants, ask for clarification.
                                   <>
                                       <div className="fixed inset-0 z-[99]" onClick={() => setIsModelMenuOpen(false)}></div>
                                       <div className={`absolute bottom-full left-0 mb-2 w-56 rounded-xl shadow-xl py-1 z-[100] max-h-80 overflow-y-auto ${isDarkMode ? 'bg-neutral-700 border border-neutral-600' : 'bg-white border border-stone-200'}`}>
-                                          {/* Show all models from settings */}
-                                          {displayModels.map(model => (
+                                          {/* Show only enabled models from settings */}
+                                          {displayModels.filter(m => m.isEnabled).map(model => (
                                               <button
                                                   key={model.id}
                                                   onClick={() => {
@@ -7520,18 +8177,18 @@ If you're not sure what the user wants, ask for clarification.
                                                       setIsModelMenuOpen(false);
                                                     }
                                                   }}
-                                                  className={`w-full text-left px-3 py-2.5 text-sm flex items-center gap-2 ${
+                                                  className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 ${
                                                       !model.isAvailable
                                                         ? 'opacity-40 cursor-not-allowed'
                                                         : isDarkMode ? 'hover:bg-neutral-600 text-neutral-200' : 'hover:bg-stone-50'
                                                   }`}
                                                   disabled={!model.isAvailable}
-                                                  title={!model.isProviderConfigured ? 'Configure provider API key in Settings' : !model.isEnabled ? 'Enable in Settings' : ''}
+                                                  title={!model.isProviderConfigured ? 'Configure provider API key in Settings' : model.name}
                                               >
-                                                  <model.Icon size={16} className={model.isAvailable ? (isDarkMode ? 'text-neutral-400' : 'text-stone-500') : 'text-stone-300'} />
-                                                  <span className={`flex-1 ${selectedModel.id === model.id ? 'font-medium' : ''}`}>{model.name}</span>
+                                                  <model.Icon size={14} className={model.isAvailable ? (isDarkMode ? 'text-neutral-400' : 'text-stone-500') : 'text-stone-300'} />
+                                                  <span className={`flex-1 ${selectedModel.id === model.id ? 'font-medium' : ''}`}>{getShortModelName(model.name)}</span>
                                                   {selectedModel.id === model.id && (
-                                                      <Check size={14} className="text-blue-600" />
+                                                      <Check size={12} className="text-blue-600" />
                                                   )}
                                               </button>
                                           ))}
@@ -7679,8 +8336,8 @@ If you're not sure what the user wants, ask for clarification.
                               <Camera size={18} />
                           </button>
 
-                          {/* Stop button (visible during streaming) */}
-                          {(isAILoading || isStreaming) && (
+                          {/* Stop button (visible only during active generation, not idle connection) */}
+                          {(isAIGenerating || isStreaming) && (
                               <button
                                   onClick={() => {
                                       cancelAI()
@@ -7700,7 +8357,7 @@ If you're not sure what the user wants, ask for clarification.
                               onClick={() => processPrompt(input)}
                               disabled={!input.trim()}
                               className={`p-1.5 rounded-lg transition-colors ml-1 disabled:opacity-30 disabled:cursor-not-allowed ${isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-800'}`}
-                              title={isAILoading || isStreaming ? "Queue message" : "Send message"}
+                              title={isAIGenerating || isStreaming ? "Queue message" : "Send message"}
                           >
                               <ArrowUp size={14} />
                           </button>
@@ -8098,7 +8755,29 @@ If you're not sure what the user wants, ask for clarification.
         onToggleDarkMode={toggleDarkMode}
         settings={appSettings}
         onSettingsChange={setAppSettings}
+        projectPath={activeTab?.projectPath}
       />
+
+      {/* Mgrep Onboarding Demo */}
+      {showMgrepOnboarding && (
+        <MgrepOnboardingDemo
+          isDarkMode={isDarkMode}
+          onAccept={() => {
+            const projectPath = activeTab?.projectPath
+            if (projectPath && window.electronAPI?.mgrep) {
+              window.electronAPI.mgrep.initialize(projectPath)
+            }
+            setShowMgrepOnboarding(false)
+          }}
+          onDecline={() => {
+            setShowMgrepOnboarding(false)
+          }}
+          onClose={() => {
+            localStorage.setItem('mgrep-onboarding-seen', 'true')
+            setShowMgrepOnboarding(false)
+          }}
+        />
+      )}
 
       </div>
     </div>

@@ -819,6 +819,169 @@ function getStatus() {
   return status
 }
 
+/**
+ * Discover MCP servers from various sources:
+ * 1. Claude Desktop config (global)
+ * 2. Project .mcp.json
+ * 3. App configured servers
+ */
+async function discoverMcpServers(projectPath) {
+  const fs = require('fs')
+  const path = require('path')
+  const os = require('os')
+
+  const discovered = {}
+
+  // Helper to safely parse JSON
+  const safeJsonParse = (content, source) => {
+    try {
+      return JSON.parse(content)
+    } catch (err) {
+      console.error(`Failed to parse ${source}:`, err.message)
+      return null
+    }
+  }
+
+  // Helper to process servers from a config
+  const processServers = (servers, source) => {
+    if (!servers || typeof servers !== 'object') return
+
+    for (const [name, config] of Object.entries(servers)) {
+      if (!config) continue
+
+      // Determine transport type
+      const type = config.type || 'stdio'
+      let transport
+
+      if (type === 'stdio') {
+        if (!config.command) {
+          console.warn(`Skipping ${name} from ${source}: missing command`)
+          continue
+        }
+        transport = {
+          type: 'stdio',
+          command: config.command,
+          args: config.args || [],
+          env: config.env || {},
+          cwd: config.cwd,
+        }
+      } else if (type === 'sse' || type === 'http') {
+        if (!config.url) {
+          console.warn(`Skipping ${name} from ${source}: missing url`)
+          continue
+        }
+        transport = {
+          type: config.type,
+          url: config.url,
+          headers: config.headers || {},
+        }
+      } else {
+        console.warn(`Skipping ${name} from ${source}: unknown type ${type}`)
+        continue
+      }
+
+      // Create unique key with source suffix for display
+      const key = `${name} (${source})`
+      discovered[key] = {
+        name,
+        source,
+        config: {
+          ...config,
+          type,
+        },
+        transport,
+        tools: null, // Will be populated when connected
+        error: null,
+      }
+    }
+  }
+
+  // 1. Claude Desktop config (macOS)
+  try {
+    const claudeDesktopPath = path.join(
+      os.homedir(),
+      'Library',
+      'Application Support',
+      'Claude',
+      'claude_desktop_config.json'
+    )
+    if (fs.existsSync(claudeDesktopPath)) {
+      const content = fs.readFileSync(claudeDesktopPath, 'utf-8')
+      const parsed = safeJsonParse(content, 'Claude Desktop config')
+      if (parsed?.mcpServers) {
+        processServers(parsed.mcpServers, 'Claude Desktop')
+        console.log(`Discovered ${Object.keys(parsed.mcpServers).length} servers from Claude Desktop`)
+      }
+    }
+  } catch (err) {
+    console.error('Error reading Claude Desktop config:', err.message)
+  }
+
+  // 2. Project .mcp.json
+  if (projectPath) {
+    try {
+      const projectMcpPath = path.join(projectPath, '.mcp.json')
+      if (fs.existsSync(projectMcpPath)) {
+        const content = fs.readFileSync(projectMcpPath, 'utf-8')
+        const parsed = safeJsonParse(content, 'Project .mcp.json')
+        if (parsed?.mcpServers) {
+          processServers(parsed.mcpServers, 'Project')
+          console.log(`Discovered ${Object.keys(parsed.mcpServers).length} servers from project`)
+        }
+      }
+    } catch (err) {
+      console.error('Error reading project .mcp.json:', err.message)
+    }
+  }
+
+  console.log(`Total discovered MCP servers: ${Object.keys(discovered).length}`)
+  return discovered
+}
+
+/**
+ * Try to connect to a discovered server and get its tools
+ */
+async function probeServer(serverConfig) {
+  const tempId = `probe_${Date.now()}`
+  try {
+    // Create a temporary connection to probe the server
+    const config = {
+      id: tempId,
+      name: serverConfig.name,
+      transport: serverConfig.transport,
+      timeout: 10000, // 10 second timeout for probing
+    }
+
+    // Connect
+    const result = await connect(config)
+    if (!result.success) {
+      return { tools: null, error: result.error }
+    }
+
+    // Get tools
+    const toolsResult = await listTools(tempId)
+    const tools = toolsResult.tools || []
+
+    // Disconnect
+    await disconnect(tempId)
+
+    return {
+      tools: tools.map(t => ({
+        name: t.name,
+        displayName: t.name,
+        description: t.description,
+      })),
+      error: null,
+    }
+  } catch (err) {
+    // Make sure to disconnect on error
+    try {
+      await disconnect(tempId)
+    } catch {}
+    return { tools: null, error: err.message }
+  }
+}
+
 module.exports = {
   setMainWindow,
   connect,
@@ -830,4 +993,6 @@ module.exports = {
   readResource,
   getPrompt,
   getStatus,
+  discoverMcpServers,
+  probeServer,
 }

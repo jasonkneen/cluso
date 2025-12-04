@@ -118,6 +118,37 @@ export interface CoreMessage {
 }
 
 // ============================================================================
+// Agent SDK Support (Claude 4.5+ models)
+// ============================================================================
+
+/**
+ * Models that should use Agent SDK instead of Vercel AI SDK
+ */
+const AGENT_SDK_MODELS = new Set([
+  'claude-sonnet-4-5',
+  'claude-sonnet-4-5-20250929',
+  'claude-opus-4-5',
+  'claude-opus-4-5-20251101',
+  'claude-haiku-4-5',
+  'claude-haiku-4-5-20251001',
+  'claude-code', // Alias for sonnet-4-5
+])
+
+/**
+ * Check if model should use Agent SDK
+ */
+export function shouldUseAgentSDK(modelId: string): boolean {
+  if (AGENT_SDK_MODELS.has(modelId)) return true
+  const lowerModelId = modelId.toLowerCase()
+  if (lowerModelId.includes('sonnet-4-5') ||
+      lowerModelId.includes('opus-4-5') ||
+      lowerModelId.includes('haiku-4-5')) {
+    return true
+  }
+  return false
+}
+
+// ============================================================================
 // Model Provider Map (for local validation)
 // ============================================================================
 
@@ -199,6 +230,7 @@ export function getProviderForModel(modelId: string): ProviderType | null {
 
 export function useAIChatV2(options: UseAIChatOptions = {}) {
   const [isLoading, setIsLoading] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false) // True only while AI is actively responding
   const [error, setError] = useState<Error | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
 
@@ -296,11 +328,265 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     cleanupFnsRef.current = []
 
     setIsLoading(true)
+    setIsGenerating(true) // Start of active generation
     setError(null)
 
     const requestId = crypto.randomUUID()
     currentRequestIdRef.current = requestId
 
+    // =========================================================================
+    // Agent SDK Route (Claude 4.5+ models)
+    // =========================================================================
+    if (shouldUseAgentSDK(modelId) && window.electronAPI?.agentSdk) {
+      const agentSdk = window.electronAPI.agentSdk
+      debugLog.aiChat.log(`[Agent SDK] Using Agent SDK for model: ${modelId}`)
+
+      return new Promise((resolve) => {
+        let fullText = ''
+        let fullReasoning = ''
+        const allToolCalls: ToolCallPart[] = []
+        const allToolResults: ToolResultPart[] = []
+        const pendingToolInputs: Map<string, { name: string; partialJson: string }> = new Map()
+
+        // Set up Agent SDK event listeners
+        const removeTextChunk = agentSdk.onTextChunk((data: { requestId: string; chunk: string }) => {
+          if (data.requestId !== requestId) return
+          fullText += data.chunk
+          onChunk?.(data.chunk)
+          optionsRef.current.onTextDelta?.(data.chunk)
+          optionsRef.current.onStreamEvent?.({
+            type: 'text-delta',
+            data: data.chunk,
+            timestamp: new Date(),
+          })
+        })
+
+        const removeThinkingStart = agentSdk.onThinkingStart((data: { requestId: string; index: number }) => {
+          if (data.requestId !== requestId) return
+          debugLog.aiChat.log(`[Agent SDK] Thinking started at index ${data.index}`)
+        })
+
+        const removeThinkingChunk = agentSdk.onThinkingChunk((data: { requestId: string; chunk: string; index: number }) => {
+          if (data.requestId !== requestId) return
+          fullReasoning += data.chunk
+          onReasoningChunk?.(data.chunk)
+          optionsRef.current.onReasoningDelta?.(data.chunk)
+          optionsRef.current.onStreamEvent?.({
+            type: 'reasoning-delta',
+            data: data.chunk,
+            timestamp: new Date(),
+          })
+        })
+
+        const removeToolStart = agentSdk.onToolStart((data: { requestId: string; toolCallId: string; toolName: string; index: number }) => {
+          if (data.requestId !== requestId) return
+          debugLog.aiChat.log(`[Agent SDK] Tool started: ${data.toolName} (${data.toolCallId})`)
+          pendingToolInputs.set(data.toolCallId, { name: data.toolName, partialJson: '' })
+
+          // Call onStepFinish to update tool chips in UI (same as Vercel AI SDK does)
+          onStepFinish?.({
+            text: fullText,
+            toolCalls: [{
+              type: 'tool-call',
+              toolCallId: data.toolCallId,
+              toolName: data.toolName,
+              args: {},
+            }],
+          })
+        })
+
+        const removeToolInputDelta = agentSdk.onToolInputDelta((data: { requestId: string; toolCallId: string; delta: string; index: number }) => {
+          if (data.requestId !== requestId) return
+          const pending = pendingToolInputs.get(data.toolCallId)
+          if (pending) {
+            pending.partialJson += data.delta
+          }
+        })
+
+        const removeToolResult = agentSdk.onToolResult((data: { requestId: string; toolCallId: string; result: string; isError: boolean }) => {
+          if (data.requestId !== requestId) return
+
+          const pending = pendingToolInputs.get(data.toolCallId)
+          const toolName = pending?.name || 'unknown'
+
+          // Parse the accumulated args
+          let args: unknown = {}
+          if (pending?.partialJson) {
+            try {
+              args = JSON.parse(pending.partialJson)
+            } catch {
+              args = { raw: pending.partialJson }
+            }
+          }
+
+          // Create tool call
+          const toolCall: ToolCallPart = {
+            type: 'tool-call',
+            toolCallId: data.toolCallId,
+            toolName,
+            args,
+          }
+          allToolCalls.push(toolCall)
+          optionsRef.current.onToolCall?.(toolCall)
+          optionsRef.current.onStreamEvent?.({
+            type: 'tool-call',
+            data: toolCall,
+            timestamp: new Date(),
+          })
+
+          // Parse result
+          let parsedResult: unknown
+          try {
+            parsedResult = JSON.parse(data.result)
+          } catch {
+            parsedResult = data.result
+          }
+
+          // Create tool result
+          const toolResult: ToolResultPart = {
+            type: 'tool-result',
+            toolCallId: data.toolCallId,
+            toolName,
+            result: data.isError ? { error: parsedResult } : parsedResult,
+          }
+          allToolResults.push(toolResult)
+          optionsRef.current.onToolResult?.(toolResult)
+          optionsRef.current.onStreamEvent?.({
+            type: 'tool-result',
+            data: toolResult,
+            timestamp: new Date(),
+          })
+
+          pendingToolInputs.delete(data.toolCallId)
+
+          // Call onStepFinish to update tool chips status in UI
+          onStepFinish?.({
+            text: fullText,
+            toolResults: [toolResult],
+          })
+        })
+
+        const removeBlockStop = agentSdk.onBlockStop((data: { requestId: string; index: number }) => {
+          if (data.requestId !== requestId) return
+          debugLog.aiChat.log(`[Agent SDK] Block stopped at index ${data.index}`)
+        })
+
+        const removeComplete = agentSdk.onComplete((data: { requestId: string; text: string; thinking?: string }) => {
+          if (data.requestId !== requestId) return
+
+          debugLog.aiChat.log('[Agent SDK] Complete received, resetting isGenerating')
+
+          // Cleanup all listeners
+          removeTextChunk()
+          removeThinkingStart()
+          removeThinkingChunk()
+          removeToolStart()
+          removeToolInputDelta()
+          removeToolResult()
+          removeBlockStop()
+          removeComplete()
+          removeError()
+          removeInterrupted()
+
+          // Handle reasoning completion
+          if (data.thinking || fullReasoning) {
+            const reasoning = data.thinking || fullReasoning
+            optionsRef.current.onReasoningComplete?.({
+              type: 'thinking',
+              content: reasoning,
+              timestamp: new Date(),
+            })
+          }
+
+          optionsRef.current.onResponse?.(data.text || fullText)
+          optionsRef.current.onFinish?.()
+          optionsRef.current.onStreamEvent?.({
+            type: 'finish',
+            data: { finishReason: 'stop' },
+            timestamp: new Date(),
+          })
+
+          setIsGenerating(false) // AI finished responding
+          setIsLoading(false)
+          currentRequestIdRef.current = null
+
+          resolve({
+            text: data.text || fullText,
+            toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+            toolResults: allToolResults.length > 0 ? allToolResults : undefined,
+            reasoning: data.thinking || fullReasoning || undefined,
+          })
+        })
+
+        const removeError = agentSdk.onError((data: { requestId: string; error: string }) => {
+          if (data.requestId !== requestId) return
+
+          // Cleanup all listeners
+          removeTextChunk()
+          removeThinkingStart()
+          removeThinkingChunk()
+          removeToolStart()
+          removeToolInputDelta()
+          removeToolResult()
+          removeBlockStop()
+          removeComplete()
+          removeError()
+          removeInterrupted()
+
+          const err = new Error(data.error)
+          setError(err)
+          optionsRef.current.onError?.(err)
+          setIsGenerating(false) // AI stopped due to error
+          setIsLoading(false)
+          currentRequestIdRef.current = null
+
+          resolve({ text: null })
+        })
+
+        const removeInterrupted = agentSdk.onInterrupted((data: { requestId: string }) => {
+          if (data.requestId !== requestId) return
+
+          debugLog.aiChat.log('[Agent SDK] Session interrupted')
+          setIsGenerating(false) // AI was interrupted
+          // Don't resolve - wait for complete/error
+        })
+
+        // Store cleanup functions
+        cleanupFnsRef.current = [
+          removeTextChunk,
+          removeThinkingStart,
+          removeThinkingChunk,
+          removeToolStart,
+          removeToolInputDelta,
+          removeToolResult,
+          removeBlockStop,
+          removeComplete,
+          removeError,
+          removeInterrupted,
+        ]
+
+        // Start the Agent SDK stream
+        agentSdk.stream({
+          requestId,
+          modelId,
+          messages,
+          system,
+          maxThinkingTokens: enableReasoning ? 16384 : 0,
+          projectFolder,
+          mcpTools,
+        }).catch((err: Error) => {
+          setError(err)
+          optionsRef.current.onError?.(err)
+          setIsGenerating(false)
+          setIsLoading(false)
+          resolve({ text: null })
+        })
+      })
+    }
+
+    // =========================================================================
+    // Vercel AI SDK Route (OpenAI, Google, Legacy Anthropic)
+    // =========================================================================
     return new Promise((resolve) => {
       let fullText = ''
       let fullReasoning = ''
@@ -407,6 +693,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
           timestamp: new Date(),
         })
 
+        setIsGenerating(false) // AI finished responding
         setIsLoading(false)
         currentRequestIdRef.current = null
 
@@ -430,6 +717,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
         const err = new Error(data.error)
         setError(err)
         optionsRef.current.onError?.(err)
+        setIsGenerating(false) // AI stopped due to error
         setIsLoading(false)
         currentRequestIdRef.current = null
 
@@ -639,6 +927,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     currentRequestIdRef.current = null
 
     // Reset loading state
+    setIsGenerating(false)
     setIsLoading(false)
 
     // Notify via callback
@@ -652,6 +941,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     generate,
     cancel,
     isLoading,
+    isGenerating, // True only while AI is actively responding (for stop button)
     error,
     isInitialized,
   }
@@ -704,87 +994,4 @@ export function mergeTools(...toolMaps: ToolsMap[]): ToolsMap {
 // Re-export z from zod for convenience (if needed by consumers)
 export { z } from 'zod'
 
-// ============================================================================
-// TypeScript Declarations for Electron API
-// ============================================================================
-
-declare global {
-  interface Window {
-    electronAPI?: {
-      aiSdk: {
-        initialize: () => Promise<{ success: boolean }>
-        stream: (options: {
-          requestId: string
-          modelId: string
-          messages: CoreMessage[]
-          providers: Record<string, string>
-          system?: string
-          tools?: Record<string, { description: string; parameters: Record<string, unknown> }>
-          maxSteps?: number
-          enableReasoning?: boolean
-          mcpTools?: MCPToolDefinition[]
-        }) => Promise<{ success: boolean; requestId: string }>
-        generate: (options: {
-          modelId: string
-          messages: CoreMessage[]
-          providers: Record<string, string>
-          system?: string
-          tools?: Record<string, { description: string; parameters: Record<string, unknown> }>
-          maxSteps?: number
-          mcpTools?: MCPToolDefinition[]
-        }) => Promise<{
-          success: boolean
-          text?: string
-          toolCalls?: Array<{ toolCallId: string; toolName: string; args: unknown }>
-          toolResults?: Array<{ toolCallId: string; toolName: string; result: unknown }>
-          finishReason?: string
-          error?: string
-        }>
-        executeMCPTool: (serverId: string, toolName: string, args: Record<string, unknown>) => Promise<{
-          success: boolean
-          content?: Array<{ type: string; text?: string }>
-          error?: string
-        }>
-        getModels: () => Promise<{ models: string[]; providers: string[] }>
-        getProvider: (modelId: string) => Promise<{ provider: string | null }>
-        onTextChunk: (callback: (data: { requestId: string; chunk: string }) => void) => () => void
-        onStepFinish: (callback: (data: {
-          requestId: string
-          text: string
-          toolCalls: Array<{ toolCallId: string; toolName: string; args: unknown }>
-          toolResults: Array<{ toolCallId: string; toolName: string; result: unknown }>
-        }) => void) => () => void
-        onComplete: (callback: (data: {
-          requestId: string
-          text: string
-          reasoning?: string
-          toolCalls?: Array<{ toolCallId: string; toolName: string; args: unknown }>
-          toolResults?: Array<{ toolCallId: string; toolName: string; result: unknown }>
-          finishReason: string
-        }) => void) => () => void
-        onError: (callback: (data: { requestId: string; error: string }) => void) => () => void
-        removeAllListeners: () => void
-        webSearch: (query: string, maxResults?: number) => Promise<{
-          success: boolean
-          query?: string
-          results?: Array<{ title: string; url: string; snippet: string }>
-          count?: number
-          error?: string
-        }>
-      }
-      oauth: {
-        getAccessToken: () => Promise<{ success: boolean; accessToken?: string | null }>
-      }
-      codex: {
-        getAccessToken: () => Promise<{ success: boolean; accessToken?: string | null }>
-      }
-      mcp: {
-        callTool: (call: { serverId: string; toolName: string; arguments: Record<string, unknown> }) => Promise<{
-          success: boolean
-          content?: Array<{ type: string; text?: string }>
-          error?: string
-        }>
-      }
-    }
-  }
-}
+// TypeScript declarations are in types/electron.d.ts

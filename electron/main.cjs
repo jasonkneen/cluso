@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron')
 const path = require('path')
 const { execSync, exec, spawnSync } = require('child_process')
 const fs = require('fs').promises
@@ -8,6 +8,12 @@ const claudeSession = require('./claude-session.cjs')
 const mcp = require('./mcp.cjs')
 const selectorAgent = require('./selector-agent.cjs')
 const aiSdkWrapper = require('./ai-sdk-wrapper.cjs')
+const agentSdkWrapper = require('./agent-sdk-wrapper.cjs')
+const fileWatcher = require('./file-watcher.cjs')
+const backgroundValidator = require('./background-validator.cjs')
+const agentTodos = require('./agent-todos.cjs')
+const lsp = require('./lsp-bridge.cjs')
+const mgrep = require('./mgrep.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -59,8 +65,189 @@ class RateLimiter {
 // Rate limiter for file search operations (max 2 concurrent, 500ms between starts)
 const fileSearchLimiter = new RateLimiter(2, 500)
 
-// Track the main window for sending events
+// ==========================================
+// Multi-Window Support with Project Locking
+// ==========================================
+// Each window is locked to a single project once set.
+// Opening a different project opens a new window.
+// Windows track: id, project path, BrowserWindow instance
+
+// Window registry: Map<windowId, { window: BrowserWindow, projectPath: string | null }>
+const windowRegistry = new Map()
+let nextWindowId = 1
+
+// Track the main window for sending events (for backwards compatibility)
 let mainWindow = null
+
+// Helper: Get window by project path
+function getWindowByProject(projectPath) {
+  for (const [id, entry] of windowRegistry) {
+    if (entry.projectPath === projectPath) {
+      return { id, ...entry }
+    }
+  }
+  return null
+}
+
+// Helper: Get all windows with projects
+function getAllProjectWindows() {
+  const result = []
+  for (const [id, entry] of windowRegistry) {
+    result.push({
+      id,
+      projectPath: entry.projectPath,
+      projectName: entry.projectName || null,
+      isFocused: entry.window.isFocused()
+    })
+  }
+  return result
+}
+
+// Helper: Send to specific window
+function sendToWindow(windowId, channel, data) {
+  const entry = windowRegistry.get(windowId)
+  if (entry && entry.window && !entry.window.isDestroyed()) {
+    entry.window.webContents.send(channel, data)
+  }
+}
+
+// Helper: Send to all windows
+function sendToAllWindows(channel, data) {
+  for (const [, entry] of windowRegistry) {
+    if (entry.window && !entry.window.isDestroyed()) {
+      entry.window.webContents.send(channel, data)
+    }
+  }
+}
+
+// Build application menu with Window submenu for project switching
+function buildApplicationMenu() {
+  const projectWindows = getAllProjectWindows().filter(w => w.projectPath)
+
+  const windowSubmenu = [
+    {
+      label: 'New Window',
+      accelerator: 'CmdOrCtrl+Shift+N',
+      click: () => {
+        createWindow()
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Minimize',
+      accelerator: 'CmdOrCtrl+M',
+      role: 'minimize'
+    },
+    {
+      label: 'Close',
+      accelerator: 'CmdOrCtrl+W',
+      role: 'close'
+    },
+    { type: 'separator' },
+    {
+      label: 'Bring All to Front',
+      role: 'front'
+    }
+  ]
+
+  // Add project windows if any exist
+  if (projectWindows.length > 0) {
+    windowSubmenu.push({ type: 'separator' })
+    windowSubmenu.push({
+      label: 'Project Windows',
+      enabled: false
+    })
+
+    for (const pw of projectWindows) {
+      const displayName = pw.projectName || path.basename(pw.projectPath || 'Unknown')
+      windowSubmenu.push({
+        label: `  ${displayName}`,
+        type: 'checkbox',
+        checked: pw.isFocused,
+        click: () => {
+          const entry = windowRegistry.get(pw.id)
+          if (entry && entry.window && !entry.window.isDestroyed()) {
+            entry.window.focus()
+          }
+        }
+      })
+    }
+  }
+
+  const template = [
+    // App menu (macOS)
+    ...(process.platform === 'darwin' ? [{
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    }] : []),
+    // File menu
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'New Window',
+          accelerator: 'CmdOrCtrl+Shift+N',
+          click: () => {
+            createWindow()
+          }
+        },
+        { type: 'separator' },
+        process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' }
+      ]
+    },
+    // Edit menu
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    },
+    // View menu
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
+    // Window menu
+    {
+      label: 'Window',
+      submenu: windowSubmenu
+    }
+  ]
+
+  const menu = Menu.buildFromTemplate(template)
+  Menu.setApplicationMenu(menu)
+}
+
+// Update menu when windows change (to reflect current project windows)
+function updateApplicationMenu() {
+  buildApplicationMenu()
+}
 
 // DEPRECATED: Use gitExecSafe() instead to prevent command injection
 // This function is kept for reference but should not be used
@@ -152,6 +339,143 @@ function registerHandlers() {
   ipcMain.handle('get-webview-preload-path', () => {
     return path.join(__dirname, 'webview-preload.cjs')
   })
+}
+
+// Register Window Management IPC handlers
+function registerWindowHandlers() {
+  // Get current window info (called from renderer to get its identity)
+  ipcMain.handle('window:get-info', (event) => {
+    const webContents = event.sender
+    const win = BrowserWindow.fromWebContents(webContents)
+    if (!win) return { windowId: null, projectPath: null, projectName: null }
+
+    const windowId = win.windowId
+    const entry = windowRegistry.get(windowId)
+    return {
+      windowId,
+      projectPath: entry?.projectPath || null,
+      projectName: entry?.projectName || null
+    }
+  })
+
+  // Lock this window to a project (one-time operation)
+  ipcMain.handle('window:lock-project', (event, projectPath, projectName) => {
+    const webContents = event.sender
+    const win = BrowserWindow.fromWebContents(webContents)
+    if (!win) return { success: false, error: 'Window not found' }
+
+    const windowId = win.windowId
+    const entry = windowRegistry.get(windowId)
+    if (!entry) return { success: false, error: 'Window not in registry' }
+
+    // Check if this window already has a project
+    if (entry.projectPath) {
+      if (entry.projectPath === projectPath) {
+        return { success: true, message: 'Already locked to this project' }
+      }
+      return {
+        success: false,
+        error: 'Window already locked to a different project',
+        currentProject: entry.projectPath
+      }
+    }
+
+    // Check if project is already open in another window
+    const existingWindow = getWindowByProject(projectPath)
+    if (existingWindow && existingWindow.id !== windowId) {
+      return {
+        success: false,
+        error: 'Project already open in another window',
+        existingWindowId: existingWindow.id
+      }
+    }
+
+    // Lock this window to the project
+    entry.projectPath = projectPath
+    entry.projectName = projectName
+    windowRegistry.set(windowId, entry)
+    console.log(`[Window] Window ${windowId} locked to project: ${projectPath}`)
+
+    // Update window title
+    win.setTitle(projectName || path.basename(projectPath))
+
+    // Notify all windows about registry change
+    sendToAllWindows('window:registry-changed', getAllProjectWindows())
+
+    // Update application menu to show new project window
+    updateApplicationMenu()
+
+    return { success: true, windowId, projectPath, projectName }
+  })
+
+  // Open a project - either in existing window (if available) or new window
+  ipcMain.handle('window:open-project', async (_event, projectPath, projectName) => {
+    // Check if project already has a window
+    const existingWindow = getWindowByProject(projectPath)
+    if (existingWindow) {
+      existingWindow.window.focus()
+      return {
+        success: true,
+        action: 'focused',
+        windowId: existingWindow.id,
+        alreadyOpen: true
+      }
+    }
+
+    // Create new window for this project
+    const result = createWindow({ projectPath, projectName })
+    return {
+      success: true,
+      action: result.alreadyOpen ? 'focused' : 'created',
+      windowId: result.windowId,
+      alreadyOpen: result.alreadyOpen
+    }
+  })
+
+  // Open a new empty window (no project locked yet)
+  ipcMain.handle('window:new', async () => {
+    const result = createWindow()
+    return {
+      success: true,
+      windowId: result.windowId
+    }
+  })
+
+  // Check if a project is already open in any window
+  ipcMain.handle('window:is-project-open', (_event, projectPath) => {
+    const existingWindow = getWindowByProject(projectPath)
+    return {
+      isOpen: !!existingWindow,
+      windowId: existingWindow?.id || null
+    }
+  })
+
+  // Get all open project windows
+  ipcMain.handle('window:get-all', () => {
+    return getAllProjectWindows()
+  })
+
+  // Focus a specific window
+  ipcMain.handle('window:focus', (_event, windowId) => {
+    const entry = windowRegistry.get(windowId)
+    if (entry && entry.window && !entry.window.isDestroyed()) {
+      entry.window.focus()
+      return { success: true }
+    }
+    return { success: false, error: 'Window not found' }
+  })
+
+  // Close a specific window
+  ipcMain.handle('window:close', (_event, windowId) => {
+    const entry = windowRegistry.get(windowId)
+    if (entry && entry.window && !entry.window.isDestroyed()) {
+      entry.window.close()
+      return { success: true }
+    }
+    return { success: false, error: 'Window not found' }
+  })
+
+  console.log('[Window] IPC handlers registered')
 }
 
 // Register OAuth IPC handlers
@@ -695,6 +1019,20 @@ function registerGitHandlers() {
     return gitExecSafe(['checkout', validation.ref])
   })
 
+  ipcMain.handle('git:checkoutFile', async (event, filePath) => {
+    // Restore a specific file to its last committed state
+    if (!filePath || typeof filePath !== 'string') {
+      return { success: false, error: 'Invalid file path' }
+    }
+    // Validate path - must be within project folder
+    const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(projectFolder, filePath)
+    if (!absolutePath.startsWith(projectFolder)) {
+      return { success: false, error: 'File path outside project folder' }
+    }
+    // Use -- to separate path from command to prevent path injection
+    return gitExecSafe(['checkout', 'HEAD', '--', absolutePath])
+  })
+
   ipcMain.handle('git:createBranch', async (event, name) => {
     // Validate branch name to prevent injection
     const validation = validateGitRef(name)
@@ -829,7 +1167,9 @@ function registerGitHandlers() {
     console.log('[Files] writeFile called with path:', filePath)
     console.log('[Files] Content length:', content?.length || 0)
 
-    const validation = validatePath(filePath)
+    // Allow writing anywhere in home directory (users need to save to their projects)
+    // Sensitive directories (.ssh, .aws, etc) are still blocked
+    const validation = validatePath(filePath, { allowHomeDir: true })
     if (!validation.valid) {
       console.log('[Files] ❌ Path validation failed:', validation.error)
       return { success: false, error: validation.error }
@@ -855,7 +1195,7 @@ function registerGitHandlers() {
 
   // Create file (fails if exists)
   ipcMain.handle('files:createFile', async (event, filePath, content = '') => {
-    const validation = validatePath(filePath)
+    const validation = validatePath(filePath, { allowHomeDir: true })
     if (!validation.valid) {
       return { success: false, error: validation.error }
     }
@@ -878,7 +1218,7 @@ function registerGitHandlers() {
 
   // Delete file
   ipcMain.handle('files:deleteFile', async (event, filePath) => {
-    const validation = validatePath(filePath)
+    const validation = validatePath(filePath, { allowHomeDir: true })
     if (!validation.valid) {
       return { success: false, error: validation.error }
     }
@@ -894,8 +1234,8 @@ function registerGitHandlers() {
 
   // Rename/move file
   ipcMain.handle('files:renameFile', async (event, oldPath, newPath) => {
-    const oldValidation = validatePath(oldPath)
-    const newValidation = validatePath(newPath)
+    const oldValidation = validatePath(oldPath, { allowHomeDir: true })
+    const newValidation = validatePath(newPath, { allowHomeDir: true })
     if (!oldValidation.valid) {
       return { success: false, error: oldValidation.error }
     }
@@ -914,7 +1254,7 @@ function registerGitHandlers() {
 
   // Create directory
   ipcMain.handle('files:createDirectory', async (event, dirPath) => {
-    const validation = validatePath(dirPath)
+    const validation = validatePath(dirPath, { allowHomeDir: true })
     if (!validation.valid) {
       return { success: false, error: validation.error }
     }
@@ -930,7 +1270,7 @@ function registerGitHandlers() {
 
   // Delete directory
   ipcMain.handle('files:deleteDirectory', async (event, dirPath) => {
-    const validation = validatePath(dirPath)
+    const validation = validatePath(dirPath, { allowHomeDir: true })
     if (!validation.valid) {
       return { success: false, error: validation.error }
     }
@@ -951,6 +1291,314 @@ function registerGitHandlers() {
       return { success: true, exists: true }
     } catch {
       return { success: true, exists: false }
+    }
+  })
+
+  // File watcher handlers
+  ipcMain.handle('file-watcher:start', async (event, projectPath) => {
+    return fileWatcher.startWatching(projectPath)
+  })
+
+  ipcMain.handle('file-watcher:stop', async (event, projectPath) => {
+    return fileWatcher.stopWatching(projectPath)
+  })
+
+  ipcMain.handle('file-watcher:get-watched', async () => {
+    return fileWatcher.getWatchedPaths()
+  })
+
+  // Mgrep (local semantic code search) handlers
+  ipcMain.handle('mgrep:initialize', async (event, projectPath) => {
+    return mgrep.initialize(projectPath)
+  })
+
+  ipcMain.handle('mgrep:search', async (event, query, options) => {
+    return mgrep.search(query, options)
+  })
+
+  ipcMain.handle('mgrep:index-file', async (event, filePath, content, projectPath) => {
+    return mgrep.indexFile(filePath, content, projectPath)
+  })
+
+  ipcMain.handle('mgrep:index-files', async (event, files, projectPath) => {
+    return mgrep.indexFiles(files, projectPath)
+  })
+
+  ipcMain.handle('mgrep:on-file-change', async (event, changeEvent) => {
+    return mgrep.onFileChange(changeEvent)
+  })
+
+  ipcMain.handle('mgrep:get-status', async (event, projectPath) => {
+    return mgrep.getStatus(projectPath)
+  })
+
+  ipcMain.handle('mgrep:get-all-projects-status', async () => {
+    return mgrep.getAllProjectsStatus()
+  })
+
+  ipcMain.handle('mgrep:set-active-project', async (event, projectPath) => {
+    return mgrep.setActiveProject(projectPath)
+  })
+
+  ipcMain.handle('mgrep:remove-project', async (event, projectPath) => {
+    return mgrep.removeProject(projectPath)
+  })
+
+  ipcMain.handle('mgrep:get-stats', async (event, projectPath) => {
+    return mgrep.getStats(projectPath)
+  })
+
+  ipcMain.handle('mgrep:clear-index', async (event, projectPath) => {
+    return mgrep.clearIndex(projectPath)
+  })
+
+  ipcMain.handle('mgrep:resync', async (event, projectPath) => {
+    try {
+      return await mgrep.resync(projectPath)
+    } catch (err) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  // Background validator handlers
+  ipcMain.handle('validator:trigger', async (event, projectPath) => {
+    return backgroundValidator.triggerValidation(projectPath)
+  })
+
+  ipcMain.handle('validator:get-state', async (event, projectPath) => {
+    return backgroundValidator.getValidationState(projectPath)
+  })
+
+  ipcMain.handle('validator:clear', async (event, projectPath) => {
+    backgroundValidator.clearValidation(projectPath)
+    return { success: true }
+  })
+
+  // Agent todos handlers - aggregate todos from various AI coding agents
+  ipcMain.handle('agent-todos:scan', async (event, projectPath) => {
+    return agentTodos.scanAllAgents(projectPath)
+  })
+
+  ipcMain.handle('agent-todos:agents', async () => {
+    return agentTodos.getAllAgents()
+  })
+
+  ipcMain.handle('agent-todos:agent-info', async (event, agentId) => {
+    return agentTodos.getAgentInfo(agentId)
+  })
+
+  // LSP handlers - Language Server Protocol integration
+  ipcMain.handle('lsp:init', async (event, projectPath) => {
+    try {
+      await lsp.init(projectPath)
+      return { success: true }
+    } catch (error) {
+      console.error('[LSP] Init failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:shutdown', async () => {
+    try {
+      await lsp.shutdown()
+      return { success: true }
+    } catch (error) {
+      console.error('[LSP] Shutdown failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:status', async () => {
+    try {
+      const manager = lsp.getManager()
+      return { success: true, data: await manager.getStatus() }
+    } catch (error) {
+      console.error('[LSP] Status failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:touch-file', async (event, filePath, waitForDiagnostics = false) => {
+    try {
+      const manager = lsp.getManager()
+      const count = await manager.touchFile(filePath, waitForDiagnostics)
+      return { success: true, clientCount: count }
+    } catch (error) {
+      console.error('[LSP] Touch file failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:file-changed', async (event, filePath, content) => {
+    try {
+      const manager = lsp.getManager()
+      await manager.fileChanged(filePath, content)
+      return { success: true }
+    } catch (error) {
+      console.error('[LSP] File changed failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:file-saved', async (event, filePath) => {
+    try {
+      const manager = lsp.getManager()
+      await manager.fileSaved(filePath)
+      return { success: true }
+    } catch (error) {
+      console.error('[LSP] File saved failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:diagnostics', async () => {
+    try {
+      const manager = lsp.getManager()
+      return { success: true, data: manager.getAllDiagnostics() }
+    } catch (error) {
+      console.error('[LSP] Get diagnostics failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:diagnostics-for-file', async (event, filePath) => {
+    try {
+      const manager = lsp.getManager()
+      return { success: true, data: manager.getDiagnosticsForFile(filePath) }
+    } catch (error) {
+      console.error('[LSP] Get diagnostics for file failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Get diagnostics for multiple files at once (for agent context)
+  ipcMain.handle('lsp:diagnostics-for-files', async (event, filePaths) => {
+    try {
+      const manager = lsp.getManager()
+      const result = {}
+
+      for (const filePath of filePaths) {
+        // Touch each file to ensure LSP servers are aware of it
+        await manager.touchFile(filePath, true) // wait for diagnostics
+        const diagnostics = manager.getDiagnosticsForFile(filePath)
+        if (diagnostics.length > 0) {
+          result[filePath] = diagnostics
+        }
+      }
+
+      return { success: true, data: result }
+    } catch (error) {
+      console.error('[LSP] Get diagnostics for files failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:hover', async (event, filePath, line, character) => {
+    try {
+      const manager = lsp.getManager()
+      const result = await manager.hover(filePath, line, character)
+      return { success: true, data: result }
+    } catch (error) {
+      console.error('[LSP] Hover failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:completion', async (event, filePath, line, character) => {
+    try {
+      const manager = lsp.getManager()
+      const result = await manager.completion(filePath, line, character)
+      return { success: true, data: result }
+    } catch (error) {
+      console.error('[LSP] Completion failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:definition', async (event, filePath, line, character) => {
+    try {
+      const manager = lsp.getManager()
+      const result = await manager.definition(filePath, line, character)
+      return { success: true, data: result }
+    } catch (error) {
+      console.error('[LSP] Definition failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:references', async (event, filePath, line, character) => {
+    try {
+      const manager = lsp.getManager()
+      const result = await manager.references(filePath, line, character)
+      return { success: true, data: result }
+    } catch (error) {
+      console.error('[LSP] References failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:set-server-enabled', async (event, serverId, enabled) => {
+    try {
+      const manager = lsp.getManager()
+      manager.setServerEnabled(serverId, enabled)
+      return { success: true }
+    } catch (error) {
+      console.error('[LSP] Set server enabled failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Install an LSP server
+  ipcMain.handle('lsp:install-server', async (event, serverId) => {
+    try {
+      const server = lsp.getServer(serverId)
+      if (!server) {
+        return { success: false, error: `Unknown server: ${serverId}` }
+      }
+      if (!server.installable) {
+        return { success: false, error: `Server ${serverId} is not installable` }
+      }
+
+      // Send progress updates to renderer
+      const onProgress = (progress) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('lsp:install-progress', {
+            serverId,
+            ...progress,
+          })
+        }
+      }
+
+      const installedPath = await server.install(onProgress)
+      return { success: true, path: installedPath }
+    } catch (error) {
+      console.error('[LSP] Install server failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Get LSP cache info
+  ipcMain.handle('lsp:get-cache-info', async () => {
+    try {
+      const info = await lsp.getCacheInfo()
+      return {
+        success: true,
+        data: info,
+      }
+    } catch (error) {
+      console.error('[LSP] Get cache info failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Clear LSP cache
+  ipcMain.handle('lsp:clear-cache', async () => {
+    try {
+      await lsp.clearCache()
+      return { success: true }
+    } catch (error) {
+      console.error('[LSP] Clear cache failed:', error)
+      return { success: false, error: error.message }
     }
   })
 
@@ -1193,7 +1841,7 @@ function registerGitHandlers() {
   ipcMain.handle('files:saveImage', async (event, base64DataUrl, destPath) => {
     console.log('[Files] saveImage called with destPath:', destPath)
 
-    const validation = validatePath(destPath)
+    const validation = validatePath(destPath, { allowHomeDir: true })
     if (!validation.valid) {
       return { success: false, error: validation.error }
     }
@@ -1689,8 +2337,15 @@ function registerSelectorAgentHandlers() {
         }
       }
 
+      // Check if already active to prevent double-init
+      if (selectorAgent.isSessionActive()) {
+        console.log('[SelectorAgent] Session already active, skipping init')
+        return { success: true }
+      }
+
       // Start the session - responses will be streamed via events
-      selectorAgent.initializeSession({
+      // Use a Promise wrapper to catch async errors from the SDK
+      const initPromise = selectorAgent.initializeSession({
         cwd: options.cwd || process.cwd(),
         onTextChunk: (text) => {
           if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1703,15 +2358,26 @@ function registerSelectorAgentHandlers() {
           }
         },
         onError: (error) => {
+          console.error('[SelectorAgent] Session error:', error)
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('selector-agent:error', error)
           }
         },
         onReady: () => {
+          console.log('[SelectorAgent] Session ready')
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('selector-agent:ready')
           }
         },
+      })
+
+      // Catch async errors from the SDK (e.g., "process exited with code 1")
+      initPromise.catch((error) => {
+        console.error('[SelectorAgent] Init failed:', error)
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('selector-agent:error',
+            error instanceof Error ? error.message : 'Session initialization failed')
+        }
       })
 
       return { success: true }
@@ -1730,7 +2396,8 @@ function registerSelectorAgentHandlers() {
       await selectorAgent.primeContext(context)
       return { success: true }
     } catch (error) {
-      console.error('Error priming selector context:', error)
+      // Note: primeContext now returns early if no session, so this shouldn't trigger
+      console.warn('[SelectorAgent] Prime context issue (non-critical):', error instanceof Error ? error.message : error)
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -1910,6 +2577,28 @@ function registerMCPHandlers() {
       return { success: false, status: {}, error: error instanceof Error ? error.message : 'Failed to get status' }
     }
   })
+
+  // Discover MCP servers from Claude Desktop, project, etc.
+  ipcMain.handle('mcp:discover', async (_event, projectPath) => {
+    try {
+      const discovered = await mcp.discoverMcpServers(projectPath)
+      return { success: true, discovered }
+    } catch (error) {
+      console.error('[MCP] Discovery error:', error)
+      return { success: false, discovered: {}, error: error instanceof Error ? error.message : 'Failed to discover servers' }
+    }
+  })
+
+  // Probe a discovered server to get its tools
+  ipcMain.handle('mcp:probe', async (_event, serverConfig) => {
+    try {
+      const result = await mcp.probeServer(serverConfig)
+      return { success: true, ...result }
+    } catch (error) {
+      console.error('[MCP] Probe error:', error)
+      return { success: false, tools: null, error: error instanceof Error ? error.message : 'Failed to probe server' }
+    }
+  })
 }
 
 // ============================================
@@ -2022,17 +2711,23 @@ function registerFastApplyHandlers() {
           activeModel: null,
           modelLoaded: false,
           downloadedModels: [],
+          enabled: false,
           storageDir: path.join(app.getPath('userData'), 'models', 'fast-apply'),
         }
       }
       const status = await fa.getStatus()
-      return status
+      // Add enabled flag from config
+      return {
+        ...status,
+        enabled: fa.isEnabled(),
+      }
     } catch (error) {
       return {
         ready: false,
         activeModel: null,
         modelLoaded: false,
         downloadedModels: [],
+        enabled: false,
         storageDir: path.join(app.getPath('userData'), 'models', 'fast-apply'),
         error: error.message,
       }
@@ -2129,7 +2824,7 @@ function registerFastApplyHandlers() {
     }
   })
 
-  // Load model into memory
+  // Load model into memory (also sets enabled=true for persistence)
   ipcMain.handle('fast-apply:load', async () => {
     try {
       const fa = getFastApply()
@@ -2138,7 +2833,8 @@ function registerFastApplyHandlers() {
       }
       console.log('[FastApply IPC] Loading model into memory...')
       await fa.load()
-      console.log('[FastApply IPC] Model loaded successfully')
+      fa.setEnabled(true)  // Persist enabled state so it auto-loads on restart
+      console.log('[FastApply IPC] Model loaded successfully, enabled state persisted')
       return { success: true }
     } catch (error) {
       console.error('[FastApply IPC] Load error:', error)
@@ -2146,12 +2842,13 @@ function registerFastApplyHandlers() {
     }
   })
 
-  // Unload model to free memory
+  // Unload model to free memory (also sets enabled=false)
   ipcMain.handle('fast-apply:unload', async () => {
     try {
       const fa = getFastApply()
       if (fa) {
         await fa.unload()
+        fa.setEnabled(false)  // Persist disabled state
       }
       return { success: true }
     } catch (error) {
@@ -2162,8 +2859,86 @@ function registerFastApplyHandlers() {
   console.log('[FastApply] IPC handlers registered')
 }
 
-function createWindow() {
-  mainWindow = new BrowserWindow({
+// ============================================================================
+// Agent SDK Handlers (Claude 4.5+ models with full streaming)
+// ============================================================================
+
+function registerAgentSdkHandlers() {
+  // Stream chat with Agent SDK
+  ipcMain.handle('agent-sdk:stream', async (_event, options) => {
+    const requestId = options.requestId || require('crypto').randomUUID()
+    options.requestId = requestId
+
+    // Start streaming in background
+    agentSdkWrapper.streamChat(options).catch(error => {
+      console.error('[Agent-SDK] Stream handler error:', error)
+      mainWindow.webContents.send('agent-sdk:error', { requestId, error: error.message })
+    })
+
+    return { success: true, requestId }
+  })
+
+  // Send follow-up message
+  ipcMain.handle('agent-sdk:send-message', async (_event, text) => {
+    try {
+      await agentSdkWrapper.sendMessage(text)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Stop current response
+  ipcMain.handle('agent-sdk:stop', async () => {
+    try {
+      const interrupted = await agentSdkWrapper.interruptCurrentResponse()
+      return { success: true, interrupted }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Reset session
+  ipcMain.handle('agent-sdk:reset', async () => {
+    try {
+      await agentSdkWrapper.resetSession()
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Check if session is active
+  ipcMain.handle('agent-sdk:is-active', () => {
+    return { active: agentSdkWrapper.isSessionActive() }
+  })
+
+  // Check if model supports Agent SDK
+  ipcMain.handle('agent-sdk:supports-model', (_event, modelId) => {
+    return { supported: agentSdkWrapper.supportsAgentSDK(modelId) }
+  })
+
+  console.log('[Agent-SDK] IPC handlers registered')
+}
+
+// Create a new window, optionally locked to a project
+// Returns { windowId, window } or focuses existing window if project already open
+function createWindow(options = {}) {
+  const { projectPath = null, projectName = null } = options
+
+  // If projectPath specified, check if already open in another window
+  if (projectPath) {
+    const existingWindow = getWindowByProject(projectPath)
+    if (existingWindow) {
+      // Focus the existing window instead of creating a new one
+      console.log(`[Window] Project already open in window ${existingWindow.id}, focusing`)
+      existingWindow.window.focus()
+      return { windowId: existingWindow.id, window: existingWindow.window, alreadyOpen: true }
+    }
+  }
+
+  const windowId = nextWindowId++
+  const newWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     backgroundColor: '#1a1a1a',
@@ -2178,12 +2953,44 @@ function createWindow() {
     },
   })
 
+  // Register window in registry
+  windowRegistry.set(windowId, {
+    window: newWindow,
+    projectPath,
+    projectName
+  })
+
+  // Track window close to clean up registry
+  newWindow.on('closed', () => {
+    console.log(`[Window] Window ${windowId} closed, removing from registry`)
+    windowRegistry.delete(windowId)
+    // If this was mainWindow, clear it
+    if (mainWindow === newWindow) {
+      mainWindow = null
+    }
+    // Notify other windows about the change
+    sendToAllWindows('window:registry-changed', getAllProjectWindows())
+    // Update application menu to reflect closed window
+    updateApplicationMenu()
+  })
+
+  // Update menu when window gains focus to show correct checkmarks
+  newWindow.on('focus', () => {
+    updateApplicationMenu()
+  })
+
+  // Set as mainWindow for backwards compatibility (first window or newest)
+  mainWindow = newWindow
+
+  // Store windowId on the BrowserWindow for IPC handlers to identify
+  newWindow.windowId = windowId
+
   // Configure webview security for preload script
   // SECURITY NOTE: contextIsolation is disabled for the webview because the inspector
   // functionality requires DOM manipulation and React fiber access in the page context.
   // This is a known tradeoff - mitigations are applied below.
   // Future improvement: Migrate to contextBridge with webContents.executeJavaScript for source location.
-  mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+  newWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
     console.log('will-attach-webview called')
     console.log('params.preload:', params.preload)
 
@@ -2215,37 +3022,109 @@ function createWindow() {
   })
 
   // Block dangerous permission requests from webviews
-  mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
-    const allowedPermissions = ['clipboard-read', 'clipboard-write']
+  newWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+    const allowedPermissions = ['clipboard-read', 'clipboard-write', 'media']
     const isAllowed = allowedPermissions.includes(permission)
     console.log(`Permission request: ${permission} -> ${isAllowed ? 'allowed' : 'denied'}`)
     callback(isAllowed)
   })
 
-  // Block dangerous navigation in webviews (file://, javascript:, data: URIs)
-  mainWindow.webContents.on('will-navigate', (event, url) => {
-    const parsed = new URL(url)
-    const blockedProtocols = ['file:', 'javascript:', 'data:', 'vbscript:']
-    if (blockedProtocols.includes(parsed.protocol)) {
-      console.warn(`Blocked navigation to dangerous URL: ${url}`)
-      event.preventDefault()
+  // Helper to check if URL is local (localhost, file://, etc.)
+  const isLocalUrl = (url) => {
+    try {
+      const parsed = new URL(url)
+      const localHosts = ['localhost', '127.0.0.1', '0.0.0.0', '[::1]']
+      return (
+        parsed.protocol === 'file:' ||
+        localHosts.includes(parsed.hostname) ||
+        parsed.hostname.endsWith('.local') ||
+        parsed.hostname.endsWith('.localhost')
+      )
+    } catch {
+      // If URL parsing fails, treat as local (relative paths, etc.)
+      return true
+    }
+  }
+
+  // Block dangerous navigation in main window (file://, javascript:, data: URIs)
+  // AND prevent navigating away from local URLs
+  newWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const parsed = new URL(url)
+      const blockedProtocols = ['javascript:', 'data:', 'vbscript:']
+      if (blockedProtocols.includes(parsed.protocol)) {
+        console.warn(`Blocked navigation to dangerous URL: ${url}`)
+        event.preventDefault()
+        return
+      }
+    } catch {
+      // URL parsing failed, allow it
     }
   })
 
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show()
+  // Handle webview navigation - open external URLs in system browser
+  newWindow.webContents.on('did-attach-webview', (event, webContents) => {
+    // Block external URL navigation in webviews - open in system browser instead
+    webContents.on('will-navigate', (navEvent, url) => {
+      if (!isLocalUrl(url)) {
+        console.log(`[Webview] External URL detected, opening in system browser: ${url}`)
+        navEvent.preventDefault()
+        shell.openExternal(url).catch((err) => {
+          console.error('Failed to open external URL:', err)
+        })
+      }
+    })
+
+    // Handle new window requests (target="_blank", window.open, etc.) in webviews
+    webContents.setWindowOpenHandler(({ url }) => {
+      if (!isLocalUrl(url)) {
+        console.log(`[Webview] New window request for external URL, opening in system browser: ${url}`)
+        shell.openExternal(url).catch((err) => {
+          console.error('Failed to open external URL:', err)
+        })
+      }
+      // Always deny new windows - external links open in system browser
+      return { action: 'deny' }
+    })
+  })
+
+  newWindow.once('ready-to-show', () => {
+    newWindow.show()
+    // Send window info to renderer once ready
+    newWindow.webContents.send('window:info', {
+      windowId,
+      projectPath,
+      projectName
+    })
   })
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:3000')
-    mainWindow.webContents.openDevTools()
+    // Pass windowId and project info via URL params so renderer knows its identity
+    const urlParams = new URLSearchParams()
+    urlParams.set('windowId', String(windowId))
+    if (projectPath) urlParams.set('projectPath', projectPath)
+    if (projectName) urlParams.set('projectName', projectName)
+    newWindow.loadURL(`http://localhost:3000?${urlParams.toString()}`)
+    newWindow.webContents.openDevTools()
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+    // For production, pass via hash (index.html can't take query params directly)
+    const urlParams = new URLSearchParams()
+    urlParams.set('windowId', String(windowId))
+    if (projectPath) urlParams.set('projectPath', projectPath)
+    if (projectName) urlParams.set('projectName', projectName)
+    newWindow.loadFile(path.join(__dirname, '../dist/index.html'), {
+      hash: urlParams.toString()
+    })
   }
+
+  console.log(`[Window] Created window ${windowId}${projectPath ? ` for project: ${projectPath}` : ' (no project)'}`)
+
+  return { windowId, window: newWindow, alreadyOpen: false }
 }
 
 app.whenReady().then(async () => {
   registerHandlers()
+  registerWindowHandlers()  // Multi-window support
   registerGitHandlers()
   registerOAuthHandlers()
   registerCodexHandlers()
@@ -2253,6 +3132,7 @@ app.whenReady().then(async () => {
   registerMCPHandlers()
   registerSelectorAgentHandlers()
   registerFastApplyHandlers()
+  registerAgentSdkHandlers()
 
   // Register AI SDK handlers and initialize
   aiSdkWrapper.registerHandlers()
@@ -2265,9 +3145,33 @@ app.whenReady().then(async () => {
 
   createWindow()
 
-  // Set main window reference for MCP events and AI SDK events
+  // Build application menu with Window submenu
+  buildApplicationMenu()
+
+  // Set main window reference for MCP events, AI SDK events, Agent SDK events, and file watcher
   mcp.setMainWindow(mainWindow)
   aiSdkWrapper.setMainWindow(mainWindow)
+  agentSdkWrapper.setMainWindow(mainWindow)
+  fileWatcher.setMainWindow(mainWindow)
+  lsp.setMainWindow(mainWindow)
+  mgrep.setMainWindow(mainWindow)
+
+  // Auto-load Fast Apply if it was enabled in previous session
+  try {
+    const fa = getFastApply()
+    if (fa && fa.isEnabled() && fa.getActiveModel()) {
+      console.log('[FastApply] Auto-loading model (was enabled in previous session)...')
+      fa.load().then(() => {
+        console.log('[FastApply] Model auto-loaded successfully')
+      }).catch((err) => {
+        console.warn('[FastApply] Auto-load failed:', err.message)
+        // Clear enabled state if auto-load fails
+        fa.setEnabled(false)
+      })
+    }
+  } catch (err) {
+    console.warn('[FastApply] Auto-load check failed:', err.message)
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -2277,6 +3181,9 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  // Stop all file watchers before quitting
+  fileWatcher.stopAll()
+  mgrep.shutdown()
   if (process.platform !== 'darwin') {
     app.quit()
   }

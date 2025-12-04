@@ -466,6 +466,97 @@ interface ElectronAISdkAPI {
     onComplete?: (fullText: string) => void
     onError?: (error: string) => void
   }) => Promise<{ success: boolean; error?: string }>
+  // V2 API additions
+  initialize: () => Promise<{ success: boolean }>
+  stream: (options: {
+    requestId: string
+    modelId: string
+    messages: Array<{ role: string; content: string }>
+    providers: Record<string, string>
+    system?: string
+    tools?: Record<string, { description: string; parameters: Record<string, unknown> }>
+    maxSteps?: number
+    enableReasoning?: boolean
+    mcpTools?: Array<{ name: string; description?: string; inputSchema: { type: string; properties?: Record<string, unknown>; required?: string[] }; serverId: string }>
+    projectFolder?: string
+  }) => Promise<{ success: boolean; requestId: string }>
+  generate: (options: {
+    modelId: string
+    messages: Array<{ role: string; content: string }>
+    providers: Record<string, string>
+    system?: string
+    tools?: Record<string, { description: string; parameters: Record<string, unknown> }>
+    maxSteps?: number
+    mcpTools?: Array<{ name: string; description?: string; inputSchema: { type: string; properties?: Record<string, unknown>; required?: string[] }; serverId: string }>
+    projectFolder?: string
+  }) => Promise<{
+    success: boolean
+    text?: string
+    toolCalls?: Array<{ toolCallId: string; toolName: string; args: unknown }>
+    toolResults?: Array<{ toolCallId: string; toolName: string; result: unknown }>
+    finishReason?: string
+    error?: string
+  }>
+  executeMCPTool: (serverId: string, toolName: string, args: Record<string, unknown>) => Promise<{
+    success: boolean
+    content?: Array<{ type: string; text?: string }>
+    error?: string
+  }>
+  getModels: () => Promise<{ models: string[]; providers: string[] }>
+  getProvider: (modelId: string) => Promise<{ provider: string | null }>
+  onTextChunk: (callback: (data: { requestId: string; chunk: string }) => void) => () => void
+  onStepFinish: (callback: (data: {
+    requestId: string
+    text: string
+    toolCalls: Array<{ toolCallId: string; toolName: string; args: unknown }>
+    toolResults: Array<{ toolCallId: string; toolName: string; result: unknown }>
+  }) => void) => () => void
+  onComplete: (callback: (data: {
+    requestId: string
+    text: string
+    reasoning?: string
+    toolCalls?: Array<{ toolCallId: string; toolName: string; args: unknown }>
+    toolResults?: Array<{ toolCallId: string; toolName: string; result: unknown }>
+    finishReason: string
+  }) => void) => () => void
+  onError: (callback: (data: { requestId: string; error: string }) => void) => () => void
+  removeAllListeners: () => void
+  webSearch: (query: string, maxResults?: number) => Promise<{
+    success: boolean
+    query?: string
+    results?: Array<{ title: string; url: string; snippet: string }>
+    count?: number
+    error?: string
+  }>
+}
+
+// Agent SDK API (Claude 4.5+ models with extended thinking and streaming)
+interface ElectronAgentSdkAPI {
+  stream: (options: {
+    requestId: string
+    modelId: string
+    messages: Array<{ role: string; content: string }>
+    system?: string
+    maxThinkingTokens?: number
+    projectFolder?: string
+    mcpTools?: Array<{ name: string; description?: string; inputSchema: { type: string; properties?: Record<string, unknown>; required?: string[] }; serverId: string }>
+  }) => Promise<void>
+  sendMessage: (text: string) => Promise<void>
+  stop: () => Promise<boolean>
+  reset: () => Promise<void>
+  isActive: () => Promise<boolean>
+  supportsModel: (modelId: string) => Promise<boolean>
+  onTextChunk: (callback: (data: { requestId: string; chunk: string }) => void) => () => void
+  onThinkingStart: (callback: (data: { requestId: string; index: number }) => void) => () => void
+  onThinkingChunk: (callback: (data: { requestId: string; chunk: string; index: number }) => void) => () => void
+  onToolStart: (callback: (data: { requestId: string; toolCallId: string; toolName: string; index: number }) => void) => () => void
+  onToolInputDelta: (callback: (data: { requestId: string; toolCallId: string; delta: string; index: number }) => void) => () => void
+  onToolResult: (callback: (data: { requestId: string; toolCallId: string; result: string; isError: boolean }) => void) => () => void
+  onBlockStop: (callback: (data: { requestId: string; index: number }) => void) => () => void
+  onComplete: (callback: (data: { requestId: string; text: string; thinking?: string }) => void) => () => void
+  onError: (callback: (data: { requestId: string; error: string }) => void) => () => void
+  onInterrupted: (callback: (data: { requestId: string }) => void) => () => void
+  removeAllListeners: () => void
 }
 
 // Fast Apply types (Local LLM for instant code merging) - Pro Feature
@@ -578,10 +669,356 @@ interface ElectronSelectorAgentAPI {
   onError: (callback: (error: string) => void) => () => void
 }
 
+// File Watcher API
+interface FileWatcherEvent {
+  type: 'add' | 'change' | 'unlink'
+  path: string
+  relativePath: string
+  projectPath: string
+  timestamp: number
+}
+
+interface ElectronFileWatcherAPI {
+  start: (projectPath: string) => Promise<{ success: boolean; alreadyWatching?: boolean }>
+  stop: (projectPath: string) => Promise<{ success: boolean; wasNotWatching?: boolean }>
+  getWatched: () => Promise<string[]>
+  onChange: (callback: (event: FileWatcherEvent) => void) => () => void
+}
+
+// Background Validator API
+interface ValidationIssue {
+  file: string
+  relativePath: string
+  line: number
+  column: number
+  severity: 'error' | 'warning'
+  code: string
+  message: string
+  tool: 'typescript' | 'eslint'
+  fixable?: boolean
+}
+
+interface ValidationResult {
+  tool: string
+  success: boolean
+  issues: ValidationIssue[]
+  skipped?: boolean
+  raw?: string
+}
+
+interface ValidationEvent {
+  type: 'start' | 'complete' | 'error'
+  projectPath: string
+  timestamp: number
+  changedFiles?: string[]
+  results?: ValidationResult[]
+  issues?: ValidationIssue[]
+  summary?: {
+    errors: number
+    warnings: number
+    total: number
+  }
+}
+
+interface ValidationState {
+  running: boolean
+  issues: ValidationIssue[]
+  lastRun?: number
+  lastComplete?: number
+}
+
+interface ElectronValidatorAPI {
+  trigger: (projectPath: string) => Promise<{ results: ValidationResult[]; issues: ValidationIssue[] }>
+  getState: (projectPath: string) => Promise<ValidationState>
+  clear: (projectPath: string) => Promise<{ success: boolean }>
+  onEvent: (callback: (event: ValidationEvent) => void) => () => void
+}
+
+// Agent Todos Aggregation API
+interface AgentTodo {
+  id: string
+  text: string
+  completed: boolean
+  status?: 'pending' | 'in_progress' | 'completed'
+  priority?: 'low' | 'medium' | 'high'
+  agent: string
+  source: string
+  line?: number
+  createdAt: string
+}
+
+interface AgentInfo {
+  id: string
+  name: string
+  icon: string
+  color: string
+  count?: number
+}
+
+interface AgentTodosScanResult {
+  todos: AgentTodo[]
+  agents: Record<string, AgentInfo>
+}
+
+interface ElectronAgentTodosAPI {
+  scan: (projectPath: string) => Promise<AgentTodosScanResult>
+  getAgents: () => Promise<AgentInfo[]>
+  getAgentInfo: (agentId: string) => Promise<AgentInfo | null>
+}
+
+// LSP Diagnostic from language servers
+interface LSPDiagnostic {
+  range: {
+    start: { line: number; character: number }
+    end: { line: number; character: number }
+  }
+  severity?: 1 | 2 | 3 | 4 // Error, Warning, Info, Hint
+  code?: string | number
+  source?: string
+  message: string
+  relatedInformation?: Array<{
+    location: { uri: string; range: LSPDiagnostic['range'] }
+    message: string
+  }>
+}
+
+// LSP Hover result
+interface LSPHoverResult {
+  contents: string | { kind: 'plaintext' | 'markdown'; value: string } | Array<string | { kind: string; value: string }>
+  range?: LSPDiagnostic['range']
+}
+
+// LSP Completion item
+interface LSPCompletionItem {
+  label: string
+  kind?: number
+  detail?: string
+  documentation?: string | { kind: string; value: string }
+  sortText?: string
+  filterText?: string
+  insertText?: string
+  textEdit?: {
+    range: LSPDiagnostic['range']
+    newText: string
+  }
+}
+
+// LSP Location (for definition/references)
+interface LSPLocation {
+  uri: string
+  range: LSPDiagnostic['range']
+}
+
+// LSP Server status for UI
+interface LSPServerStatus {
+  id: string
+  name: string
+  extensions: string[]
+  enabled: boolean
+  installed: boolean
+  installable: boolean
+  running: boolean
+  instances: Array<{
+    root: string
+    openDocuments: number
+    diagnosticCount: number
+  }>
+}
+
+// LSP Event types
+interface LSPEvent {
+  type: 'diagnostics' | 'server-started' | 'server-closed' | 'server-status-changed'
+  path?: string
+  diagnostics?: LSPDiagnostic[]
+  serverId?: string
+  root?: string
+  enabled?: boolean
+}
+
+interface LSPInstallProgress {
+  serverId: string
+  stage: 'installing' | 'fetching' | 'downloading' | 'extracting' | 'complete'
+  package?: string
+  size?: number
+}
+
+interface LSPCacheInfo {
+  cacheDir: string
+  binDir: string
+  nodeModulesDir: string
+  cacheSize: number
+  cacheVersion: string
+}
+
+interface ElectronLSPAPI {
+  init: (projectPath: string) => Promise<{ success: boolean; error?: string }>
+  shutdown: () => Promise<{ success: boolean; error?: string }>
+  getStatus: () => Promise<{ success: boolean; data?: LSPServerStatus[]; error?: string }>
+  touchFile: (filePath: string, waitForDiagnostics?: boolean) => Promise<{ success: boolean; clientCount?: number; error?: string }>
+  fileChanged: (filePath: string, content?: string) => Promise<{ success: boolean; error?: string }>
+  fileSaved: (filePath: string) => Promise<{ success: boolean; error?: string }>
+  getDiagnostics: () => Promise<{ success: boolean; data?: Record<string, LSPDiagnostic[]>; error?: string }>
+  getDiagnosticsForFile: (filePath: string) => Promise<{ success: boolean; data?: LSPDiagnostic[]; error?: string }>
+  getDiagnosticsForFiles: (filePaths: string[]) => Promise<{ success: boolean; data?: Record<string, LSPDiagnostic[]>; error?: string }>
+  hover: (filePath: string, line: number, character: number) => Promise<{ success: boolean; data?: LSPHoverResult | null; error?: string }>
+  completion: (filePath: string, line: number, character: number) => Promise<{ success: boolean; data?: LSPCompletionItem[]; error?: string }>
+  definition: (filePath: string, line: number, character: number) => Promise<{ success: boolean; data?: LSPLocation | LSPLocation[] | null; error?: string }>
+  references: (filePath: string, line: number, character: number) => Promise<{ success: boolean; data?: LSPLocation[]; error?: string }>
+  setServerEnabled: (serverId: string, enabled: boolean) => Promise<{ success: boolean; error?: string }>
+  installServer: (serverId: string) => Promise<{ success: boolean; path?: string; error?: string }>
+  getCacheInfo: () => Promise<{ success: boolean; data?: LSPCacheInfo; error?: string }>
+  clearCache: () => Promise<{ success: boolean; error?: string }>
+  onEvent: (callback: (event: LSPEvent) => void) => () => void
+  onInstallProgress: (callback: (progress: LSPInstallProgress) => void) => () => void
+}
+
+// Mgrep (Local Semantic Code Search) types
+interface MgrepIndexStats {
+  totalFiles: number
+  totalChunks: number
+  totalEmbeddings: number
+  databaseSize: number
+  lastIndexedAt: string | null
+}
+
+interface MgrepStatus {
+  ready: boolean
+  indexing: boolean
+  stats: MgrepIndexStats | null
+  projectPath: string | null
+  error: string | null
+}
+
+interface MgrepFileChangeEvent {
+  filePath: string
+  eventType: 'added' | 'modified' | 'deleted'
+  timestamp: number
+}
+
+interface MgrepSearchOptions {
+  limit?: number
+  threshold?: number
+}
+
+interface MgrepSearchResult {
+  filePath: string
+  chunkIndex: number
+  content: string
+  similarity: number
+  metadata: {
+    startLine: number
+    endLine: number
+    language: string
+    functionName?: string
+    classScope?: string
+    isDocstring?: boolean
+  }
+}
+
+interface MgrepEvent {
+  type: 'ready' | 'indexing-start' | 'indexing-progress' | 'indexing-complete' | 'scanning-start' | 'scanning-complete' | 'file-indexed' | 'stats-updated' | 'error'
+  projectPath?: string
+  stats?: MgrepIndexStats
+  totalFiles?: number
+  filesFound?: number
+  filesProcessed?: number
+  current?: number
+  total?: number
+  currentFile?: string
+  totalChunks?: number
+  chunksIndexed?: number
+  filePath?: string
+  chunks?: number
+  error?: string
+}
+
+// Multi-project status
+interface MgrepProjectStatus {
+  projectPath: string
+  ready: boolean
+  indexing: boolean
+  stats: MgrepIndexStats | null
+  error: string | null
+  isActive: boolean
+}
+
+interface ElectronMgrepAPI {
+  initialize: (projectPath: string) => Promise<{ success: boolean; message?: string; error?: string }>
+  search: (query: string, options?: MgrepSearchOptions & { projectPath?: string }) => Promise<{ success: boolean; results?: MgrepSearchResult[]; projectPath?: string; error?: string }>
+  indexFile: (filePath: string, content: string, projectDir?: string) => Promise<{ success: boolean; chunks?: number; error?: string }>
+  indexFiles: (files: Array<{ filePath: string; content: string }>, projectDir?: string) => Promise<{ success: boolean; filesProcessed?: number; totalChunks?: number; error?: string }>
+  onFileChange: (event: MgrepFileChangeEvent) => Promise<{ success: boolean; error?: string }>
+  getStatus: (projectPath?: string) => Promise<{ success: boolean; status?: MgrepStatus; error?: string }>
+  getStats: (projectPath?: string) => Promise<{ success: boolean; stats?: MgrepIndexStats; projectPath?: string; error?: string }>
+  clearIndex: (projectPath?: string) => Promise<{ success: boolean; projectPath?: string; error?: string }>
+  resync: (projectPath: string) => Promise<{ success: boolean; filesProcessed?: number; totalChunks?: number; error?: string }>
+  // Multi-project APIs
+  getAllProjectsStatus: () => Promise<{ success: boolean; projects?: MgrepProjectStatus[]; error?: string }>
+  setActiveProject: (projectPath: string) => Promise<{ success: boolean; error?: string }>
+  removeProject: (projectPath: string) => Promise<{ success: boolean; error?: string }>
+  onEvent: (callback: (event: MgrepEvent) => void) => () => void
+}
+
+// Window Management API (Multi-window support with project locking)
+interface WindowInfo {
+  windowId: number | null
+  projectPath: string | null
+  projectName: string | null
+}
+
+interface WindowLockResult {
+  success: boolean
+  message?: string
+  error?: string
+  windowId?: number
+  projectPath?: string
+  projectName?: string
+  currentProject?: string
+  existingWindowId?: number
+}
+
+interface WindowOpenResult {
+  success: boolean
+  action: 'focused' | 'created'
+  windowId: number
+  alreadyOpen: boolean
+}
+
+interface WindowNewResult {
+  success: boolean
+  windowId: number
+}
+
+interface WindowIsOpenResult {
+  isOpen: boolean
+  windowId: number | null
+}
+
+interface WindowEntry {
+  id: number
+  projectPath: string | null
+  projectName: string | null
+  isFocused: boolean
+}
+
+interface ElectronWindowAPI {
+  getInfo: () => Promise<WindowInfo>
+  lockProject: (projectPath: string, projectName: string) => Promise<WindowLockResult>
+  openProject: (projectPath: string, projectName: string) => Promise<WindowOpenResult>
+  new: () => Promise<WindowNewResult>
+  isProjectOpen: (projectPath: string) => Promise<WindowIsOpenResult>
+  getAll: () => Promise<WindowEntry[]>
+  focus: (windowId: number) => Promise<{ success: boolean; error?: string }>
+  close: (windowId: number) => Promise<{ success: boolean; error?: string }>
+  onInfo: (callback: (info: WindowInfo) => void) => () => void
+  onRegistryChanged: (callback: (windows: WindowEntry[]) => void) => () => void
+}
+
 interface ElectronAPI {
   git: ElectronGitAPI
   files: ElectronFilesAPI
   aiSdk: ElectronAISdkAPI
+  agentSdk?: ElectronAgentSdkAPI
   oauth: ElectronOAuthAPI
   codex: ElectronCodexAPI
   api: ElectronApiAPI
@@ -591,6 +1028,12 @@ interface ElectronAPI {
   voice?: ElectronVoiceAPI
   tabdata?: ElectronTabDataAPI
   fastApply?: ElectronFastApplyAPI
+  fileWatcher?: ElectronFileWatcherAPI
+  validator?: ElectronValidatorAPI
+  agentTodos?: ElectronAgentTodosAPI
+  lsp?: ElectronLSPAPI
+  mgrep?: ElectronMgrepAPI
+  window?: ElectronWindowAPI
   getWebviewPreloadPath: () => Promise<string>
   isElectron: boolean
 }

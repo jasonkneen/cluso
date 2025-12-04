@@ -29,8 +29,9 @@ interface ProjectInfo {
 interface ProjectSetupFlowProps {
   projectPath: string
   projectName: string
+  initialPort?: number // Use saved port if available
   isDarkMode: boolean
-  onComplete: (url: string) => void
+  onComplete: (url: string, port: number) => void
   onCancel: () => void
 }
 
@@ -159,6 +160,7 @@ const DEFAULT_PORTS: Record<string, number> = {
 export function ProjectSetupFlow({
   projectPath,
   projectName,
+  initialPort,
   isDarkMode,
   onComplete,
   onCancel
@@ -403,8 +405,10 @@ export function ProjectSetupFlow({
   }, [hasRun, runSetup])
 
   const handleLaunch = () => {
-    const url = `http://localhost:${projectInfo.port || 3000}`
-    onComplete(url)
+    // User-specified port (from edit) takes priority over auto-detected port
+    const port = initialPort || projectInfo.port || 3000
+    const url = `http://localhost:${port}`
+    onComplete(url, port)
   }
 
   const getStepIcon = (status: SetupStep['status']) => {
@@ -433,11 +437,13 @@ export function ProjectSetupFlow({
         {projectPath}
       </p>
 
-      {/* Tech Stack Chips */}
+      {/* Tech Stack Chips - deduplicated by name */}
       <div className="flex flex-wrap justify-center content-start gap-2 mb-8 h-[80px] max-w-md overflow-hidden">
-        {visibleChips.map((chip, index) => (
+        {visibleChips
+          .filter((chip, index, arr) => arr.findIndex(c => c.name === chip.name) === index)
+          .map((chip, index) => (
           <span
-            key={`${chip.name}-${index}`}
+            key={chip.name}
             className={`
               px-3 py-1.5 text-xs font-medium rounded-full border
               animate-in fade-in zoom-in-95 duration-200
@@ -532,9 +538,9 @@ export function ProjectSetupFlow({
       </div>
 
       {/* Port info subtle hint */}
-      {isComplete && projectInfo.port && (
+      {isComplete && (
         <p className={`mt-4 text-xs ${isDarkMode ? 'text-neutral-600' : 'text-stone-400'}`}>
-          localhost:{projectInfo.port}
+          localhost:{initialPort || projectInfo.port || 3000}
         </p>
       )}
     </div>

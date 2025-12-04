@@ -687,7 +687,7 @@ const styles = `
   }
 
   .pricing-card.featured::before {
-    content: 'Most Popular';
+    content: 'Cloud Services';
     position: absolute;
     top: -12px;
     left: 50%;
@@ -700,30 +700,8 @@ const styles = `
     border-radius: 9999px;
   }
 
-  .pricing-card.blurred {
-    filter: blur(8px);
-    pointer-events: none;
-    user-select: none;
-    position: relative;
-  }
-
   .pricing-card-wrapper {
     position: relative;
-  }
-
-  .pricing-card-wrapper .coming-soon {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 10;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    padding: 0.5rem 1rem;
-    border-radius: 9999px;
-    font-weight: 600;
-    font-size: 0.9rem;
-    color: var(--text-secondary);
   }
 
   .pricing-card h3 {
@@ -742,6 +720,13 @@ const styles = `
     font-size: 1rem;
     font-weight: 400;
     color: var(--text-secondary);
+  }
+
+  .pricing-card .original-price {
+    font-size: 1rem;
+    color: var(--text-muted);
+    text-decoration: line-through;
+    margin-right: 0.5rem;
   }
 
   .pricing-card .price-note {
@@ -1097,8 +1082,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
             <div className="nav-links">
               <a href="#features">Features</a>
               <a href="#pricing">Pricing</a>
-              <a href="#">Docs</a>
-              <a href="https://github.com/jkneen/flows" target="_blank" rel="noopener noreferrer">Github</a>
+              <a href="#docs">Documentation</a>
               <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
                 {isDark ? (
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1117,18 +1101,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
 
         {/* Hero Section */}
         <section className="hero">
-          <div className="hero-badge">
+          <a href="#downloads" className="hero-badge" style={{ textDecoration: 'none', color: 'inherit' }}>
             <span className="dot"></span>
-            <span>Download</span>
-          </div>
+            <span>Download 3 Day Trial</span>
+          </a>
 
           <h1>
             The <span className="gradient">AI-powered</span> browser<br />for frontend development
           </h1>
 
           <p className="hero-subtitle">
-            Select elements, talk to AI, and watch your UI transform in real-time.
-            Cluso brings voice-powered development to your browser.
+            Inspect any element on the web, describe your changes with your voice, and see them live instantly.
+            The AI-powered browser for developers who think faster than they type.
           </p>
 
           <form className="email-form" onSubmit={handleSubmit} id="download">
@@ -1151,7 +1135,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
             </button>
           </form>
 
-          <p className="hero-note">Join the waitlist to get early access.</p>
+          <p className="hero-note">Join for early access</p>
 
           <div className="hero-image">
             <img
@@ -1235,62 +1219,67 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
 
             <div className="pricing-grid">
               <div className="pricing-card">
-                <h3>Free</h3>
-                <div className="price">$0</div>
-                <p className="price-note">Forever free</p>
+                <h3>Starter Lifetime</h3>
+                <div className="price"><span className="original-price">$79</span>$49</div>
+                <p className="price-note">ONE TIME PAYMENT</p>
                 <ul>
                   <li>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <polyline points="20 6 9 17 4 12"/>
                     </svg>
-                    Voice-powered UI editing
+                    Fast local edits
                   </li>
                   <li>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <polyline points="20 6 9 17 4 12"/>
                     </svg>
-                    Element selection & inspection
+                    Bring your own keys
                   </li>
                   <li>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <polyline points="20 6 9 17 4 12"/>
                     </svg>
-                    Real-time preview
+                    Private data
                   </li>
                   <li>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <polyline points="20 6 9 17 4 12"/>
                     </svg>
-                    Basic AI requests
+                    Free updates for life
                   </li>
                 </ul>
-                <a href="#download" className="btn btn-secondary">Get Started</a>
+                <a href="#plans" className="btn btn-secondary">Download 3 Day Trial</a>
               </div>
 
               <div className="pricing-card-wrapper">
-                <span className="coming-soon">Coming Soon</span>
-                <div className="pricing-card featured blurred">
+                <div className="pricing-card featured">
                   <h3>Pro</h3>
-                  <div className="price">$19<span>/mo</span></div>
+                  <div className="price"><span className="original-price">$29</span>$19<span>/mo</span></div>
                   <p className="price-note">For serious developers</p>
                   <ul>
                     <li>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12"/>
                       </svg>
-                      Everything in Free
+                      Ultra fast cloud edits
                     </li>
                     <li>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12"/>
                       </svg>
-                      Unlimited AI requests
+                      Everything in Starter
                     </li>
                     <li>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12"/>
                     </svg>
-                      Advanced code generation
+                      Cloud memory
+                    </li>
+                    <li>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Unlimited context
                     </li>
                     <li>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1299,15 +1288,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                       Priority support
                     </li>
                   </ul>
-                  <a href="#download" className="btn btn-primary">Start Free Trial</a>
+                  <a href="#plans" className="btn btn-primary">Start 7 day trial</a>
                 </div>
               </div>
 
               <div className="pricing-card-wrapper">
-                <span className="coming-soon">Coming Soon</span>
-                <div className="pricing-card blurred">
+                <div className="pricing-card featured">
                   <h3>Team</h3>
-                  <div className="price">$49<span>/mo</span></div>
+                  <div className="price"><span className="original-price">$79</span>$59<span>/mo</span></div>
                   <p className="price-note">Per seat, billed annually</p>
                   <ul>
                     <li>
@@ -1320,24 +1308,30 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12"/>
                       </svg>
-                      Team collaboration
+                      Team keys
                     </li>
                     <li>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12"/>
                       </svg>
-                      Shared component library
+                      Team stats
                     </li>
                     <li>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12"/>
                       </svg>
-                      Admin dashboard
+                      Shared knowledge base
+                    </li>
+                    <li>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Team management
                     </li>
                   </ul>
-                  <a href="#download" className="btn btn-secondary">Contact Sales</a>
-</div>
-</div>
+                  <a href="#plans" className="btn btn-primary">Start 7 day trial</a>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -1350,7 +1344,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               Download Cluso for free and transform how you build user interfaces.
             </p>
             <div className="cta-buttons">
-              <a href="#download" className="btn btn-primary btn-large" style={{ backgroundColor: 'white', color: 'black' }}>
+              <a href="#downloads" className="btn btn-primary btn-large" style={{ backgroundColor: 'white', color: 'black' }}>
                 Download Now
               </a>
             </div>
@@ -1392,15 +1386,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                 <ul>
                   <li><a href="#features">Features</a></li>
                   <li><a href="#pricing">Pricing</a></li>
-                  <li><a href="#download">Join Waitlist</a></li>
+                  <li><a href="#downloads">Download</a></li>
                 </ul>
               </div>
 
               <div className="footer-links">
                 <h4>Resources</h4>
                 <ul>
-                  <li><a href="#" >Docs</a></li>
-                  <li style={{ display: 'none' }}><a href="https://github.com/jkneen/flows" target="_blank" rel="noopener noreferrer">Github</a></li>
+                  <li><a href="#docs" >Documentation</a></li>
                 </ul>
               </div>
 
@@ -1419,11 +1412,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                 <a href="#" aria-label="Twitter">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-                  </svg>
-                </a>
-                <a href="https://github.com/jkneen/cluso" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
                   </svg>
                 </a>
               </div>

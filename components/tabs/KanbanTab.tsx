@@ -100,7 +100,7 @@ export function KanbanTab({ columns, boardTitle, isDarkMode, onUpdateColumns, on
   }, [columns, draggedCard, onUpdateColumns])
 
   return (
-    <div className={`flex-1 flex flex-col h-full overflow-hidden ${isDarkMode ? 'bg-neutral-900' : 'bg-stone-100'}`}>
+    <div className={`flex-1 flex flex-col h-full overflow-hidden ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`}>
       {/* Header with editable board title */}
       <div className={`px-4 py-3 border-b ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
         {editingBoardTitle ? (
@@ -150,7 +150,7 @@ export function KanbanTab({ columns, boardTitle, isDarkMode, onUpdateColumns, on
           <div
             key={column.id}
             className={`flex-shrink-0 w-72 flex flex-col rounded-xl ${
-              isDarkMode ? 'bg-neutral-800' : 'bg-white'
+              isDarkMode ? 'bg-neutral-700' : 'bg-stone-100'
             } shadow-sm`}
             onDragOver={handleDragOver}
             onDrop={() => handleDrop(column.id)}

@@ -128,3 +128,152 @@ The AI SDK's `@ai-sdk/anthropic` doesn't support OAuth natively. We work around 
 - Client ID: `9d1c250a-e61b-44d9-88ed-5944d1962f5e`
 - Token Endpoint: `https://console.anthropic.com/v1/oauth/token`
 - Scopes: `org:create_api_key user:profile user:inference`
+
+## CRITICAL: Electron Permissions - NEVER Block Media
+
+**Date: December 5, 2025**
+**Issue: Security hardening broke voice functionality**
+
+### What Happened
+A security refactoring commit added a `setPermissionRequestHandler` to block "dangerous" permissions from webviews, but forgot to include `'media'` in the allowed list:
+
+```javascript
+// WRONG - breaks voice input
+const allowedPermissions = ['clipboard-read', 'clipboard-write']
+
+// CORRECT - allows microphone for voice
+const allowedPermissions = ['clipboard-read', 'clipboard-write', 'media']
+```
+
+### The Rule
+**This is a voice-first application.** When adding security restrictions to Electron:
+
+1. **ALWAYS include `'media'` permission** - Required for microphone/voice input
+2. **Test voice after any security changes** - If `Permission request: media -> denied` appears in console, voice is broken
+3. **Check the permission handler** at `electron/main.cjs` line ~2650 before committing security changes
+
+### Permission Handler Location
+```
+electron/main.cjs:
+mainWindow.webContents.session.setPermissionRequestHandler(...)
+```
+
+### Console Indicator
+- `Permission request: media -> allowed` = Voice works
+- `Permission request: media -> denied` = Voice is BROKEN
+
+## Lessons Learned - Debugging and UI Patterns
+
+### Debug Logging with Component Prefixes - CRITICAL
+
+**Date: December 5, 2025**
+**Issue: Mysterious errors in component state, unclear which component was failing**
+
+When debugging across multiple components, add specific prefixes to error messages:
+
+```typescript
+// GOOD - immediately identifies the source
+console.error('[FloatingChatContent] Invalid task state', state);
+console.error('[SidePanel] Invalid step state', state);
+
+// BAD - you don't know where the error came from
+console.error('Invalid state', state);
+```
+
+**Why this matters**: The smoking gun was a LOCAL ENUM with wrong values in FloatingChatContent:
+
+```typescript
+// WRONG (FloatingChatContent)
+enum ExecutionState {
+  TASK_START = 'task_start',    // ❌ underscore
+  STEP_START = 'step_start',    // ❌ underscore
+}
+
+// CORRECT (actual enum from types)
+enum ExecutionState {
+  TASK_START = 'task.start',    // ✅ dot
+  STEP_START = 'step.start',    // ✅ dot
+}
+```
+
+**Fix**: Replace local enum with proper import:
+```typescript
+import { ExecutionState, Actors, AgentEvent } from '../../../../chrome-extension/src/background/agent/event/types';
+```
+
+**Key lesson**: Finding WHERE to fix it is harder than the actual fix. Component-prefixed logging turns "mystery errors everywhere" into "ah, it's THIS component with THESE wrong enum values."
+
+### Z-Index and Stacking Context - CRITICAL
+
+**Date: December 4, 2025**
+**Issue: Widgets appearing above HAL lens despite lens having higher z-index**
+
+Z-index values on child elements don't matter if the parent container isn't part of the stacking context.
+
+**Problem structure**:
+```jsx
+<>
+  {/* Widget Grid */} <div style={{zIndex: 1}}>
+  {/* Widgets */} <div style={{zIndex: 40-50}}>
+  <div className="chat-indicator"> {/* NO z-index! */}
+    <div className="status-container" style={{zIndex: 100000}}>
+      {/* HAL Lens */}
+    </div>
+  </div>
+</>
+```
+
+**Solution**: Add z-index to parent and manage pointer-events:
+```jsx
+<div style={{zIndex: 100000, pointerEvents: 'none'}}>
+  {/* full-screen container, let clicks pass through */}
+  <div style={{pointerEvents: 'auto'}}>
+    {/* lens can receive clicks */}
+  </div>
+</div>
+```
+
+**Z-Index hierarchy**:
+- Widget grid: 1
+- Widgets (inactive): 40
+- Widgets (active): 50
+- HAL lens container: 100000
+- Camera feed: 100001
+
+**Debug command**:
+```bash
+grep -n "zIndex\|z-index" file.tsx file.css
+```
+
+### Drawer/Overlay UI Pattern - CRITICAL MENTAL MODEL
+
+**Date: December 4, 2025**
+**Issue: Wasted 2+ hours on drawer implementation with wrong mental model**
+
+**Correct pattern for "slides up from behind"**:
+```tsx
+<div className="relative">
+  {/* Drawer: BEHIND, slides UP with negative translateY */}
+  <div className="absolute bottom-0 left-0 right-0 z-0"
+       style={{transform: `translateY(${-distance}px)`}}>
+    {drawer content}
+  </div>
+  {/* Input/Panel: IN FRONT */}
+  <div className="relative z-10">
+    {input panel}
+  </div>
+</div>
+```
+
+**What to NEVER do**:
+- `flex-col-reverse` for stacking layers
+- Height animations for slide effects
+- Negative margins for overlap
+- Multiple wrapper divs with complex z-index chains
+
+**Mental model**:
+- "Behind the panel" → z-index LOWER than panel
+- "Slides up" → translateY with NEGATIVE values
+- "Appears above the input" → VISUAL result, NOT z-index order
+
+**When stuck after 2-3 failed attempts**: Ask yourself "absolute positioning + transform or flex layout?" Check the terminology - "behind" means stacking context, not flexbox.

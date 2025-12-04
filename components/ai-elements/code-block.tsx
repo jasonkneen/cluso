@@ -4,15 +4,50 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import {
+  Component,
   type ComponentProps,
   createContext,
+  type ErrorInfo,
   type HTMLAttributes,
+  type ReactNode,
   useContext,
   useEffect,
   useRef,
   useState,
 } from "react";
 import { type BundledLanguage, codeToHtml, type ShikiTransformer } from "shiki";
+
+// Error boundary to prevent code block errors from crashing the app
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  fallback: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+}
+
+class CodeBlockErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(): ErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('[CodeBlock] Render error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+    return this.props.children;
+  }
+}
 
 type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   code: string;
@@ -54,23 +89,34 @@ export async function highlightCode(
   code: string,
   language: BundledLanguage,
   showLineNumbers = false
-) {
+): Promise<[string, string]> {
   const transformers: ShikiTransformer[] = showLineNumbers
     ? [lineNumberTransformer]
     : [];
 
-  return await Promise.all([
-    codeToHtml(code, {
-      lang: language,
-      theme: "one-light",
-      transformers,
-    }),
-    codeToHtml(code, {
-      lang: language,
-      theme: "one-dark-pro",
-      transformers,
-    }),
-  ]);
+  try {
+    return await Promise.all([
+      codeToHtml(code, {
+        lang: language,
+        theme: "one-light",
+        transformers,
+      }),
+      codeToHtml(code, {
+        lang: language,
+        theme: "one-dark-pro",
+        transformers,
+      }),
+    ]);
+  } catch (error) {
+    // Log but don't crash - return escaped HTML fallback
+    console.error('[CodeBlock] Shiki highlighting failed:', error);
+    const escaped = code
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    const fallbackHtml = `<pre><code>${escaped}</code></pre>`;
+    return [fallbackHtml, fallbackHtml];
+  }
 }
 
 export const CodeBlock = ({
@@ -87,13 +133,19 @@ export const CodeBlock = ({
   const mounted = useRef(false);
 
   useEffect(() => {
-    highlightCode(code, language, showLineNumbers).then(([light, dark]) => {
-      if (!mounted.current) {
-        setHtml(light);
-        setDarkHtml(dark);
-        mounted.current = true;
-      }
-    });
+    highlightCode(code, language, showLineNumbers)
+      .then(([light, dark]) => {
+        if (!mounted.current) {
+          setHtml(light);
+          setDarkHtml(dark);
+          mounted.current = true;
+        }
+      })
+      .catch((err) => {
+        // Catch any errors from dynamic imports or highlighting
+        // The fallback HTML is already set in highlightCode, but catch here too
+        console.error('[CodeBlock] Async error caught:', err);
+      });
 
     return () => {
       mounted.current = false;

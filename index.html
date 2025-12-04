@@ -18,6 +18,18 @@
         --border: 231 229 228; /* stone-200 */
         --primary: 28 25 23; /* stone-900 */
         --primary-foreground: 250 250 249; /* stone-50 */
+
+        /* Theme color variables (light mode defaults - matches bg-stone-300) */
+        --color-background: #d6d3d1;
+        --color-foreground: #171717;
+        --color-primary: #2563eb;
+        --color-secondary: #7c3aed;
+        --color-accent: #0891b2;
+        --color-border: #e7e5e4;
+        --color-success: #16a34a;
+        --color-error: #dc2626;
+        --color-warning: #d97706;
+        --color-info: #2563eb;
       }
 
       .dark {
@@ -30,14 +42,145 @@
         --primary-foreground: 255 255 255; /* white */
       }
 
-      /* Code block styling for dark mode - Shiki one-dark-pro theme colors */
-      .dark [data-streamdown="code-block"] {
-        background-color: #282c34 !important;
-        border-color: #3e4451 !important;
+      /* Dark mode theme variables - set on :root when .dark exists anywhere */
+      :root:has(.dark) {
+        --color-background: #171717;
+        --color-foreground: #f5f5f5;
+        --color-primary: #3b82f6;
+        --color-secondary: #8b5cf6;
+        --color-accent: #06b6d4;
+        --color-border: #404040;
+        --color-success: #22c55e;
+        --color-error: #ef4444;
+        --color-warning: #f59e0b;
+        --color-info: #3b82f6;
       }
 
+      /* When a custom theme is applied, use the theme colors */
+      html[data-theme],
+      html[data-theme] body {
+        background-color: var(--color-background) !important;
+        color: var(--color-foreground) !important;
+      }
+
+      /* Theme-aware UI elements */
+      html[data-theme] .theme-root,
+      html[data-theme] .theme-bg {
+        background-color: var(--color-background) !important;
+      }
+      html[data-theme] .theme-fg {
+        color: var(--color-foreground) !important;
+      }
+      html[data-theme] .theme-primary {
+        color: var(--color-primary) !important;
+      }
+      html[data-theme] .theme-border {
+        border-color: var(--color-border) !important;
+      }
+
+      /* Theme root - background comes from CSS variables */
+      .theme-root {
+        background-color: var(--color-background) !important;
+      }
+
+      /* ============================================================
+         THEME OVERRIDE SYSTEM
+         When a custom theme is active (data-theme attribute set),
+         override Tailwind's hardcoded dark mode colors with theme colors
+         ============================================================ */
+
+      /* Panel backgrounds - override bg-neutral-800 and bg-white patterns */
+      /* bg-neutral-900 = base background (darkest for dark themes) */
+      [data-theme] .bg-neutral-900 {
+        background-color: var(--color-background) !important;
+      }
+      /* bg-neutral-800, bg-white = panel backgrounds (lighter for dark themes) */
+      [data-theme] .bg-neutral-800,
+      [data-theme] .bg-white,
+      [data-theme] .bg-stone-50 {
+        background-color: var(--color-panel, var(--color-background)) !important;
+      }
+
+      /* Text colors - override neutral and stone text colors */
+      [data-theme] .text-neutral-100,
+      [data-theme] .text-neutral-200,
+      [data-theme] .text-white {
+        color: var(--color-foreground) !important;
+      }
+      [data-theme] .text-neutral-400,
+      [data-theme] .text-neutral-500,
+      [data-theme] .text-stone-400,
+      [data-theme] .text-stone-500 {
+        color: var(--color-muted, color-mix(in srgb, var(--color-foreground) 60%, transparent)) !important;
+      }
+      [data-theme] .text-stone-900,
+      [data-theme] .text-stone-800,
+      [data-theme] .text-stone-700 {
+        color: var(--color-foreground) !important;
+      }
+
+      /* Border colors - override neutral and stone border colors */
+      [data-theme] .border-neutral-700,
+      [data-theme] .border-neutral-600,
+      [data-theme] .border-stone-200,
+      [data-theme] .border-stone-100 {
+        border-color: var(--color-border) !important;
+      }
+
+      /* Hover states with theme colors */
+      [data-theme] .hover\:bg-neutral-700:hover,
+      [data-theme] .hover\:bg-neutral-600:hover,
+      [data-theme] .hover\:bg-stone-200:hover,
+      [data-theme] .hover\:bg-stone-100:hover {
+        background-color: color-mix(in srgb, var(--color-foreground) 10%, var(--color-background)) !important;
+      }
+
+      /* Active/selected states */
+      [data-theme] .bg-neutral-700,
+      [data-theme] .bg-neutral-600,
+      [data-theme] .bg-stone-200,
+      [data-theme] .bg-stone-100 {
+        background-color: color-mix(in srgb, var(--color-foreground) 15%, var(--color-background)) !important;
+      }
+
+      /* Primary color accents */
+      [data-theme] .text-blue-500,
+      [data-theme] .text-blue-600 {
+        color: var(--color-primary) !important;
+      }
+      [data-theme] .bg-blue-500,
+      [data-theme] .bg-blue-600 {
+        background-color: var(--color-primary) !important;
+      }
+      [data-theme] .border-blue-500,
+      [data-theme] .border-blue-400 {
+        border-color: var(--color-primary) !important;
+      }
+
+      /* Success/Error/Warning colors from theme */
+      [data-theme] .text-green-500,
+      [data-theme] .text-green-600 {
+        color: var(--color-success) !important;
+      }
+      [data-theme] .text-red-500,
+      [data-theme] .text-red-600 {
+        color: var(--color-error) !important;
+      }
+      [data-theme] .text-amber-500,
+      [data-theme] .text-yellow-500 {
+        color: var(--color-warning) !important;
+      }
+
+      /* Code block styling - theme aware */
+      [data-theme] [data-streamdown="code-block"],
+      .dark [data-streamdown="code-block"] {
+        background-color: var(--color-background, #282c34) !important;
+        border-color: var(--color-border, #3e4451) !important;
+      }
+
+      [data-theme] [data-streamdown="code-block"] pre,
       .dark [data-streamdown="code-block"] pre {
-        background-color: #282c34 !important;
+        background-color: var(--color-background, #282c34) !important;
       }
 
       /* Inline code styling */
@@ -48,10 +191,17 @@
 
       body {
         margin: 0;
-        background-color: #09090b; /* zinc-950 */
-        color: #fff;
+        background-color: var(--color-background, #d6d3d1);
+        color: var(--color-foreground, #171717);
         font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
         overflow: hidden;
+      }
+
+      /* Dark mode default body colors */
+      .dark body,
+      body.dark {
+        background-color: var(--color-background, #171717);
+        color: var(--color-foreground, #f5f5f5);
       }
 
       /* IBM Plex Mono for code blocks */

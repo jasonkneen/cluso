@@ -103,6 +103,20 @@ export class FastApply extends EventEmitter {
     await this.manager.setActiveModel(variant, this.options.autoDownload)
   }
 
+  /**
+   * Get whether fast apply should auto-load on startup
+   */
+  isEnabled(): boolean {
+    return this.manager.isEnabled()
+  }
+
+  /**
+   * Set whether fast apply should auto-load on startup
+   */
+  setEnabled(enabled: boolean): void {
+    this.manager.setEnabled(enabled)
+  }
+
   // ============================================
   // Download
   // ============================================

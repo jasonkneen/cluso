@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getCurrentBranch: () => ipcRenderer.invoke('git:getCurrentBranch'),
     getBranches: () => ipcRenderer.invoke('git:getBranches'),
     checkout: (branch) => ipcRenderer.invoke('git:checkout', branch),
+    checkoutFile: (filePath) => ipcRenderer.invoke('git:checkoutFile', filePath),
     createBranch: (name) => ipcRenderer.invoke('git:createBranch', name),
     getStatus: () => ipcRenderer.invoke('git:getStatus'),
     commit: (message) => ipcRenderer.invoke('git:commit', message),
@@ -90,6 +91,53 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Utility operations
     exists: (path) => ipcRenderer.invoke('files:exists', path),
     stat: (path) => ipcRenderer.invoke('files:stat', path),
+  },
+
+  // File watcher operations
+  fileWatcher: {
+    start: (projectPath) => ipcRenderer.invoke('file-watcher:start', projectPath),
+    stop: (projectPath) => ipcRenderer.invoke('file-watcher:stop', projectPath),
+    getWatched: () => ipcRenderer.invoke('file-watcher:get-watched'),
+    // Listen for file change events
+    onChange: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('file-watcher:change', handler)
+      return () => ipcRenderer.removeListener('file-watcher:change', handler)
+    },
+  },
+
+  // Mgrep (local semantic code search) operations - supports multiple concurrent projects
+  mgrep: {
+    // Initialize mgrep for a project (can have multiple active)
+    initialize: (projectPath) => ipcRenderer.invoke('mgrep:initialize', projectPath),
+    // Semantic search (optional projectPath to search specific project)
+    search: (query, options) => ipcRenderer.invoke('mgrep:search', query, options),
+    // Index a single file (auto-routes to correct project)
+    indexFile: (filePath, content, projectPath) => ipcRenderer.invoke('mgrep:index-file', filePath, content, projectPath),
+    // Index multiple files for a specific project
+    indexFiles: (files, projectPath) => ipcRenderer.invoke('mgrep:index-files', files, projectPath),
+    // Handle file change event (auto-routes to correct project)
+    onFileChange: (changeEvent) => ipcRenderer.invoke('mgrep:on-file-change', changeEvent),
+    // Get status for a specific project (or active project if not specified)
+    getStatus: (projectPath) => ipcRenderer.invoke('mgrep:get-status', projectPath),
+    // Get status of ALL indexed projects (new multi-project API)
+    getAllProjectsStatus: () => ipcRenderer.invoke('mgrep:get-all-projects-status'),
+    // Set the active project
+    setActiveProject: (projectPath) => ipcRenderer.invoke('mgrep:set-active-project', projectPath),
+    // Remove a project from tracking
+    removeProject: (projectPath) => ipcRenderer.invoke('mgrep:remove-project', projectPath),
+    // Get stats for a specific project
+    getStats: (projectPath) => ipcRenderer.invoke('mgrep:get-stats', projectPath),
+    // Clear the index for a specific project
+    clearIndex: (projectPath) => ipcRenderer.invoke('mgrep:clear-index', projectPath),
+    // Resync (re-scan and re-index) a project
+    resync: (projectPath) => ipcRenderer.invoke('mgrep:resync', projectPath),
+    // Listen for mgrep events (includes projectPath in event data)
+    onEvent: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('mgrep:event', handler)
+      return () => ipcRenderer.removeListener('mgrep:event', handler)
+    },
   },
 
   // Dialog operations
@@ -218,6 +266,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getPrompt: (serverId, name, args) => ipcRenderer.invoke('mcp:get-prompt', { serverId, name, arguments: args }),
     // Get status of all connections
     getStatus: () => ipcRenderer.invoke('mcp:get-status'),
+    // Discover MCP servers from Claude Desktop, project .mcp.json, etc.
+    discover: (projectPath) => ipcRenderer.invoke('mcp:discover', projectPath),
+    // Probe a discovered server to get its tools
+    probe: (serverConfig) => ipcRenderer.invoke('mcp:probe', serverConfig),
     // Listen for MCP events
     onEvent: (callback) => {
       ipcRenderer.on('mcp:event', (_event, mcpEvent) => callback(mcpEvent))
@@ -275,6 +327,102 @@ contextBridge.exposeInMainWorld('electronAPI', {
     webSearch: (query, maxResults) => ipcRenderer.invoke('ai-sdk:web-search', { query, maxResults }),
   },
 
+  // Agent SDK operations (Claude models with full streaming)
+  agentSdk: {
+    // Stream chat with Agent SDK (for Claude 4.5+ models)
+    stream: (options) => ipcRenderer.invoke('agent-sdk:stream', options),
+    // Send follow-up message to active session
+    sendMessage: (text) => ipcRenderer.invoke('agent-sdk:send-message', text),
+    // Stop current response
+    stop: () => ipcRenderer.invoke('agent-sdk:stop'),
+    // Reset session
+    reset: () => ipcRenderer.invoke('agent-sdk:reset'),
+    // Check if session is active
+    isActive: () => ipcRenderer.invoke('agent-sdk:is-active'),
+    // Check if model supports Agent SDK
+    supportsModel: (modelId) => ipcRenderer.invoke('agent-sdk:supports-model', modelId),
+    // Listen for text chunks
+    onTextChunk: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:text-chunk', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:text-chunk', handler)
+    },
+    // Listen for thinking start
+    onThinkingStart: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:thinking-start', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:thinking-start', handler)
+    },
+    // Listen for thinking chunks
+    onThinkingChunk: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:thinking-chunk', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:thinking-chunk', handler)
+    },
+    // Listen for tool start
+    onToolStart: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:tool-start', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:tool-start', handler)
+    },
+    // Listen for tool input deltas (partial JSON)
+    onToolInputDelta: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:tool-input-delta', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:tool-input-delta', handler)
+    },
+    // Listen for tool results
+    onToolResult: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:tool-result', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:tool-result', handler)
+    },
+    // Listen for block stop
+    onBlockStop: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:block-stop', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:block-stop', handler)
+    },
+    // Listen for completion
+    onComplete: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:complete', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:complete', handler)
+    },
+    // Listen for errors
+    onError: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:error', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:error', handler)
+    },
+    // Listen for interruption
+    onInterrupted: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:interrupted', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:interrupted', handler)
+    },
+    // Listen for file modifications (for edited files drawer)
+    onFileModified: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('ai-sdk:file-modified', handler)
+      return () => ipcRenderer.removeListener('ai-sdk:file-modified', handler)
+    },
+    // Remove all listeners
+    removeAllListeners: () => {
+      ipcRenderer.removeAllListeners('agent-sdk:text-chunk')
+      ipcRenderer.removeAllListeners('agent-sdk:thinking-start')
+      ipcRenderer.removeAllListeners('agent-sdk:thinking-chunk')
+      ipcRenderer.removeAllListeners('agent-sdk:tool-start')
+      ipcRenderer.removeAllListeners('agent-sdk:tool-input-delta')
+      ipcRenderer.removeAllListeners('agent-sdk:tool-result')
+      ipcRenderer.removeAllListeners('agent-sdk:block-stop')
+      ipcRenderer.removeAllListeners('agent-sdk:complete')
+      ipcRenderer.removeAllListeners('agent-sdk:error')
+      ipcRenderer.removeAllListeners('agent-sdk:interrupted')
+      ipcRenderer.removeAllListeners('ai-sdk:file-modified')
+    },
+  },
+
   // Fast Apply (Local LLM for instant code merging) - Pro Feature
   fastApply: {
     // Get current status of Fast Apply
@@ -312,6 +460,108 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const handler = () => callback()
       ipcRenderer.on('fast-apply:model-unloaded', handler)
       return () => ipcRenderer.removeListener('fast-apply:model-unloaded', handler)
+    },
+  },
+
+  // Background validator operations (lint, typecheck, etc)
+  validator: {
+    trigger: (projectPath) => ipcRenderer.invoke('validator:trigger', projectPath),
+    getState: (projectPath) => ipcRenderer.invoke('validator:get-state', projectPath),
+    clear: (projectPath) => ipcRenderer.invoke('validator:clear', projectPath),
+    // Listen for validation events
+    onEvent: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('background-validator:event', handler)
+      return () => ipcRenderer.removeListener('background-validator:event', handler)
+    },
+  },
+
+  // Agent todos aggregation (scan todos from Claude, Cline, Roo, etc)
+  agentTodos: {
+    scan: (projectPath) => ipcRenderer.invoke('agent-todos:scan', projectPath),
+    getAgents: () => ipcRenderer.invoke('agent-todos:agents'),
+    getAgentInfo: (agentId) => ipcRenderer.invoke('agent-todos:agent-info', agentId),
+  },
+
+  // LSP (Language Server Protocol) - background language intelligence
+  lsp: {
+    // Initialize LSP for a project
+    init: (projectPath) => ipcRenderer.invoke('lsp:init', projectPath),
+    // Shutdown all LSP servers
+    shutdown: () => ipcRenderer.invoke('lsp:shutdown'),
+    // Get status of all language servers
+    getStatus: () => ipcRenderer.invoke('lsp:status'),
+    // Touch a file (notify LSP it's open)
+    touchFile: (filePath, waitForDiagnostics) => ipcRenderer.invoke('lsp:touch-file', filePath, waitForDiagnostics),
+    // Notify file changed
+    fileChanged: (filePath, content) => ipcRenderer.invoke('lsp:file-changed', filePath, content),
+    // Notify file saved
+    fileSaved: (filePath) => ipcRenderer.invoke('lsp:file-saved', filePath),
+    // Get all diagnostics
+    getDiagnostics: () => ipcRenderer.invoke('lsp:diagnostics'),
+    // Get diagnostics for a specific file
+    getDiagnosticsForFile: (filePath) => ipcRenderer.invoke('lsp:diagnostics-for-file', filePath),
+    // Get diagnostics for multiple files (for agent context)
+    getDiagnosticsForFiles: (filePaths) => ipcRenderer.invoke('lsp:diagnostics-for-files', filePaths),
+    // Get hover information at position
+    hover: (filePath, line, character) => ipcRenderer.invoke('lsp:hover', filePath, line, character),
+    // Get completions at position
+    completion: (filePath, line, character) => ipcRenderer.invoke('lsp:completion', filePath, line, character),
+    // Get definition at position
+    definition: (filePath, line, character) => ipcRenderer.invoke('lsp:definition', filePath, line, character),
+    // Get references at position
+    references: (filePath, line, character) => ipcRenderer.invoke('lsp:references', filePath, line, character),
+    // Enable/disable a specific server
+    setServerEnabled: (serverId, enabled) => ipcRenderer.invoke('lsp:set-server-enabled', serverId, enabled),
+    // Install an LSP server
+    installServer: (serverId) => ipcRenderer.invoke('lsp:install-server', serverId),
+    // Get cache info (size, paths)
+    getCacheInfo: () => ipcRenderer.invoke('lsp:get-cache-info'),
+    // Clear the LSP cache
+    clearCache: () => ipcRenderer.invoke('lsp:clear-cache'),
+    // Listen for LSP events (diagnostics, server status changes)
+    onEvent: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('lsp:event', handler)
+      return () => ipcRenderer.removeListener('lsp:event', handler)
+    },
+    // Listen for install progress events
+    onInstallProgress: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('lsp:install-progress', handler)
+      return () => ipcRenderer.removeListener('lsp:install-progress', handler)
+    },
+  },
+
+  // Window management (multi-window support with project locking)
+  window: {
+    // Get current window info (windowId, projectPath, projectName)
+    getInfo: () => ipcRenderer.invoke('window:get-info'),
+    // Lock this window to a project (one-time operation per window)
+    lockProject: (projectPath, projectName) => ipcRenderer.invoke('window:lock-project', projectPath, projectName),
+    // Open a project - creates new window or focuses existing
+    openProject: (projectPath, projectName) => ipcRenderer.invoke('window:open-project', projectPath, projectName),
+    // Open a new empty window
+    new: () => ipcRenderer.invoke('window:new'),
+    // Check if a project is already open in any window
+    isProjectOpen: (projectPath) => ipcRenderer.invoke('window:is-project-open', projectPath),
+    // Get all open project windows
+    getAll: () => ipcRenderer.invoke('window:get-all'),
+    // Focus a specific window by ID
+    focus: (windowId) => ipcRenderer.invoke('window:focus', windowId),
+    // Close a specific window by ID
+    close: (windowId) => ipcRenderer.invoke('window:close', windowId),
+    // Listen for window info (sent on ready-to-show)
+    onInfo: (callback) => {
+      const handler = (_event, info) => callback(info)
+      ipcRenderer.on('window:info', handler)
+      return () => ipcRenderer.removeListener('window:info', handler)
+    },
+    // Listen for registry changes (when windows open/close/lock)
+    onRegistryChanged: (callback) => {
+      const handler = (_event, windows) => callback(windows)
+      ipcRenderer.on('window:registry-changed', handler)
+      return () => ipcRenderer.removeListener('window:registry-changed', handler)
     },
   },
 

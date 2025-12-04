@@ -299,72 +299,120 @@ export function FastApplySettings({ isDarkMode, isPro = true }: FastApplySetting
   const canToggle = status?.activeModel && !toggling;
   const isOn = status?.ready;
 
+  // Check if currently downloading any model
+  const isDownloadingAny = downloading !== null && downloadProgress !== null
+
   return (
     <div className="space-y-6">
-      {/* Header with Toggle */}
+      {/* Header with Toggle - shows Ready status or Download progress */}
       <div className={`p-4 rounded-xl border ${
-        isDarkMode ? 'bg-neutral-800/50 border-neutral-700' : 'bg-stone-50 border-stone-200'
+        isDownloadingAny
+          ? isDarkMode ? 'bg-blue-500/10 border-blue-500/30' : 'bg-blue-50 border-blue-200'
+          : isOn
+            ? isDarkMode ? 'bg-green-500/10 border-green-500/30' : 'bg-green-50 border-green-200'
+            : isDarkMode ? 'bg-neutral-800/50 border-neutral-700' : 'bg-stone-50 border-stone-200'
       }`}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-lg ${
-              isOn
-                ? isDarkMode ? 'bg-green-500/20' : 'bg-green-100'
-                : isDarkMode ? 'bg-neutral-700' : 'bg-stone-200'
-            }`}>
-              <Zap size={20} className={isOn ? 'text-green-500' : isDarkMode ? 'text-neutral-400' : 'text-stone-400'} />
-            </div>
-            <div>
-              <h4 className={`font-medium ${isDarkMode ? 'text-white' : 'text-stone-900'}`}>
-                Fast Apply
-              </h4>
-              <p className={`text-xs ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
-                {!status?.activeModel
-                  ? 'Download a model to enable'
-                  : isOn
-                    ? `${status.activeModel} loaded & ready`
-                    : `${status.activeModel} available`}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {/* Toggle Switch */}
-            <button
-              onClick={handleToggle}
-              disabled={!canToggle}
-              className={`relative w-11 h-6 rounded-full transition-all duration-200 ${
-                !canToggle
-                  ? isDarkMode ? 'bg-neutral-700 cursor-not-allowed' : 'bg-stone-200 cursor-not-allowed'
-                  : isOn
-                    ? 'bg-green-500'
-                    : isDarkMode ? 'bg-neutral-600 hover:bg-neutral-500' : 'bg-stone-300 hover:bg-stone-400'
-              }`}
-            >
-              <div
-                className={`absolute top-0.5 w-5 h-5 rounded-full transition-all duration-200 flex items-center justify-center ${
-                  isOn ? 'left-[22px]' : 'left-0.5'
-                } ${
-                  toggling
-                    ? 'bg-white/80'
-                    : 'bg-white shadow-sm'
+        {isDownloadingAny ? (
+          /* Download progress view */
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${isDarkMode ? 'bg-blue-500/20' : 'bg-blue-100'}`}>
+                  <Download size={20} className="text-blue-500" />
+                </div>
+                <div>
+                  <h4 className={`font-medium ${isDarkMode ? 'text-blue-400' : 'text-blue-700'}`}>
+                    Downloading {downloadProgress.variant}...
+                  </h4>
+                  <p className={`text-xs ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                    {formatBytes(downloadProgress.downloaded)} / {formatBytes(downloadProgress.total)}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleCancel}
+                className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
+                  isDarkMode ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-red-100 text-red-600 hover:bg-red-200'
                 }`}
               >
-                {toggling && <Loader2 size={12} className="animate-spin text-neutral-500" />}
-              </div>
-            </button>
-            {/* Refresh button */}
-            <button
-              onClick={loadData}
-              className={`p-2 rounded-lg transition-colors ${
-                isDarkMode
-                  ? 'hover:bg-neutral-700 text-neutral-400'
-                  : 'hover:bg-stone-200 text-stone-500'
-              }`}
-            >
-              <RefreshCw size={16} />
-            </button>
+                Cancel
+              </button>
+            </div>
+            <div className={`w-full h-2 rounded-full overflow-hidden ${isDarkMode ? 'bg-neutral-700' : 'bg-blue-200'}`}>
+              <div
+                className="h-full bg-blue-500 transition-all duration-300"
+                style={{ width: `${downloadProgress.percent}%` }}
+              />
+            </div>
+            <div className="flex justify-end mt-2">
+              <span className={`text-xs ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                {formatSpeed(downloadProgress.speed)} - {formatEta(downloadProgress.eta)} remaining
+              </span>
+            </div>
           </div>
-        </div>
+        ) : (
+          /* Normal status view */
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-lg ${
+                isOn
+                  ? isDarkMode ? 'bg-green-500/20' : 'bg-green-100'
+                  : isDarkMode ? 'bg-neutral-700' : 'bg-stone-200'
+              }`}>
+                <Zap size={20} className={isOn ? 'text-green-500' : isDarkMode ? 'text-neutral-400' : 'text-stone-400'} />
+              </div>
+              <div>
+                <h4 className={`font-medium ${isOn ? 'text-green-500' : isDarkMode ? 'text-white' : 'text-stone-900'}`}>
+                  {isOn ? 'Ready' : 'Fast Apply'}
+                </h4>
+                <p className={`text-xs ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                  {!status?.activeModel
+                    ? 'Download a model to enable'
+                    : isOn
+                      ? `${status.activeModel} loaded`
+                      : `${status.activeModel} available`}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Toggle Switch */}
+              <button
+                onClick={handleToggle}
+                disabled={!canToggle}
+                className={`relative w-11 h-6 rounded-full transition-all duration-200 ${
+                  !canToggle
+                    ? isDarkMode ? 'bg-neutral-700 cursor-not-allowed' : 'bg-stone-200 cursor-not-allowed'
+                    : isOn
+                      ? 'bg-green-500'
+                      : isDarkMode ? 'bg-neutral-600 hover:bg-neutral-500' : 'bg-stone-300 hover:bg-stone-400'
+                }`}
+              >
+                <div
+                  className={`absolute top-0.5 w-5 h-5 rounded-full transition-all duration-200 flex items-center justify-center ${
+                    isOn ? 'left-[22px]' : 'left-0.5'
+                  } ${
+                    toggling
+                      ? 'bg-white/80'
+                      : 'bg-white shadow-sm'
+                  }`}
+                >
+                  {toggling && <Loader2 size={12} className="animate-spin text-neutral-500" />}
+                </div>
+              </button>
+              {/* Refresh button */}
+              <button
+                onClick={loadData}
+                className={`p-2 rounded-lg transition-colors ${
+                  isDarkMode
+                    ? 'hover:bg-neutral-700 text-neutral-400'
+                    : 'hover:bg-stone-200 text-stone-500'
+                }`}
+              >
+                <RefreshCw size={16} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Error display */}
@@ -377,148 +425,143 @@ export function FastApplySettings({ isDarkMode, isPro = true }: FastApplySetting
         </div>
       )}
 
-      {/* Download progress */}
-      {downloading && downloadProgress && (
-        <div className={`p-4 rounded-xl border ${
-          isDarkMode ? 'bg-blue-500/10 border-blue-500/30' : 'bg-blue-50 border-blue-200'
-        }`}>
-          <div className="flex items-center justify-between mb-2">
-            <span className={`text-sm font-medium ${isDarkMode ? 'text-blue-400' : 'text-blue-700'}`}>
-              Downloading {downloadProgress.variant}...
-            </span>
-            <button
-              onClick={handleCancel}
-              className={`text-xs px-2 py-1 rounded transition-colors ${
-                isDarkMode ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-red-100 text-red-600 hover:bg-red-200'
-              }`}
-            >
-              Cancel
-            </button>
-          </div>
-          <div className={`w-full h-2 rounded-full overflow-hidden ${isDarkMode ? 'bg-neutral-700' : 'bg-stone-200'}`}>
-            <div
-              className="h-full bg-blue-500 transition-all duration-300"
-              style={{ width: `${downloadProgress.percent}%` }}
-            />
-          </div>
-          <div className="flex justify-between mt-2">
-            <span className={`text-xs ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
-              {formatBytes(downloadProgress.downloaded)} / {formatBytes(downloadProgress.total)}
-            </span>
-            <span className={`text-xs ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
-              {formatSpeed(downloadProgress.speed)} - {formatEta(downloadProgress.eta)} remaining
-            </span>
-          </div>
-        </div>
-      )}
-
       {/* Models list */}
       <div>
         <h3 className={`text-sm font-medium mb-3 ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
           Available Models
         </h3>
         <div className="space-y-2">
-          {(models || []).map((model) => (
-            <div
-              key={model.variant}
-              className={`p-4 rounded-xl border transition-colors ${
-                status?.activeModel === model.variant
-                  ? isDarkMode ? 'border-blue-500 bg-blue-500/10' : 'border-blue-500 bg-blue-50'
-                  : isDarkMode ? 'border-neutral-700 hover:border-neutral-600' : 'border-stone-200 hover:border-stone-300'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className={`font-medium ${isDarkMode ? 'text-white' : 'text-stone-900'}`}>
-                      {model.variant}
-                    </span>
-                    {model.downloaded && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        isDarkMode ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'
-                      }`}>
-                        Downloaded
+          {(models || []).map((model) => {
+            const isDownloading = downloading === model.variant && downloadProgress
+            return (
+              <div
+                key={model.variant}
+                className={`p-4 rounded-xl border transition-colors ${
+                  isDownloading
+                    ? isDarkMode ? 'border-blue-500/50 bg-blue-500/10' : 'border-blue-300 bg-blue-50'
+                    : status?.activeModel === model.variant
+                      ? isDarkMode ? 'border-blue-500 bg-blue-500/10' : 'border-blue-500 bg-blue-50'
+                      : isDarkMode ? 'border-neutral-700 hover:border-neutral-600' : 'border-stone-200 hover:border-stone-300'
+                }`}
+              >
+                {/* Show download progress instead of normal content when downloading */}
+                {isDownloading ? (
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <span className={`font-medium ${isDarkMode ? 'text-blue-400' : 'text-blue-700'}`}>
+                        Downloading {model.variant}...
                       </span>
-                    )}
-                    {status?.activeModel === model.variant && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        isDarkMode ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-700'
-                      }`}>
-                        Active
+                      <button
+                        onClick={handleCancel}
+                        className={`text-xs px-3 py-1 rounded-lg transition-colors ${
+                          isDarkMode ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-red-100 text-red-600 hover:bg-red-200'
+                        }`}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <div className={`w-full h-2 rounded-full overflow-hidden ${isDarkMode ? 'bg-neutral-700' : 'bg-blue-200'}`}>
+                      <div
+                        className="h-full bg-blue-500 transition-all duration-300"
+                        style={{ width: `${downloadProgress.percent}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between mt-2">
+                      <span className={`text-xs ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                        {formatBytes(downloadProgress.downloaded)} / {formatBytes(downloadProgress.total)}
                       </span>
-                    )}
+                      <span className={`text-xs ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                        {formatSpeed(downloadProgress.speed)} - {formatEta(downloadProgress.eta)} remaining
+                      </span>
+                    </div>
                   </div>
-                  <p className={`text-xs mt-1 ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
-                    {model.description}
-                  </p>
-                  <div className={`flex items-center gap-4 mt-2 text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-                    <span className="flex items-center gap-1">
-                      <HardDrive size={12} />
-                      {model.size} MB
-                    </span>
-                    <span>Quality: {model.quality}</span>
-                    <span>RAM: ~{model.memory} MB</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 ml-4">
-                  {model.downloaded ? (
-                    <>
-                      {status?.activeModel !== model.variant && (
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`font-medium ${isDarkMode ? 'text-white' : 'text-stone-900'}`}>
+                          {model.variant}
+                        </span>
+                        {model.downloaded && (
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            isDarkMode ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'
+                          }`}>
+                            Downloaded
+                          </span>
+                        )}
+                        {status?.activeModel === model.variant && (
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            isDarkMode ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className={`text-xs mt-1 ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                        {model.description}
+                      </p>
+                      <div className={`flex items-center gap-4 mt-2 text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                        <span className="flex items-center gap-1">
+                          <HardDrive size={12} />
+                          {model.size} MB
+                        </span>
+                        <span>Quality: {model.quality}</span>
+                        <span>RAM: ~{model.memory} MB</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 ml-4">
+                      {model.downloaded ? (
+                        <>
+                          {status?.activeModel !== model.variant && (
+                            <button
+                              onClick={() => handleSetActive(model.variant)}
+                              className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
+                                isDarkMode
+                                  ? 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
+                                  : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                              }`}
+                            >
+                              Select
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleDelete(model.variant)}
+                            disabled={deleting === model.variant}
+                            className={`p-2 rounded-lg transition-colors ${
+                              isDarkMode
+                                ? 'hover:bg-red-500/20 text-neutral-400 hover:text-red-400'
+                                : 'hover:bg-red-100 text-stone-400 hover:text-red-600'
+                            } ${deleting === model.variant ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          >
+                            {deleting === model.variant ? (
+                              <Loader2 size={16} className="animate-spin" />
+                            ) : (
+                              <Trash2 size={16} />
+                            )}
+                          </button>
+                        </>
+                      ) : (
                         <button
-                          onClick={() => handleSetActive(model.variant)}
-                          className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
-                            isDarkMode
-                              ? 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
-                              : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                          onClick={() => handleDownload(model.variant)}
+                          disabled={downloading !== null}
+                          className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg transition-colors ${
+                            downloading !== null
+                              ? 'opacity-50 cursor-not-allowed bg-neutral-800 text-neutral-500'
+                              : isDarkMode
+                                ? 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+                                : 'bg-stone-200 text-stone-700 hover:bg-stone-300'
                           }`}
                         >
-                          Select
+                          <Download size={14} />
+                          Download
                         </button>
                       )}
-                      <button
-                        onClick={() => handleDelete(model.variant)}
-                        disabled={deleting === model.variant}
-                        className={`p-2 rounded-lg transition-colors ${
-                          isDarkMode
-                            ? 'hover:bg-red-500/20 text-neutral-400 hover:text-red-400'
-                            : 'hover:bg-red-100 text-stone-400 hover:text-red-600'
-                        } ${deleting === model.variant ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      >
-                        {deleting === model.variant ? (
-                          <Loader2 size={16} className="animate-spin" />
-                        ) : (
-                          <Trash2 size={16} />
-                        )}
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => handleDownload(model.variant)}
-                      disabled={downloading !== null}
-                      className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg transition-colors ${
-                        downloading === model.variant
-                          ? isDarkMode
-                            ? 'bg-blue-500/20 text-blue-400'
-                            : 'bg-blue-100 text-blue-700'
-                          : downloading !== null
-                            ? 'opacity-50 cursor-not-allowed bg-neutral-800 text-neutral-500'
-                            : isDarkMode
-                              ? 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
-                              : 'bg-stone-200 text-stone-700 hover:bg-stone-300'
-                      }`}
-                    >
-                      {downloading === model.variant ? (
-                        <Loader2 size={14} className="animate-spin" />
-                      ) : (
-                        <Download size={14} />
-                      )}
-                      {downloading === model.variant ? 'Downloading...' : 'Download'}
-                    </button>
-                  )}
-                </div>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 

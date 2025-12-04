@@ -5,32 +5,61 @@ import { SelectedElement, Message } from '../types'
 import { getSystemPrompt, getPromptModeForIntent, type PromptMode } from '../utils/systemPrompts'
 import { getElectronAPI } from './useElectronAPI'
 
-// Intent classification types
+// Intent classification types - designed to be combinable (e.g., ui_modify + research)
 export type IntentType =
+  // Code operations
   | 'code_edit'      // Edit/modify existing code
   | 'code_create'    // Create new files/code
   | 'code_delete'    // Delete files/code
   | 'code_explain'   // Explain code
   | 'code_refactor'  // Refactor/improve code
   | 'file_operation' // File system operations (list, rename, etc)
-  | 'question'       // General question about code/context
+  // UI operations
   | 'ui_inspect'     // Inspect/analyze UI element
   | 'ui_modify'      // Modify UI element
+  | 'ui_build'       // Build new UI component/feature
+  // Research & Analysis
+  | 'research'       // Research, investigate, find information
+  | 'analyze'        // Analyze code, data, or patterns
+  | 'compare'        // Compare options, approaches, or implementations
+  // Planning & Architecture
+  | 'plan'           // Plan implementation, design architecture
+  | 'document'       // Write documentation, comments, README
+  // Testing & Quality
+  | 'test'           // Write tests, run tests, test functionality
   | 'debug'          // Debug/fix issues
+  | 'review'         // Code review, security review
+  // DevOps & Deployment
+  | 'deploy'         // Deploy, publish, release
+  | 'configure'      // Configure settings, environment, tools
+  // Communication
+  | 'question'       // General question about code/context
+  | 'chat'           // General conversation, not task-specific
+  // Meta
   | 'unknown'        // Couldn't classify
 
 export interface ClassifiedIntent {
-  type: IntentType
+  type: IntentType           // Primary intent
+  secondaryTypes: IntentType[] // Additional intents (for combinations like "research + ui_modify")
   confidence: number
-  targets: string[]        // Files/elements being targeted
-  action: string           // What to do (edit, create, delete, etc)
-  description: string      // Human-readable description
+  targets: string[]          // Files/elements being targeted
+  action: string             // What to do (edit, create, delete, etc)
+  description: string        // Human-readable description
+}
+
+// LSP Diagnostic for agent context
+export interface FileDiagnostic {
+  line: number
+  character: number
+  severity: 'error' | 'warning' | 'info' | 'hint'
+  message: string
+  source?: string
 }
 
 // Context for the coding agent
 export interface CodingContext {
   selectedElement: SelectedElement | null
-  selectedFiles: Array<{ path: string; content: string }>
+  selectedFiles: Array<{ path: string; content: string; diagnostics?: FileDiagnostic[] }>
   selectedLogs: Array<{ type: string; message: string }>
   projectPath: string | null
   currentFile?: string
@@ -151,13 +180,102 @@ const INTENT_PATTERNS: Array<{
     ],
     keywords: ['how', 'what', 'why', 'question'],
   },
+  // New intent types for comprehensive coverage
+  {
+    type: 'ui_build',
+    patterns: [
+      /(?:build|create|make)\s+(?:a\s+)?(?:new\s+)?(?:page|screen|view|layout|form|modal|dialog|menu|nav|sidebar|header|footer|component|widget)/i,
+      /(?:add|implement)\s+(?:a\s+)?(?:new\s+)?(?:feature|section|area)/i,
+    ],
+    keywords: ['build', 'create page', 'new page', 'new screen', 'add section', 'new component', 'create form', 'add modal'],
+  },
+  {
+    type: 'research',
+    patterns: [
+      /(?:research|investigate|look\s+into|find\s+out|explore|discover)/i,
+      /(?:what\s+are\s+the\s+best|best\s+practices|how\s+do\s+others|industry\s+standard)/i,
+      /(?:search\s+for|look\s+up|google|find\s+examples)/i,
+    ],
+    keywords: ['research', 'investigate', 'explore', 'best practices', 'find out', 'look into', 'examples of'],
+  },
+  {
+    type: 'analyze',
+    patterns: [
+      /(?:analyze|analysis|audit|assess|evaluate|examine|study)/i,
+      /(?:what's\s+wrong|find\s+issues|identify\s+problems|check\s+for)/i,
+    ],
+    keywords: ['analyze', 'analysis', 'audit', 'assess', 'evaluate', 'examine', 'study', 'find issues'],
+  },
+  {
+    type: 'compare',
+    patterns: [
+      /(?:compare|versus|vs\.?|which\s+is\s+better|pros\s+and\s+cons|trade-?offs)/i,
+      /(?:difference\s+between|similarities|options)/i,
+    ],
+    keywords: ['compare', 'versus', 'vs', 'better', 'pros cons', 'trade-offs', 'difference between', 'options'],
+  },
+  {
+    type: 'plan',
+    patterns: [
+      /(?:plan|design|architect|outline|strategy|roadmap|approach)/i,
+      /(?:how\s+should\s+we|what's\s+the\s+best\s+way\s+to|steps\s+to)/i,
+    ],
+    keywords: ['plan', 'design', 'architect', 'outline', 'strategy', 'roadmap', 'approach', 'steps'],
+  },
+  {
+    type: 'document',
+    patterns: [
+      /(?:document|write\s+docs|readme|jsdoc|comment|annotate)/i,
+      /(?:add\s+documentation|explain\s+in\s+code|write\s+comments)/i,
+    ],
+    keywords: ['document', 'documentation', 'readme', 'jsdoc', 'comments', 'annotate'],
+  },
+  {
+    type: 'test',
+    patterns: [
+      /(?:test|write\s+tests|unit\s+test|integration\s+test|e2e|spec)/i,
+      /(?:verify|validate|check\s+if\s+works|make\s+sure)/i,
+    ],
+    keywords: ['test', 'tests', 'unit test', 'integration test', 'e2e', 'spec', 'verify', 'validate'],
+  },
+  {
+    type: 'review',
+    patterns: [
+      /(?:review|code\s+review|security\s+review|check\s+code|audit\s+code)/i,
+      /(?:is\s+this\s+code\s+(?:good|safe|secure)|any\s+issues|improvements)/i,
+    ],
+    keywords: ['review', 'code review', 'security review', 'audit', 'check code', 'improvements'],
+  },
+  {
+    type: 'deploy',
+    patterns: [
+      /(?:deploy|publish|release|ship|push\s+to\s+prod|go\s+live)/i,
+      /(?:build\s+for\s+production|production\s+build|package)/i,
+    ],
+    keywords: ['deploy', 'publish', 'release', 'ship', 'production', 'go live'],
+  },
+  {
+    type: 'configure',
+    patterns: [
+      /(?:configure|config|setup|set\s+up|settings|environment|env)/i,
+      /(?:install|add\s+package|npm\s+install|add\s+dependency)/i,
+    ],
+    keywords: ['configure', 'config', 'setup', 'settings', 'environment', 'env', 'install', 'package'],
+  },
+  {
+    type: 'chat',
+    patterns: [
+      /^(?:hi|hello|hey|thanks|thank\s+you|ok|okay|sure|cool|nice|great)\s*[!.]?$/i,
+    ],
+    keywords: ['hi', 'hello', 'hey', 'thanks', 'ok'],
+  },
 ]
 
-// Classify user intent from message
+// Classify user intent from message - returns primary + secondary intents
 function classifyIntent(message: string, context: CodingContext): ClassifiedIntent {
   const lowerMessage = message.toLowerCase()
-  let bestMatch: { type: IntentType; score: number } = { type: 'unknown', score: 0 }
   const scoreBreakdown: Record<string, { pattern: number; keyword: number; context: number; total: number }> = {}
+  const allScores: Array<{ type: IntentType; score: number }> = []
 
   for (const pattern of INTENT_PATTERNS) {
     let score = 0
@@ -182,7 +300,7 @@ function classifyIntent(message: string, context: CodingContext): ClassifiedInte
     score += keywordScore
 
     // Boost score based on context
-    if (context.selectedElement && (pattern.type === 'ui_inspect' || pattern.type === 'ui_modify')) {
+    if (context.selectedElement && (pattern.type === 'ui_inspect' || pattern.type === 'ui_modify' || pattern.type === 'ui_build')) {
       contextScore += 2
     }
     if (context.selectedFiles.length > 0 && pattern.type.startsWith('code_')) {
@@ -195,15 +313,30 @@ function classifyIntent(message: string, context: CodingContext): ClassifiedInte
 
     scoreBreakdown[pattern.type] = { pattern: patternScore, keyword: keywordScore, context: contextScore, total: score }
 
-    if (score > bestMatch.score) {
-      bestMatch = { type: pattern.type, score }
+    if (score > 0) {
+      allScores.push({ type: pattern.type, score })
     }
   }
 
+  // Sort by score descending
+  allScores.sort((a, b) => b.score - a.score)
+
+  // Get primary intent (highest scoring)
+  const primaryIntent = allScores[0] || { type: 'unknown' as IntentType, score: 0 }
+
+  // Get secondary intents (other high-scoring intents above threshold)
+  // Threshold: at least 50% of primary score and score >= 2
+  const secondaryThreshold = Math.max(primaryIntent.score * 0.5, 2)
+  const secondaryTypes: IntentType[] = allScores
+    .slice(1) // Skip primary
+    .filter(s => s.score >= secondaryThreshold)
+    .slice(0, 2) // Max 2 secondary intents
+    .map(s => s.type)
+
   // Log intent classification for debugging
   console.log('[Intent] Classification for:', message.substring(0, 50))
-  console.log('[Intent] Scores:', scoreBreakdown)
-  console.log('[Intent] Winner:', bestMatch.type, 'with score', bestMatch.score)
+  console.log('[Intent] Top scores:', allScores.slice(0, 5))
+  console.log('[Intent] Primary:', primaryIntent.type, '| Secondary:', secondaryTypes)
 
   // Extract targets from message
   const targets: string[] = []
@@ -222,19 +355,31 @@ function classifyIntent(message: string, context: CodingContext): ClassifiedInte
     code_explain: 'explain',
     code_refactor: 'refactor',
     file_operation: 'file_op',
-    question: 'answer',
     ui_inspect: 'inspect',
     ui_modify: 'modify',
+    ui_build: 'build',
+    research: 'research',
+    analyze: 'analyze',
+    compare: 'compare',
+    plan: 'plan',
+    document: 'document',
+    test: 'test',
     debug: 'debug',
+    review: 'review',
+    deploy: 'deploy',
+    configure: 'configure',
+    question: 'answer',
+    chat: 'chat',
     unknown: 'process',
   }
 
   return {
-    type: bestMatch.type,
-    confidence: Math.min(bestMatch.score / 10, 1),
+    type: primaryIntent.type,
+    secondaryTypes,
+    confidence: Math.min(primaryIntent.score / 10, 1),
     targets,
-    action: actionMap[bestMatch.type],
-    description: `${actionMap[bestMatch.type]} ${targets.join(', ') || 'context'}`,
+    action: actionMap[primaryIntent.type] || 'process',
+    description: `${actionMap[primaryIntent.type] || 'process'} ${targets.join(', ') || 'context'}`,
   }
 }
 
@@ -244,75 +389,82 @@ function buildSystemPrompt(context: CodingContext, intent: ClassifiedIntent, mcp
 
   parts.push(`You are a coding assistant running in Electron with DIRECT ACCESS to the local file system.
 
-CRITICAL RULES - READ CAREFULLY:
-1. You are NOT a web app. You ARE running in Electron with full file system access.
-2. You have function-calling tools that EXECUTE DIRECTLY on the user's machine.
-3. When the user asks to read, write, list, or modify files - CALL THE TOOL IMMEDIATELY.
-4. NEVER output code snippets showing how to set up IPC or file operations.
-5. NEVER say "I can't access files" or "as a web app" - you CAN and MUST use the tools.
-6. NEVER suggest terminal commands. USE THE TOOLS.
-7. NEVER ask the user to copy/paste files or run commands - YOU DO IT.
-8. NEVER say "could you share" or "please paste" - USE YOUR TOOLS to read files.
+CRITICAL EXECUTION RULES:
+1. You have DIRECT file system access. USE IT.
+2. When asked to CREATE a file - CREATE IT IMMEDIATELY. Don't read first.
+3. When asked to EDIT a file - READ IT ONCE, then WRITE the changes.
+4. If a read fails (file not found) and you're creating - JUST CREATE THE FILE.
+5. NEVER get stuck in a read loop. If you've tried reading and it failed, MOVE ON.
+6. NEVER ask the user to do anything - YOU have the tools, USE THEM.
+7. EXECUTE tools directly. Don't explain or ask permission.
 
-WHAT YOU CAN DO:
-- Read ANY file on the file system
-- Write/edit ANY file
-- Search through code
-- List directories
-- View project structure
+ACTION-FIRST BEHAVIOR:
+- CREATE tasks: Use write_file or create_file IMMEDIATELY with the content
+- EDIT tasks: Read file ONCE, then write_file with changes
+- If read fails with "not found" and you're creating: That's EXPECTED - just create it
+- If you've read 2+ files without making progress: STOP READING and TAKE ACTION
 
-WHAT YOU CANNOT DO:
-- Browse to URLs (http://localhost, websites, etc.)
-- BUT you CAN read the SOURCE FILES that serve those URLs
+ANTI-LOOP RULES:
+- Do NOT call list_directory more than once per request
+- Do NOT call read_file on the same path twice
+- Do NOT search for files you should be creating
+- If tools return errors, ADAPT - don't retry the same thing
 
-If the user shows you a localhost URL, READ THE SOURCE FILES instead of asking them to paste code.
+Your tools:
 
-Your tools (call these directly):
+WRITING (use these for CREATE/EDIT):
+- write_file: Creates or overwrites file - USE THIS FIRST for create/edit tasks
+- create_file: Creates new file (fails if exists)
+- delete_file: Deletes file
+- rename_file: Renames/moves file
+- create_directory: Creates folder
 
-FILE READING:
-- list_directory: Lists files/folders - USE THIS for "show me files", "what's in this folder"
-- read_file: Reads file content - USE THIS for "show me", "read", "what's in this file"
-- read_multiple_files: Reads multiple files at once - efficient for reading several files
-- get_file_tree: Gets recursive directory tree - USE THIS for "project structure", "what files exist"
+READING (use sparingly):
+- read_file: Read file content
+- list_directory: List directory contents
+- get_file_tree: Get project structure
+- read_multiple_files: Read several files at once
 
-FILE WRITING:
-- write_file: Writes to file - USE THIS for "edit", "update", "change", "save"
-- create_file: Creates new file - USE THIS for "create", "new file", "add file"
-- delete_file: Deletes file - USE THIS for "delete", "remove"
-- rename_file: Renames/moves - USE THIS for "rename", "move"
-- copy_file: Copies file - USE THIS for "copy", "duplicate"
-- create_directory: Creates folder - USE THIS for "new folder", "mkdir"
+SEARCH - CRITICAL INSTRUCTIONS:
+- semantic_search: **YOUR PRIMARY SEARCH TOOL** - Finds code by meaning and context
+  → USE FOR: "Quick start", "auth code", "error handling", "API endpoint", ANY code search
+  → This understands INTENT, not just keywords
+- search_in_files: Grep (ONLY for exact regex patterns like "TODO:|FIXME:")
+- find_files: Glob (ONLY for filenames like "*.test.ts")
 
-SEARCH:
-- search_in_files: Grep-like search - USE THIS for "find", "search for", "where is"
-- find_files: Glob pattern match - USE THIS for "find all *.ts files", "list tsx files"
-
-UTILITIES:
-- file_exists: Checks if path exists
-- file_stat: Gets file info (size, dates)
-- git_status: Shows git status
-- git_commit: Commits changes
-
-EXECUTE THE TOOLS. Do not explain how to set them up. They are already set up and working.
+🚨 IMPORTANT: ALWAYS use semantic_search for finding code. It's faster and smarter than grep.
+Only fall back to search_in_files if semantic_search returns "Index is empty".
 
 Current intent: ${intent.type} (${intent.description})
 Confidence: ${Math.round(intent.confidence * 100)}%`)
 
   if (context.projectPath) {
-    parts.push(`\nProject root: ${context.projectPath}`)
+    parts.push(`\n## Project Context
+Project root: ${context.projectPath}
+
+IMPORTANT: This is where the source files live. When the user asks about the page or wants changes:
+1. Use Glob to find relevant source files (e.g., *.tsx, *.jsx, *.html)
+2. Use Read to examine the full file before making changes
+3. Common patterns: src/, components/, pages/, app/`)
   }
 
   if (context.selectedElement) {
-    parts.push(`\n## Selected UI Element
+    parts.push(`\n## Selected UI Element (FOCUS AREA - but read the FULL file for context)
 Tag: ${context.selectedElement.tagName}
 ${context.selectedElement.id ? `ID: ${context.selectedElement.id}` : ''}
 ${context.selectedElement.className ? `Classes: ${context.selectedElement.className}` : ''}
 ${context.selectedElement.text ? `Text: ${context.selectedElement.text.substring(0, 100)}` : ''}
 ${context.selectedElement.xpath ? `XPath: ${context.selectedElement.xpath}` : ''}
-${context.selectedElement.sourceLocation?.summary ? `Source: ${context.selectedElement.sourceLocation.summary}` : ''}`)
+${context.selectedElement.sourceLocation?.summary ? `Source: ${context.selectedElement.sourceLocation.summary}` : ''}
+
+⚠️ CRITICAL FOR UI EDITS:
+1. This HTML snippet is just the SELECTED element - the user wants to focus on this area
+2. You MUST read the ENTIRE source file to understand the full context before editing
+3. The element exists within a larger component/page - understand that structure first
+4. Don't assume what's around it - READ THE FILE to see the full picture`)
 
     if (context.selectedElement.outerHTML) {
-      parts.push(`\nHTML:\n\`\`\`html\n${context.selectedElement.outerHTML.substring(0, 500)}\n\`\`\``)
+      parts.push(`\nHTML Snippet (selected element only):\n\`\`\`html\n${context.selectedElement.outerHTML.substring(0, 500)}\n\`\`\``)
     }
   }
 
@@ -320,6 +472,36 @@ ${context.selectedElement.sourceLocation?.summary ? `Source: ${context.selectedE
     parts.push(`\n## Selected Files`)
     for (const file of context.selectedFiles) {
       parts.push(`\n### ${file.path}\n\`\`\`\n${file.content.substring(0, 2000)}${file.content.length > 2000 ? '\n... (truncated)' : ''}\n\`\`\``)
+
+      // Include LSP diagnostics if available
+      if (file.diagnostics && file.diagnostics.length > 0) {
+        const errors = file.diagnostics.filter(d => d.severity === 'error')
+        const warnings = file.diagnostics.filter(d => d.severity === 'warning')
+        const hints = file.diagnostics.filter(d => d.severity === 'info' || d.severity === 'hint')
+
+        parts.push(`\n**Diagnostics:**`)
+        if (errors.length > 0) {
+          parts.push(`\n🔴 **Errors (${errors.length}):**`)
+          for (const err of errors.slice(0, 10)) {
+            parts.push(`- Line ${err.line}:${err.character}: ${err.message}${err.source ? ` [${err.source}]` : ''}`)
+          }
+          if (errors.length > 10) parts.push(`  ... and ${errors.length - 10} more errors`)
+        }
+        if (warnings.length > 0) {
+          parts.push(`\n🟡 **Warnings (${warnings.length}):**`)
+          for (const warn of warnings.slice(0, 5)) {
+            parts.push(`- Line ${warn.line}:${warn.character}: ${warn.message}${warn.source ? ` [${warn.source}]` : ''}`)
+          }
+          if (warnings.length > 5) parts.push(`  ... and ${warnings.length - 5} more warnings`)
+        }
+        if (hints.length > 0 && errors.length === 0 && warnings.length === 0) {
+          // Only show hints if no errors/warnings to keep context focused
+          parts.push(`\n💡 **Hints (${hints.length}):**`)
+          for (const hint of hints.slice(0, 3)) {
+            parts.push(`- Line ${hint.line}:${hint.character}: ${hint.message}`)
+          }
+        }
+      }
     }
   }
 
@@ -332,42 +514,45 @@ ${context.selectedElement.sourceLocation?.summary ? `Source: ${context.selectedE
 
   // Add intent-specific instructions
   switch (intent.type) {
-    case 'code_edit':
     case 'code_create':
+      parts.push(`\n## CREATE INSTRUCTIONS - DO THIS NOW:
+1. Call write_file with the FULL content immediately
+2. Do NOT read files first - you're CREATING, not editing
+3. Do NOT search for where to put the file - the user told you
+4. If you need to see project structure, ONE list_directory call max
+5. WRITE THE FILE. That is your primary task.`)
+      break
+
+    case 'code_edit':
     case 'code_refactor':
-      parts.push(`\n## Instructions
-When modifying code:
-1. Use the write_file tool to save changes
-2. Show the diff of what you changed
-3. Explain why you made the changes
-4. If creating new files, ensure they follow existing project conventions`)
+      parts.push(`\n## EDIT INSTRUCTIONS:
+1. Read the target file ONCE with read_file
+2. Make your changes and call write_file with the new content
+3. Do NOT read other files unless absolutely necessary
+4. If read_file returns "not found" error, use write_file to create it`)
       break
 
     case 'code_explain':
     case 'question':
-      parts.push(`\n## Instructions
-Provide clear, concise explanations.
-Reference specific line numbers when discussing code.
-If the question requires looking at additional files, use the read_file tool.`)
+      parts.push(`\n## EXPLAIN INSTRUCTIONS:
+Read the relevant files and provide clear explanations.
+Reference specific line numbers when discussing code.`)
       break
 
     case 'ui_inspect':
     case 'ui_modify':
-      parts.push(`\n## Instructions
-For UI work:
-1. Analyze the element's structure and styling
-2. If modifying, identify the source file and component
-3. Apply the changes to the source code using the write_file tool
-4. Consider accessibility and responsive design`)
+      parts.push(`\n## UI INSTRUCTIONS:
+1. The element info is above - USE IT
+2. If modifying, call write_file to update the source
+3. Do NOT over-analyze - make the change`)
       break
 
     case 'debug':
-      parts.push(`\n## Instructions
-For debugging:
-1. Analyze the error messages and stack traces
-2. Identify the root cause
-3. Suggest a fix with code changes
-4. Explain how to prevent similar issues`)
+      parts.push(`\n## DEBUG INSTRUCTIONS:
+1. Read the error info provided
+2. Call read_file on the suspected file
+3. Call write_file with the fix
+4. Do NOT endlessly search - make your best fix attempt`)
       break
   }
 
@@ -693,6 +878,62 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
           return { matches: result.data, count: result.data.length }
         }
         return { error: result.error }
+      },
+    } as ToolDefinition,
+
+    // Semantic code search (AI-powered, understands meaning)
+    semantic_search: {
+      description: 'PRIMARY SEARCH TOOL: Search codebase by meaning, intent, and context using AI. Finds code even when exact keywords don\'t match. Use this for ALL code searches: features, concepts, components, functions, patterns, documentation - everything. 3-10x faster than grep and finds more relevant results. Only falls back to grep if index is empty.',
+      parameters: z.object({
+        query: z.string().describe('Natural language description of what to find (e.g., "authentication handler", "error handling for API calls")'),
+        limit: z.number().optional().describe('Maximum results to return (default: 10)'),
+        threshold: z.number().optional().describe('Minimum similarity score 0-1 (default: 0.3)'),
+      }),
+      execute: async (args: unknown) => {
+        const { query, limit, threshold } = args as {
+          query: string
+          limit?: number
+          threshold?: number
+        }
+        const { api: electronAPI } = getElectronAPI()
+
+        // Check if mgrep is available
+        if (electronAPI?.mgrep?.search) {
+          const result = await electronAPI.mgrep.search(query, { limit, threshold })
+          if (result.success && result.results) {
+            return {
+              matches: result.results.map((r: { filePath: string; content: string; score: number; metadata?: { startLine?: number; endLine?: number; language?: string; functionName?: string } }) => ({
+                file: r.filePath,
+                content: r.content,
+                score: r.score,
+                startLine: r.metadata?.startLine,
+                endLine: r.metadata?.endLine,
+                language: r.metadata?.language,
+                functionName: r.metadata?.functionName,
+              })),
+              count: result.results.length,
+              semantic: true,
+            }
+          }
+          // Fall through to grep if mgrep failed
+          console.log('[semantic_search] mgrep failed, falling back to grep:', result.error)
+        }
+
+        // Fallback to grep-based search
+        if (electronAPI?.files?.searchInFiles) {
+          const result = await electronAPI.files.searchInFiles(query, undefined, { maxResults: limit || 10 })
+          if (result.success) {
+            return {
+              matches: result.data,
+              count: result.data.length,
+              semantic: false,
+              warning: '⚠️ Fell back to keyword search (slower, less accurate). Code Index not initialized - go to Settings → Code Index to enable AI-powered semantic search for better results.',
+            }
+          }
+          return { error: result.error }
+        }
+
+        return { error: 'Search not available. Enable Code Index in Settings for semantic search.' }
       },
     } as ToolDefinition,
 

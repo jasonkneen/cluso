@@ -12,6 +12,7 @@ import { InferenceEngine } from './InferenceEngine'
 export class ModelManager {
   private storageDir: string
   private activeModel: ModelVariant | null = null
+  private enabled: boolean = false  // Whether fast apply should auto-load on startup
   private downloader: Downloader
   private engine: InferenceEngine
   private configPath: string
@@ -209,6 +210,9 @@ export class ModelManager {
       if (config.activeModel && MODELS[config.activeModel as ModelVariant]) {
         this.activeModel = config.activeModel
       }
+      if (typeof config.enabled === 'boolean') {
+        this.enabled = config.enabled
+      }
     } catch {
       // Config doesn't exist yet, use defaults
     }
@@ -222,11 +226,27 @@ export class ModelManager {
       fs.mkdirSync(this.storageDir, { recursive: true })
       const config = {
         activeModel: this.activeModel,
+        enabled: this.enabled,
         lastUpdated: new Date().toISOString(),
       }
       fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2))
     } catch (error) {
       console.warn('[FastApply] Failed to save config:', error)
     }
+  }
+
+  /**
+   * Get whether fast apply should auto-load on startup
+   */
+  isEnabled(): boolean {
+    return this.enabled
+  }
+
+  /**
+   * Set whether fast apply should auto-load on startup
+   */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled
+    this.saveConfig()
   }
 }

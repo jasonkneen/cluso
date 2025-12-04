@@ -9,6 +9,8 @@
 const { query } = require('@anthropic-ai/claude-agent-sdk')
 const { createRequire } = require('module')
 const { existsSync } = require('fs')
+const path = require('path')
+const os = require('os')
 
 // Model IDs - use fast model for selector to minimize latency
 const SELECTOR_MODEL_ID = 'claude-haiku-4-5-20251001'
@@ -32,9 +34,25 @@ let currentContext = {
 }
 
 /**
- * Resolve the CLI path from the SDK
+ * Resolve the Claude Code CLI path
+ * Prefers the global CLI (which has working auth) over the SDK's bundled CLI
  */
 function resolveClaudeCodeCli() {
+  // Prefer global claude CLI which has working OAuth auth
+  const globalPaths = [
+    '/usr/local/bin/claude',
+    path.join(os.homedir(), '.npm', 'bin', 'claude'),
+    path.join(os.homedir(), '.local', 'bin', 'claude'),
+  ]
+
+  for (const globalPath of globalPaths) {
+    if (existsSync(globalPath)) {
+      console.log('[SelectorAgent] Using global CLI:', globalPath)
+      return globalPath
+    }
+  }
+
+  // Fall back to SDK's bundled CLI
   const requireModule = createRequire(__filename)
   const cliPath = requireModule.resolve('@anthropic-ai/claude-agent-sdk/cli.js')
 
@@ -42,10 +60,32 @@ function resolveClaudeCodeCli() {
   if (cliPath.includes('app.asar')) {
     const unpackedPath = cliPath.replace('app.asar', 'app.asar.unpacked')
     if (existsSync(unpackedPath)) {
+      console.log('[SelectorAgent] Using unpacked SDK CLI:', unpackedPath)
       return unpackedPath
     }
   }
+  console.log('[SelectorAgent] Using SDK CLI:', cliPath)
   return cliPath
+}
+
+/**
+ * Wrap a message in the CLI's expected format
+ */
+function wrapMessage(message) {
+  // If message has 'role' and 'content', wrap it in the CLI format
+  if (message.role && message.content) {
+    return {
+      type: message.role, // "user" or "assistant"
+      session_id: '',
+      message: {
+        role: message.role,
+        content: message.content,
+      },
+      parent_tool_use_id: null,
+    }
+  }
+  // Otherwise return as-is (might already be wrapped)
+  return message
 }
 
 /**
@@ -56,7 +96,7 @@ async function* messageGenerator() {
     if (messageQueue.length > 0) {
       const { message, resolve } = messageQueue.shift()
       resolve()
-      yield message
+      yield wrapMessage(message)
     } else {
       // Wait for next message
       await new Promise(resolve => {
@@ -119,35 +159,66 @@ function getContextState() {
 }
 
 /**
- * System prompt for the selector agent
+ * System prompt for the UI assistant agent
  */
-const SELECTOR_SYSTEM_PROMPT = `You are a precise element selector assistant. Your job is to help identify and select DOM elements based on user descriptions.
+const SELECTOR_SYSTEM_PROMPT = `You are a creative UI assistant that helps users modify web pages. You can understand various requests and propose creative solutions.
 
-When the user describes an element they want to select, you should:
-1. Analyze the provided page elements context
-2. Identify the most likely matching element(s)
-3. Return a CSS selector that uniquely identifies the element
-4. Provide brief reasoning for your selection
+CAPABILITIES:
+- Select elements by description (visual, semantic, or structural)
+- Suggest style changes (colors, sizes, layouts, animations)
+- Propose structural changes (add, remove, rearrange elements)
+- Generate code patches for source files
+- Execute JavaScript for DOM manipulation
 
-IMPORTANT RESPONSE FORMAT:
-When selecting an element, respond with a JSON object in this exact format:
+UNDERSTANDING USER INTENT:
+Users may ask for things like:
+- "Make the header blue" → style change
+- "Add a shadow to this card" → style enhancement
+- "Move the button to the right" → layout change
+- "Make this section look more modern" → creative redesign
+- "Select the navigation menu" → element selection
+- "Change the text to say X" → content modification
+- "Add a hover effect" → interaction enhancement
+
+RESPONSE FORMAT:
+For element selection requests, respond with JSON:
 {
-  "selector": "CSS_SELECTOR_HERE",
-  "reasoning": "Brief explanation of why this element matches",
+  "type": "selection",
+  "selector": "CSS_SELECTOR",
+  "reasoning": "Why this matches",
   "confidence": 0.0-1.0,
-  "alternatives": ["ALTERNATIVE_SELECTOR_1", "ALTERNATIVE_SELECTOR_2"]
+  "alternatives": []
 }
 
-If no matching element is found, respond with:
+For modification requests, respond with JSON:
 {
-  "selector": null,
-  "reasoning": "Explanation of why no match was found",
-  "confidence": 0,
-  "suggestions": ["Description of what might work"]
+  "type": "modification",
+  "selector": "TARGET_CSS_SELECTOR",
+  "action": "style|content|structure|code",
+  "changes": {
+    "description": "What will change",
+    "css": { "property": "value" },  // for style changes
+    "html": "new content",            // for content changes
+    "javascript": "code to execute"   // for dynamic changes
+  },
+  "reasoning": "Why this approach"
 }
 
-Be concise. Prioritize unique selectors using IDs, data attributes, or specific class combinations.
-Avoid overly complex selectors that may break with minor page changes.`
+For creative suggestions:
+{
+  "type": "suggestion",
+  "ideas": [
+    { "description": "...", "impact": "low|medium|high" }
+  ]
+}
+
+BE CREATIVE: Don't just do property swaps. Think about:
+- Visual hierarchy and balance
+- Modern design patterns
+- User experience improvements
+- Accessibility enhancements
+
+Be concise but helpful. Propose bold changes when appropriate.`
 
 /**
  * Initialize the selector agent session
@@ -172,19 +243,33 @@ async function initializeSession(options = {}) {
 
   try {
     // Create the query session
+    // Note: Haiku doesn't support thinking, so maxThinkingTokens must be 0
+    const cliPath = resolveClaudeCodeCli()
+    console.log('[SelectorAgent] Creating session:', {
+      model: SELECTOR_MODEL_ID,
+      cwd,
+      cliPath,
+    })
     selectorSession = query({
       prompt: messageGenerator(),
       options: {
         model: SELECTOR_MODEL_ID,
-        maxThinkingTokens: 8_000,
+        maxThinkingTokens: 0, // Haiku doesn't support thinking
+        // Only read project-level config (.mcp.json), NOT user-level (Claude Desktop)
         settingSources: ['project'],
         permissionMode: 'acceptEdits',
         allowedTools: [], // Selector agent doesn't need tools, just analysis
-        pathToClaudeCodeExecutable: resolveClaudeCodeCli(),
+        pathToClaudeCodeExecutable: cliPath,
         cwd,
         includePartialMessages: true,
         systemPrompt: SELECTOR_SYSTEM_PROMPT,
       }
+    })
+
+    // Send initial message to bootstrap the session - required to keep connection alive
+    await pushMessage({
+      role: 'user',
+      content: [{ type: 'text', text: 'Hello, I am the element selector interface. I will send you page contexts and element selection requests. Please respond with JSON format as specified in your instructions. Ready?' }]
     })
 
     // Signal ready
@@ -224,7 +309,13 @@ async function initializeSession(options = {}) {
       }
     }
   } catch (error) {
-    console.error('Error in selector session:', error)
+    console.error('[SelectorAgent] Error in session:', error)
+    console.error('[SelectorAgent] Error stack:', error?.stack)
+    console.error('[SelectorAgent] Error details:', JSON.stringify({
+      message: error?.message,
+      code: error?.code,
+      exitCode: error?.exitCode,
+    }, null, 2))
     onError?.(error instanceof Error ? error.message : 'Unknown error')
   } finally {
     isProcessing = false
@@ -262,7 +353,8 @@ function parseSelectionResult(response) {
  */
 async function primeContext(context) {
   if (!selectorSession) {
-    throw new Error('No active selector session')
+    console.warn('[SelectorAgent] Cannot prime - no active session yet. Session will be primed when initialized.')
+    return // Silently return instead of throwing - session might not be ready yet
   }
 
   const { pageElements, pageUrl, pageTitle } = context

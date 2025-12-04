@@ -477,16 +477,30 @@ const PROJECT_ROOT = path.join(__dirname, '..')
 
 function normalizeToolPath(inputPath, baseDir = PROJECT_ROOT) {
   if (!inputPath || typeof inputPath !== 'string') return null
-  const tildeExpanded = inputPath.startsWith('~/')
+
+  // Handle tilde expansion
+  let normalized = inputPath.startsWith('~/')
     ? path.join(os.homedir(), inputPath.slice(2))
     : inputPath
-  // If it's an absolute path, return it as-is (don't prepend baseDir)
-  if (path.isAbsolute(tildeExpanded)) {
-    return tildeExpanded
+
+  // CRITICAL: If path looks like an absolute path but doesn't start with /,
+  // the AI sometimes passes "Users/..." instead of "/Users/..." - fix it
+  if (normalized.startsWith('Users/') || normalized.startsWith('home/') || normalized.match(/^[A-Za-z]:\\/)) {
+    console.warn('[normalizeToolPath] Fixing missing leading slash:', normalized)
+    normalized = '/' + normalized
   }
+
+  // If it's an absolute path, return it as-is (don't prepend baseDir)
+  if (path.isAbsolute(normalized)) {
+    console.log('[normalizeToolPath] Absolute path, returning as-is:', normalized)
+    return normalized
+  }
+
   // For relative paths, resolve against baseDir
-  const cleaned = tildeExpanded.replace(/^\.\/+/, '')
-  return path.resolve(baseDir, cleaned)
+  const cleaned = normalized.replace(/^\.\/+/, '')
+  const result = path.resolve(baseDir, cleaned)
+  console.log('[normalizeToolPath] Relative path resolved:', inputPath, '->', result)
+  return result
 }
 
 function getProjectRoot(context) {
@@ -522,7 +536,7 @@ const BUILT_IN_TOOL_EXECUTORS = {
   async read_file({ path, filePath }, context = {}) {
     const requestedPath = path ?? filePath
     const baseDir = getProjectRoot(context)
-    console.log('[AI-SDK-Wrapper] read_file requested:', requestedPath)
+    console.log('[AI-SDK-Wrapper] read_file requested:', requestedPath, '| projectRoot:', baseDir, '| context.projectRoot:', context?.projectRoot)
     const targetPath = normalizeToolPath(requestedPath, baseDir)
     if (!targetPath) {
       console.warn('[AI-SDK-Wrapper] read_file missing path', { path, filePath })
@@ -538,21 +552,42 @@ const BUILT_IN_TOOL_EXECUTORS = {
     }
   },
 
-  async write_file({ path, filePath, content }, context = {}) {
+  async write_file({ path, filePath, content } = {}, context = {}) {
     try {
+      if (content === undefined || content === null) {
+        return { error: 'write_file requires "content" argument' }
+      }
       const baseDir = getProjectRoot(context)
       const targetPath = normalizeToolPath(path ?? filePath, baseDir)
       if (!targetPath) {
         return { error: 'write_file requires "path"' }
       }
-      await fs.writeFile(targetPath, content, 'utf-8')
-      return { success: true, path: targetPath, bytesWritten: Buffer.byteLength(content, 'utf-8') }
+      // Read original content for undo capability
+      let originalContent
+      try {
+        originalContent = await fs.readFile(targetPath, 'utf-8')
+      } catch {
+        // File doesn't exist yet - no original content
+      }
+      // Ensure parent directory exists
+      const parentDir = require('path').dirname(targetPath)
+      await fs.mkdir(parentDir, { recursive: true })
+      const newContent = String(content)
+      await fs.writeFile(targetPath, newContent, 'utf-8')
+      // Notify renderer about file modification for edited files drawer
+      sendToRenderer('ai-sdk:file-modified', {
+        type: 'write',
+        path: targetPath,
+        originalContent,
+        newContent,
+      })
+      return { success: true, path: targetPath, bytesWritten: Buffer.byteLength(newContent, 'utf-8') }
     } catch (error) {
       return { error: error.message }
     }
   },
 
-  async create_file({ path, filePath, content = '' }, context = {}) {
+  async create_file({ path, filePath, content = '' } = {}, context = {}) {
     try {
       const baseDir = getProjectRoot(context)
       const targetPath = normalizeToolPath(path ?? filePath, baseDir)
@@ -565,7 +600,17 @@ const BUILT_IN_TOOL_EXECUTORS = {
       } catch {
         // File not found - proceed
       }
-      await fs.writeFile(targetPath, content, 'utf-8')
+      // Ensure parent directory exists
+      const parentDir = require('path').dirname(targetPath)
+      await fs.mkdir(parentDir, { recursive: true })
+      const newContent = String(content ?? '')
+      await fs.writeFile(targetPath, newContent, 'utf-8')
+      // Notify renderer about file creation for edited files drawer
+      sendToRenderer('ai-sdk:file-modified', {
+        type: 'create',
+        path: targetPath,
+        newContent,
+      })
       return { success: true, path: targetPath }
     } catch (error) {
       return { error: error.message }
@@ -579,7 +624,20 @@ const BUILT_IN_TOOL_EXECUTORS = {
       if (!targetPath) {
         return { error: 'delete_file requires a "path" argument' }
       }
+      // Read original content for undo capability
+      let originalContent
+      try {
+        originalContent = await fs.readFile(targetPath, 'utf-8')
+      } catch {
+        // File doesn't exist - won't be able to undo
+      }
       await fs.unlink(targetPath)
+      // Notify renderer about file deletion for edited files drawer
+      sendToRenderer('ai-sdk:file-modified', {
+        type: 'delete',
+        path: targetPath,
+        originalContent,
+      })
       return { success: true, path: targetPath }
     } catch (error) {
       return { error: error.message }
@@ -769,8 +827,11 @@ const BUILT_IN_TOOL_EXECUTORS = {
     }
   },
 
-  async find_files({ pattern, directory }, context = {}) {
+  async find_files({ pattern, directory } = {}, context = {}) {
     try {
+      if (!pattern || typeof pattern !== 'string') {
+        return { error: 'find_files requires a "pattern" argument (e.g., "*.ts", "**/*.json")' }
+      }
       const results = []
       const baseDir = getProjectRoot(context)
       const searchDir = directory ? normalizeToolPath(directory, baseDir) : baseDir
@@ -837,8 +898,11 @@ const BUILT_IN_TOOL_EXECUTORS = {
     }
   },
 
-  async read_multiple_files({ paths }, context = {}) {
+  async read_multiple_files({ paths } = {}, context = {}) {
     try {
+      if (!paths || !Array.isArray(paths) || paths.length === 0) {
+        return { error: 'read_multiple_files requires a "paths" array argument' }
+      }
       const baseDir = getProjectRoot(context)
       const results = await Promise.all(
         paths.map(async filePath => {
@@ -1261,6 +1325,7 @@ async function streamChat(options) {
     // Helper to wrap tool execution with logging and event emission
     const wrapExecutor = (name, executeFn) => async (args, context) => {
       const execContext = { ...context, projectRoot: activeProjectRoot }
+      console.log(`[AI-SDK-Wrapper] Tool ${name} executing with projectRoot:`, activeProjectRoot)
       const toolCallId = execContext?.toolCallId || 'unknown'
       try {
         let result = await executeFn(args, execContext)

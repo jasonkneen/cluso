@@ -64,10 +64,24 @@ Your tools:
 - write_file(path, content): Write to file
 - create_file(path, content): Create new file
 - delete_file(path): Delete file
-- search_in_files(pattern, path): Search for text
-- find_files(pattern, path): Find files by glob
+- semantic_search(query): AI-powered search - **USE THIS FOR ALL CODE SEARCHES**
+- search_in_files(pattern, path): Grep (only for exact regex like "TODO:|FIXME:")
+- find_files(pattern, path): Glob (only for filenames like "*.config.js")
 
 ${context.projectPath ? `Project: ${context.projectPath}` : ''}
+
+SEARCH STRATEGY - READ THIS CAREFULLY:
+🎯 ALWAYS use semantic_search as your FIRST choice for finding code:
+  - "Quick start" → semantic_search("quick start onboarding")
+  - "auth code" → semantic_search("authentication handler")
+  - "API endpoint" → semantic_search("API endpoint definition")
+  - "error handling" → semantic_search("error handling")
+
+❌ ONLY use search_in_files for exact regex patterns:
+  - Finding TODO comments → search_in_files("TODO:|FIXME:")
+  - Finding specific syntax → search_in_files("import.*React")
+
+FORMATTING: Use separate paragraphs for distinct thoughts. Add a blank line between paragraphs.
 
 START WORKING IMMEDIATELY. Read files, make changes, execute.`
 }
@@ -85,18 +99,30 @@ CRITICAL BEHAVIOR:
 - NEVER ask the user to provide files, run commands, or share output
 - NEVER say "could you share" or "please paste" - USE YOUR TOOLS
 - When you need to see files: READ THEM with read_file or list_directory
-- When you need to search: USE search_in_files or find_files
+- When you need to search code: ALWAYS use semantic_search FIRST
 - BE PROACTIVE - just do the work, don't ask for permission
+
+FORMATTING: Use separate paragraphs for distinct thoughts. Add a blank line between paragraphs for readability.
 
 Your tools:
 - list_directory(path): List files in a directory
 - read_file(path): Read file contents
 - write_file(path, content): Write to file
-- search_in_files(pattern, path): Search for text
-- find_files(pattern, path): Find files by glob
+- semantic_search(query): **DEFAULT SEARCH TOOL** - Finds code by meaning, intent, and context
+- search_in_files(pattern, path): Grep (only for exact regex like "TODO:|import.*")
+- find_files(pattern, path): Glob (only for filenames like "*.test.ts")
 
 ${context.projectPath ? `Project: ${context.projectPath}` : ''}
-${context.mcpToolCount ? `MCP tools available: ${context.mcpToolCount}` : ''}`)
+${context.mcpToolCount ? `MCP tools available: ${context.mcpToolCount}` : ''}
+
+SEARCH STRATEGY:
+🎯 semantic_search is your PRIMARY search tool - use it for:
+  - Finding features: "user authentication", "payment processing"
+  - Finding patterns: "error handling", "validation logic"
+  - Finding concepts: "state management", "API endpoints"
+  - Finding ANYTHING: "Quick start", "navbar component", "config file"
+
+❌ ONLY use search_in_files/find_files when semantic_search says "Index is empty" or for exact regex`)
 
   if (context.selectedElement) {
     parts.push(`
@@ -148,15 +174,18 @@ export function getSystemPrompt(mode: PromptMode, context: PromptContext): strin
  */
 export function getPromptModeForIntent(intentType: string, hasSelectedElement: boolean): PromptMode {
   // DOM edits with selected element = fast path
-  if (intentType === 'ui_modify' && hasSelectedElement) {
+  if ((intentType === 'ui_modify' || intentType === 'ui_build') && hasSelectedElement) {
     return 'dom_edit'
   }
 
-  // File operations
-  if (['code_edit', 'code_create', 'code_delete', 'file_operation', 'code_refactor'].includes(intentType)) {
+  // File operations - includes new coding-related intents
+  if ([
+    'code_edit', 'code_create', 'code_delete', 'file_operation', 'code_refactor',
+    'test', 'document', 'deploy', 'configure'
+  ].includes(intentType)) {
     return 'file_ops'
   }
 
-  // Everything else gets full chat
+  // Everything else gets full chat (research, analyze, compare, plan, review, question, chat, etc.)
   return 'chat'
 }

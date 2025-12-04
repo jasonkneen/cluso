@@ -44,13 +44,14 @@ let multipleMatches = [] // Store multiple AI-selected elements
 let numberBadges = [] // Store number badge elements
 
 // Move mode state - support multiple overlays
-let moveOverlays = [] // Array of { overlay, element, originalRect, elementData, positionLabel }
+let moveOverlays = [] // Array of { overlay, element, originalRect, elementData, positionLabel, initialScrollX, initialScrollY }
 let activeMoveOverlay = null // Currently being dragged/resized
 let isMoveDragging = false
 let isResizing = false
 let resizeHandle = null
 let moveStartX = 0
 let moveStartY = 0
+let moveScrollHandler = null // Scroll event handler for move mode
 
 // CSS injection for hover/selection effects
 // Inject CSS when DOM is ready
@@ -881,6 +882,7 @@ let dropLabel = null
 let originalTextContent = null
 let isEditing = false
 let editToolbar = null
+let editingSourceLocation = null // Store source location when editing starts
 
 function getDropAction(element, dataTransfer) {
   const hasFiles = dataTransfer.types.includes('Files')
@@ -947,10 +949,12 @@ function createEditToolbar(element) {
   acceptBtn.addEventListener('click', function(e) {
     e.stopPropagation()
     const newText = element.textContent
+    const xpath = getXPath(element)
+    // Include source location captured when editing started
     ipcRenderer.sendToHost('inline-edit-accept', {
       oldText: originalTextContent,
       newText: newText,
-      element: getElementSummary(element)
+      element: { ...getElementSummary(element), xpath, sourceLocation: editingSourceLocation }
     })
     finishEditing(element)
   })
@@ -965,7 +969,7 @@ function createEditToolbar(element) {
   return editToolbar
 }
 
-function startEditing(element) {
+async function startEditing(element) {
   if (isEditing) return
 
   // Only allow editing for text-like elements
@@ -975,6 +979,10 @@ function startEditing(element) {
 
   isEditing = true
   originalTextContent = element.textContent
+
+  // Get source location now so we have it when accepting the edit
+  editingSourceLocation = await getSourceLocation(element)
+  console.log('[Inline Edit] Started editing, source location:', editingSourceLocation?.summary || 'none')
 
   element.contentEditable = 'true'
   element.classList.add('inspector-inline-editing')
@@ -995,6 +1003,7 @@ function finishEditing(element) {
   element.contentEditable = 'false'
   element.classList.remove('inspector-inline-editing')
   originalTextContent = null
+  editingSourceLocation = null // Clear stored source location
 
   if (editToolbar) {
     editToolbar.remove()
@@ -1195,15 +1204,26 @@ function createMoveOverlay(element, summary, xpath, sourceLocation) {
   positionLabel.className = 'move-position-label'
   document.body.appendChild(positionLabel)
 
-  // Store overlay data
+  // Store overlay data with initial scroll position
   const overlayData = {
     overlay,
     element,
     originalRect,
     elementData: { summary, xpath, sourceLocation },
-    positionLabel
+    positionLabel,
+    initialScrollX: window.scrollX,
+    initialScrollY: window.scrollY,
+    currentOffsetX: 0, // Track user drag offset separately from scroll
+    currentOffsetY: 0
   }
   moveOverlays.push(overlayData)
+
+  // Set up scroll handler on first overlay creation
+  if (moveOverlays.length === 1 && !moveScrollHandler) {
+    moveScrollHandler = handleMoveScroll
+    window.addEventListener('scroll', moveScrollHandler, { passive: true })
+    console.log('[Move] Scroll handler attached')
+  }
 
   // Update position label
   updatePositionLabelFor(overlayData)
@@ -1249,30 +1269,36 @@ function handleMoveMove(e) {
   const deltaY = e.clientY - moveStartY
 
   if (isMoveDragging) {
-    const currentLeft = parseFloat(overlay.style.left) || 0
-    const currentTop = parseFloat(overlay.style.top) || 0
-    overlay.style.left = (currentLeft + deltaX) + 'px'
-    overlay.style.top = (currentTop + deltaY) + 'px'
+    // Update the user offset (separate from scroll position)
+    activeMoveOverlay.currentOffsetX += deltaX
+    activeMoveOverlay.currentOffsetY += deltaY
+
+    // Calculate new position based on original + scroll delta + user offset
+    const scrollDeltaX = window.scrollX - activeMoveOverlay.initialScrollX
+    const scrollDeltaY = window.scrollY - activeMoveOverlay.initialScrollY
+    const newLeft = activeMoveOverlay.originalRect.left - scrollDeltaX + activeMoveOverlay.currentOffsetX
+    const newTop = activeMoveOverlay.originalRect.top - scrollDeltaY + activeMoveOverlay.currentOffsetY
+
+    overlay.style.left = newLeft + 'px'
+    overlay.style.top = newTop + 'px'
   } else if (isResizing) {
-    const currentLeft = parseFloat(overlay.style.left) || 0
-    const currentTop = parseFloat(overlay.style.top) || 0
     const currentWidth = parseFloat(overlay.style.width) || 100
     const currentHeight = parseFloat(overlay.style.height) || 100
 
-    let newLeft = currentLeft
-    let newTop = currentTop
+    let offsetDeltaX = 0
+    let offsetDeltaY = 0
     let newWidth = currentWidth
     let newHeight = currentHeight
 
     if (resizeHandle.includes('l')) {
-      newLeft = currentLeft + deltaX
+      offsetDeltaX = deltaX
       newWidth = currentWidth - deltaX
     }
     if (resizeHandle.includes('r')) {
       newWidth = currentWidth + deltaX
     }
     if (resizeHandle.includes('t')) {
-      newTop = currentTop + deltaY
+      offsetDeltaY = deltaY
       newHeight = currentHeight - deltaY
     }
     if (resizeHandle.includes('b')) {
@@ -1280,6 +1306,16 @@ function handleMoveMove(e) {
     }
 
     if (newWidth >= 20 && newHeight >= 20) {
+      // Update offsets for left/top handle resizing
+      activeMoveOverlay.currentOffsetX += offsetDeltaX
+      activeMoveOverlay.currentOffsetY += offsetDeltaY
+
+      // Calculate new position
+      const scrollDeltaX = window.scrollX - activeMoveOverlay.initialScrollX
+      const scrollDeltaY = window.scrollY - activeMoveOverlay.initialScrollY
+      const newLeft = activeMoveOverlay.originalRect.left - scrollDeltaX + activeMoveOverlay.currentOffsetX
+      const newTop = activeMoveOverlay.originalRect.top - scrollDeltaY + activeMoveOverlay.currentOffsetY
+
       overlay.style.left = newLeft + 'px'
       overlay.style.top = newTop + 'px'
       overlay.style.width = newWidth + 'px'
@@ -1344,6 +1380,27 @@ function updatePositionLabelFor(overlayData) {
   label.style.top = (y - 30) + 'px'
 }
 
+// Handle scroll events to move overlays with page content
+function handleMoveScroll() {
+  if (moveOverlays.length === 0) return
+
+  moveOverlays.forEach(overlayData => {
+    // Calculate scroll delta from when overlay was created
+    const scrollDeltaX = window.scrollX - overlayData.initialScrollX
+    const scrollDeltaY = window.scrollY - overlayData.initialScrollY
+
+    // New position = original position - scroll delta + any user drag offset
+    const newLeft = overlayData.originalRect.left - scrollDeltaX + overlayData.currentOffsetX
+    const newTop = overlayData.originalRect.top - scrollDeltaY + overlayData.currentOffsetY
+
+    overlayData.overlay.style.left = newLeft + 'px'
+    overlayData.overlay.style.top = newTop + 'px'
+
+    // Update position label
+    updatePositionLabelFor(overlayData)
+  })
+}
+
 function cleanupSingleMoveOverlay(overlayData) {
   if (overlayData.element) {
     overlayData.element.classList.remove('move-original-hidden')
@@ -1357,6 +1414,13 @@ function cleanupSingleMoveOverlay(overlayData) {
 }
 
 function cleanupAllMoveOverlays() {
+  // Remove scroll handler
+  if (moveScrollHandler) {
+    window.removeEventListener('scroll', moveScrollHandler)
+    moveScrollHandler = null
+    console.log('[Move] Scroll handler removed')
+  }
+
   moveOverlays.forEach(overlayData => {
     cleanupSingleMoveOverlay(overlayData)
   })
