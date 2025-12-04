@@ -1166,7 +1166,7 @@ export default function App() {
     isMoveActiveRef.current = isMoveActive;
   }, [isMoveActive]);
 
-  // Auto-switch to Gemini 2.5 Flash and disable thinking when inspector is active
+  // Auto-switch to Claude Haiku 4.5 (or fallback to fast model) when inspector is active
   useEffect(() => {
     if (isInspectorActive) {
       // Save current settings before switching
@@ -1175,20 +1175,24 @@ export default function App() {
         thinkingLevel: thinkingLevel,
       };
 
-      // Find Gemini 2.5 Flash model
-      const geminiFlashModel = displayModels.find(m =>
+      // Prefer Claude Haiku 4.5 for fast tooling, fallback to other fast models
+      const fastModel = displayModels.find(m =>
+        m.id === 'claude-haiku-4-5' && m.isAvailable
+      ) || displayModels.find(m =>
+        m.id.includes('haiku') && m.isAvailable
+      ) || displayModels.find(m =>
         m.id.includes('gemini-2') && m.id.includes('flash') && m.isAvailable
       ) || displayModels.find(m =>
-        m.id.includes('gemini') && m.id.includes('flash') && m.isAvailable
+        m.id.includes('flash') && m.isAvailable
       );
 
-      if (geminiFlashModel) {
-        console.log('[Inspector] Switching to fast model:', geminiFlashModel.id);
+      if (fastModel) {
+        console.log('[Inspector] Switching to fast model:', fastModel.id);
         setSelectedModel({
-          id: geminiFlashModel.id,
-          name: geminiFlashModel.name,
-          provider: geminiFlashModel.provider,
-          Icon: geminiFlashModel.Icon,
+          id: fastModel.id,
+          name: fastModel.name,
+          provider: fastModel.provider,
+          Icon: fastModel.Icon,
         });
       }
 
@@ -7525,8 +7529,8 @@ If you're not sure what the user wants, ask for clarification.
                                   <>
                                       <div className="fixed inset-0 z-[99]" onClick={() => setIsModelMenuOpen(false)}></div>
                                       <div className={`absolute bottom-full left-0 mb-2 w-56 rounded-xl shadow-xl py-1 z-[100] max-h-80 overflow-y-auto ${isDarkMode ? 'bg-neutral-700 border border-neutral-600' : 'bg-white border border-stone-200'}`}>
-                                          {/* Show all models from settings */}
-                                          {displayModels.map(model => (
+                                          {/* Show only enabled models from settings */}
+                                          {displayModels.filter(m => m.isEnabled).map(model => (
                                               <button
                                                   key={model.id}
                                                   onClick={() => {
@@ -7541,7 +7545,7 @@ If you're not sure what the user wants, ask for clarification.
                                                         : isDarkMode ? 'hover:bg-neutral-600 text-neutral-200' : 'hover:bg-stone-50'
                                                   }`}
                                                   disabled={!model.isAvailable}
-                                                  title={!model.isProviderConfigured ? 'Configure provider API key in Settings' : !model.isEnabled ? 'Enable in Settings' : ''}
+                                                  title={!model.isProviderConfigured ? 'Configure provider API key in Settings' : ''}
                                               >
                                                   <model.Icon size={16} className={model.isAvailable ? (isDarkMode ? 'text-neutral-400' : 'text-stone-500') : 'text-stone-300'} />
                                                   <span className={`flex-1 ${selectedModel.id === model.id ? 'font-medium' : ''}`}>{model.name}</span>

@@ -122,23 +122,26 @@ export const DEFAULT_SETTINGS: AppSettings = {
     { id: 'anthropic', name: 'Anthropic', apiKey: '', enabled: false },
   ],
   models: [
-    { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro', provider: 'google', enabled: true },
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'google', enabled: true },
-    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'google', enabled: true },
-    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'google', enabled: true },
-    { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', enabled: false },
-    { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai', enabled: false },
-    { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'anthropic', enabled: false },
-    { id: 'claude-3-opus', name: 'Claude 3 Opus', provider: 'anthropic', enabled: false },
-    // Claude Code OAuth models
+    // Claude Code OAuth models (recommended for Agent SDK)
     { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', provider: 'claude-code', enabled: false },
     { id: 'claude-opus-4-5', name: 'Claude Opus 4.5', provider: 'claude-code', enabled: false },
     { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', provider: 'claude-code', enabled: false },
+    // Claude legacy API models
+    { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'anthropic', enabled: false },
+    { id: 'claude-3-opus', name: 'Claude 3 Opus', provider: 'anthropic', enabled: false },
+    // OpenAI models
+    { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', enabled: false },
+    { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai', enabled: false },
     // Codex OAuth models (ChatGPT Plus/Pro)
     { id: 'gpt-5.1', name: 'GPT-5.1', provider: 'codex', enabled: false },
     { id: 'gpt-5.1-mini', name: 'GPT-5.1 Mini', provider: 'codex', enabled: false },
     { id: 'gpt-5.1-nano', name: 'GPT-5.1 Nano', provider: 'codex', enabled: false },
     { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex', provider: 'codex', enabled: false },
+    // Google Gemini models
+    { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro', provider: 'google', enabled: true },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'google', enabled: true },
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'google', enabled: true },
+    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'google', enabled: true },
   ],
   connections: [
     {
