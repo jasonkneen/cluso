@@ -521,6 +521,63 @@ interface ElectronFastApplyAPI {
   onModelUnloaded: (callback: () => void) => () => void
 }
 
+// Selector Agent types (persistent Claude Agent SDK session for element selection)
+interface SelectorAgentInitOptions {
+  cwd?: string
+}
+
+interface SelectorAgentResult {
+  success: boolean
+  error?: string
+}
+
+interface SelectorAgentActiveResult {
+  active: boolean
+}
+
+interface SelectorAgentContextState {
+  isPrimed: boolean
+  pageUrl: string | null
+  pageTitle: string | null
+  lastPrimedAt: number | null
+}
+
+interface SelectorAgentPageContext {
+  pageElements: string | object
+  pageUrl?: string
+  pageTitle?: string
+}
+
+interface SelectorAgentSelectOptions {
+  includeContext?: boolean
+  pageElements?: string
+}
+
+interface SelectorAgentSelectionResult {
+  selector: string | null
+  reasoning: string
+  confidence: number
+  alternatives: string[]
+  suggestions?: string[]
+  raw?: string
+  parseError?: string
+}
+
+interface ElectronSelectorAgentAPI {
+  init: (options?: SelectorAgentInitOptions) => Promise<SelectorAgentResult>
+  prime: (context: SelectorAgentPageContext) => Promise<SelectorAgentResult>
+  select: (description: string, options?: SelectorAgentSelectOptions) => Promise<SelectorAgentResult>
+  send: (text: string) => Promise<SelectorAgentResult>
+  isActive: () => Promise<SelectorAgentActiveResult>
+  getContextState: () => Promise<SelectorAgentContextState>
+  reset: () => Promise<SelectorAgentResult>
+  interrupt: () => Promise<SelectorAgentResult>
+  onTextChunk: (callback: (text: string) => void) => () => void
+  onSelectionResult: (callback: (result: SelectorAgentSelectionResult) => void) => () => void
+  onReady: (callback: () => void) => () => void
+  onError: (callback: (error: string) => void) => () => void
+}
+
 interface ElectronAPI {
   git: ElectronGitAPI
   files: ElectronFilesAPI
@@ -529,6 +586,7 @@ interface ElectronAPI {
   codex: ElectronCodexAPI
   api: ElectronApiAPI
   claudeCode: ElectronClaudeCodeAPI
+  selectorAgent?: ElectronSelectorAgentAPI
   mcp?: ElectronMCPAPI
   voice?: ElectronVoiceAPI
   tabdata?: ElectronTabDataAPI
