@@ -275,6 +275,95 @@ contextBridge.exposeInMainWorld('electronAPI', {
     webSearch: (query, maxResults) => ipcRenderer.invoke('ai-sdk:web-search', { query, maxResults }),
   },
 
+  // Agent SDK operations (Claude models with full streaming)
+  agentSdk: {
+    // Stream chat with Agent SDK (for Claude 4.5+ models)
+    stream: (options) => ipcRenderer.invoke('agent-sdk:stream', options),
+    // Send follow-up message to active session
+    sendMessage: (text) => ipcRenderer.invoke('agent-sdk:send-message', text),
+    // Stop current response
+    stop: () => ipcRenderer.invoke('agent-sdk:stop'),
+    // Reset session
+    reset: () => ipcRenderer.invoke('agent-sdk:reset'),
+    // Check if session is active
+    isActive: () => ipcRenderer.invoke('agent-sdk:is-active'),
+    // Check if model supports Agent SDK
+    supportsModel: (modelId) => ipcRenderer.invoke('agent-sdk:supports-model', modelId),
+    // Listen for text chunks
+    onTextChunk: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:text-chunk', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:text-chunk', handler)
+    },
+    // Listen for thinking start
+    onThinkingStart: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:thinking-start', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:thinking-start', handler)
+    },
+    // Listen for thinking chunks
+    onThinkingChunk: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:thinking-chunk', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:thinking-chunk', handler)
+    },
+    // Listen for tool start
+    onToolStart: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:tool-start', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:tool-start', handler)
+    },
+    // Listen for tool input deltas (partial JSON)
+    onToolInputDelta: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:tool-input-delta', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:tool-input-delta', handler)
+    },
+    // Listen for tool results
+    onToolResult: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:tool-result', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:tool-result', handler)
+    },
+    // Listen for block stop
+    onBlockStop: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:block-stop', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:block-stop', handler)
+    },
+    // Listen for completion
+    onComplete: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:complete', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:complete', handler)
+    },
+    // Listen for errors
+    onError: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:error', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:error', handler)
+    },
+    // Listen for interruption
+    onInterrupted: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('agent-sdk:interrupted', handler)
+      return () => ipcRenderer.removeListener('agent-sdk:interrupted', handler)
+    },
+    // Remove all listeners
+    removeAllListeners: () => {
+      ipcRenderer.removeAllListeners('agent-sdk:text-chunk')
+      ipcRenderer.removeAllListeners('agent-sdk:thinking-start')
+      ipcRenderer.removeAllListeners('agent-sdk:thinking-chunk')
+      ipcRenderer.removeAllListeners('agent-sdk:tool-start')
+      ipcRenderer.removeAllListeners('agent-sdk:tool-input-delta')
+      ipcRenderer.removeAllListeners('agent-sdk:tool-result')
+      ipcRenderer.removeAllListeners('agent-sdk:block-stop')
+      ipcRenderer.removeAllListeners('agent-sdk:complete')
+      ipcRenderer.removeAllListeners('agent-sdk:error')
+      ipcRenderer.removeAllListeners('agent-sdk:interrupted')
+    },
+  },
+
   // Fast Apply (Local LLM for instant code merging) - Pro Feature
   fastApply: {
     // Get current status of Fast Apply

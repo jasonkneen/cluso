@@ -8,6 +8,7 @@ const claudeSession = require('./claude-session.cjs')
 const mcp = require('./mcp.cjs')
 const selectorAgent = require('./selector-agent.cjs')
 const aiSdkWrapper = require('./ai-sdk-wrapper.cjs')
+const agentSdkWrapper = require('./agent-sdk-wrapper.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -2162,6 +2163,68 @@ function registerFastApplyHandlers() {
   console.log('[FastApply] IPC handlers registered')
 }
 
+// ============================================================================
+// Agent SDK Handlers (Claude 4.5+ models with full streaming)
+// ============================================================================
+
+function registerAgentSdkHandlers() {
+  // Stream chat with Agent SDK
+  ipcMain.handle('agent-sdk:stream', async (_event, options) => {
+    const requestId = options.requestId || require('crypto').randomUUID()
+    options.requestId = requestId
+
+    // Start streaming in background
+    agentSdkWrapper.streamChat(options).catch(error => {
+      console.error('[Agent-SDK] Stream handler error:', error)
+      mainWindow.webContents.send('agent-sdk:error', { requestId, error: error.message })
+    })
+
+    return { success: true, requestId }
+  })
+
+  // Send follow-up message
+  ipcMain.handle('agent-sdk:send-message', async (_event, text) => {
+    try {
+      await agentSdkWrapper.sendMessage(text)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Stop current response
+  ipcMain.handle('agent-sdk:stop', async () => {
+    try {
+      const interrupted = await agentSdkWrapper.interruptCurrentResponse()
+      return { success: true, interrupted }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Reset session
+  ipcMain.handle('agent-sdk:reset', async () => {
+    try {
+      await agentSdkWrapper.resetSession()
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Check if session is active
+  ipcMain.handle('agent-sdk:is-active', () => {
+    return { active: agentSdkWrapper.isSessionActive() }
+  })
+
+  // Check if model supports Agent SDK
+  ipcMain.handle('agent-sdk:supports-model', (_event, modelId) => {
+    return { supported: agentSdkWrapper.supportsAgentSDK(modelId) }
+  })
+
+  console.log('[Agent-SDK] IPC handlers registered')
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -2253,6 +2316,7 @@ app.whenReady().then(async () => {
   registerMCPHandlers()
   registerSelectorAgentHandlers()
   registerFastApplyHandlers()
+  registerAgentSdkHandlers()
 
   // Register AI SDK handlers and initialize
   aiSdkWrapper.registerHandlers()
@@ -2265,9 +2329,10 @@ app.whenReady().then(async () => {
 
   createWindow()
 
-  // Set main window reference for MCP events and AI SDK events
+  // Set main window reference for MCP events, AI SDK events, and Agent SDK events
   mcp.setMainWindow(mainWindow)
   aiSdkWrapper.setMainWindow(mainWindow)
+  agentSdkWrapper.setMainWindow(mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
