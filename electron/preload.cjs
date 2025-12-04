@@ -123,6 +123,46 @@ contextBridge.exposeInMainWorld('electronAPI', {
     list: (projectPath) => ipcRenderer.invoke('tabdata:list', projectPath),
   },
 
+  // Selector Agent (persistent Claude Agent SDK session for fast element selection)
+  selectorAgent: {
+    // Initialize selector agent session
+    init: (options) => ipcRenderer.invoke('selector-agent:init', options),
+    // Prime context with page elements (proactive context loading)
+    prime: (context) => ipcRenderer.invoke('selector-agent:prime', context),
+    // Request element selection based on description
+    select: (description, options) => ipcRenderer.invoke('selector-agent:select', { description, options }),
+    // Send a general message to the session
+    send: (text) => ipcRenderer.invoke('selector-agent:send', text),
+    // Check if session is active
+    isActive: () => ipcRenderer.invoke('selector-agent:is-active'),
+    // Get current context state (isPrimed, pageUrl, etc.)
+    getContextState: () => ipcRenderer.invoke('selector-agent:context-state'),
+    // Reset the session
+    reset: () => ipcRenderer.invoke('selector-agent:reset'),
+    // Interrupt current response
+    interrupt: () => ipcRenderer.invoke('selector-agent:interrupt'),
+    // Listen for streaming text chunks
+    onTextChunk: (callback) => {
+      ipcRenderer.on('selector-agent:text-chunk', (_event, text) => callback(text))
+      return () => ipcRenderer.removeAllListeners('selector-agent:text-chunk')
+    },
+    // Listen for selection results
+    onSelectionResult: (callback) => {
+      ipcRenderer.on('selector-agent:selection-result', (_event, result) => callback(result))
+      return () => ipcRenderer.removeAllListeners('selector-agent:selection-result')
+    },
+    // Listen for ready event
+    onReady: (callback) => {
+      ipcRenderer.on('selector-agent:ready', () => callback())
+      return () => ipcRenderer.removeAllListeners('selector-agent:ready')
+    },
+    // Listen for errors
+    onError: (callback) => {
+      ipcRenderer.on('selector-agent:error', (_event, error) => callback(error))
+      return () => ipcRenderer.removeAllListeners('selector-agent:error')
+    },
+  },
+
   // Claude Code SDK operations (uses Claude Agent SDK with OAuth)
   claudeCode: {
     // Start a session with initial prompt
