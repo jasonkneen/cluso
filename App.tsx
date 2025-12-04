@@ -284,6 +284,17 @@ export default function App() {
   }, []);
 
   const handleCloseTab = useCallback((tabId: string) => {
+    // Find the tab to check if it's a project tab
+    const tabToClose = tabs.find(t => t.id === tabId);
+
+    // If it's a project tab, show confirmation
+    if (tabToClose?.projectPath) {
+      const confirmed = window.confirm(
+        `Close project "${tabToClose.title || 'Untitled'}"?\n\nThis will close the project and clear its chat history.`
+      );
+      if (!confirmed) return;
+    }
+
     setTabs(prev => {
       const filtered = prev.filter(t => t.id !== tabId);
       if (filtered.length === 0) {
@@ -298,7 +309,14 @@ export default function App() {
       }
       return filtered;
     });
-  }, [activeTabId]);
+
+    // Clear chat history for the closed tab (especially for project tabs)
+    if (tabToClose?.projectPath) {
+      setMessages([]);
+      setSelectedFiles([]);
+      setSelectedElement(null);
+    }
+  }, [activeTabId, tabs]);
 
   const handleSelectTab = useCallback((tabId: string) => {
     setActiveTabId(tabId);
@@ -525,6 +543,7 @@ export default function App() {
     url: t.url,
     favicon: t.favicon,
     type: t.type || 'browser',
+    isProject: !!t.projectPath, // Mark project tabs with folder icon
   }));
 
   // Browser State
@@ -856,7 +875,8 @@ export default function App() {
       const hasError = toolResult.result && typeof toolResult.result === 'object' && 'error' in toolResult.result;
       if (hasError) {
         const errorMsg = String((toolResult.result as any).error);
-        const toolError = createToolError(toolResult.toolCallId, 'tool', new Error(errorMsg));
+        const toolName = toolResult.toolName?.replace(/^mcp_[^_]+_/, '') || 'tool';
+        const toolError = createToolError(toolResult.toolCallId, toolName, new Error(errorMsg));
         const display = formatErrorForDisplay(toolError);
         console.log(`[Tool Error] ${display.title}: ${display.description}`);
         toolTracker.trackError(toolResult.toolCallId, errorMsg)
@@ -1307,10 +1327,22 @@ export default function App() {
       finalUrl = 'http://' + finalUrl;
     }
     console.log('Navigating to:', finalUrl);
+
+    // Check if any existing tab has this URL with a projectPath - inherit it
+    const matchingProjectTab = tabs.find(t =>
+      t.projectPath && t.url && t.url.toLowerCase() === finalUrl.toLowerCase()
+    );
+
     // Update both display URL and tab's navigation URL
     setUrlInput(finalUrl);
-    updateCurrentTab({ url: finalUrl });
-  }, [updateCurrentTab]);
+    if (matchingProjectTab && !activeTab.projectPath) {
+      // Inherit projectPath from matching project tab
+      console.log('Inheriting projectPath from matching tab:', matchingProjectTab.projectPath);
+      updateCurrentTab({ url: finalUrl, projectPath: matchingProjectTab.projectPath });
+    } else {
+      updateCurrentTab({ url: finalUrl });
+    }
+  }, [updateCurrentTab, tabs, activeTab.projectPath]);
 
   const handleUrlSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -2271,8 +2303,10 @@ export default function App() {
   // Load directory listing for @ command
   const loadDirectoryFiles = useCallback(async (dirPath?: string) => {
     if (!isElectron || !window.electronAPI?.files) return;
+    console.log('[@ Files] Loading directory:', dirPath || '(default)');
     const result = await window.electronAPI.files.listDirectory(dirPath);
     if (result.success && result.data) {
+      console.log('[@ Files] Loaded', result.data.length, 'files from:', dirPath || '(default)');
       setDirectoryFiles(result.data);
       if (dirPath) {
         setCurrentDirectory(dirPath);
@@ -2288,15 +2322,16 @@ export default function App() {
     setAutocompleteIndex(0);
   }, [currentDirectory, loadDirectoryFiles]);
 
-  // Navigate back to parent directory
+  // Navigate back to parent directory - use project path as root
   const navigateBack = useCallback(() => {
     const newStack = [...directoryStack];
     const parentDir = newStack.pop();
     setDirectoryStack(newStack);
-    loadDirectoryFiles(parentDir || undefined);
+    // If no parent in stack, go back to project root (or system root if no project)
+    loadDirectoryFiles(parentDir || activeTab.projectPath || undefined);
     setFileSearchQuery('');
     setAutocompleteIndex(0);
-  }, [directoryStack, loadDirectoryFiles]);
+  }, [directoryStack, loadDirectoryFiles, activeTab.projectPath]);
 
   // Handle @ command - select a file from the list
   const handleFileSelect = useCallback(async (filePath: string) => {
@@ -2306,7 +2341,24 @@ export default function App() {
     if (result.success && result.data) {
       const { path, content } = result.data;
       setSelectedFiles(prev => [...prev, { path, content }]);
-      setInput(''); // Clear @ command
+
+      // Replace the @query with the file reference in the input
+      // Find the last @ and replace from there to the end (or to the next space)
+      setInput(prevInput => {
+        const lastAtIndex = prevInput.lastIndexOf('@');
+        if (lastAtIndex === -1) return ''; // Fallback: clear input
+
+        // Get everything before the @
+        const beforeAt = prevInput.substring(0, lastAtIndex);
+
+        // Create a short display name for the file reference
+        const fileName = path.split('/').pop() || path;
+
+        // Return the text before @ + a reference marker (file is now in selectedFiles)
+        // Add a space after so user can continue typing
+        return `${beforeAt}[${fileName}] `;
+      });
+
       setShowFileAutocomplete(false);
       setFileSearchQuery('');
       setAutocompleteIndex(0);
@@ -2354,19 +2406,31 @@ export default function App() {
     setInput(value);
     setAutocompleteIndex(0);
 
-    // Detect @ command for file selection
-    if (value.startsWith('@')) {
-      const query = value.substring(1);
-      console.log('[Input] @ detected, query:', query);
-      setFileSearchQuery(query);
-      setShowFileAutocomplete(true);
-      setShowCommandAutocomplete(false);
-      // Load files on first @
-      if (value === '@') {
-        loadDirectoryFiles();
+    // Detect @ command for file selection - works ANYWHERE in input
+    // Find the last @ symbol to get the current query
+    const lastAtIndex = value.lastIndexOf('@');
+    if (lastAtIndex !== -1) {
+      // Check if there's a space after the @ (means user finished typing file ref)
+      const afterAt = value.substring(lastAtIndex + 1);
+      const hasSpaceAfter = afterAt.includes(' ');
+      if (!hasSpaceAfter) {
+        const query = afterAt;
+        console.log('[Input] @ detected at position', lastAtIndex, 'query:', query);
+        setFileSearchQuery(query);
+        setShowFileAutocomplete(true);
+        setShowCommandAutocomplete(false);
+        // Load files on first @ - use project path if available
+        if (query === '') {
+          console.log('[@ Files] First @, using project path:', activeTab.projectPath || '(none)');
+          loadDirectoryFiles(activeTab.projectPath || undefined);
+        }
+      } else {
+        // User has moved past the @ reference, hide autocomplete
+        setShowFileAutocomplete(false);
+        setFileSearchQuery('');
       }
     }
-    // Detect / command for prompt selection
+    // Detect / command for prompt selection - ONLY at start of input
     else if (value.startsWith('/')) {
       const query = value.substring(1);
       console.log('[Input] / detected, query:', query);
@@ -2405,7 +2469,7 @@ export default function App() {
     } else {
       setPreviewIntent(null);
     }
-  }, [loadDirectoryFiles, processCodingMessage]);
+  }, [loadDirectoryFiles, processCodingMessage, activeTab.projectPath]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -4873,7 +4937,7 @@ If you're not sure what the user wants, ask for clarification.
           providers: providerConfigs,
           system: shouldUseTools ? agentSystemPrompt : undefined,
           tools: shouldUseTools ? tools : undefined,
-          maxSteps: 6, // Reduced for faster responses
+          maxSteps: 15, // Allow more steps for complex file operations
           enableReasoning: thinkingLevel !== 'off',
           mcpTools: mcpToolDefinitions, // Pass MCP tools separately
           projectFolder: activeTab?.projectPath || undefined,
@@ -5633,9 +5697,15 @@ If you're not sure what the user wants, ask for clarification.
               <input
                 type="text"
                 value={urlInput}
-                onChange={(e) => setUrlInput(e.target.value)}
-                className={`w-full h-8 px-3 pr-8 text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 ${isDarkMode ? 'bg-neutral-700 border-neutral-600 text-neutral-100 placeholder-neutral-400' : 'bg-white border border-stone-200'}`}
+                onChange={(e) => !activeTab.projectPath && setUrlInput(e.target.value)}
+                readOnly={!!activeTab.projectPath}
+                className={`w-full h-8 px-3 pr-8 text-sm rounded-full focus:outline-none ${
+                  activeTab.projectPath
+                    ? `cursor-default ${isDarkMode ? 'bg-neutral-800 border-neutral-700 text-neutral-400' : 'bg-stone-100 border-stone-200 text-stone-500'}`
+                    : `focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 ${isDarkMode ? 'bg-neutral-700 border-neutral-600 text-neutral-100 placeholder-neutral-400' : 'bg-white border border-stone-200'}`
+                }`}
                 placeholder="Enter URL..."
+                title={activeTab.projectPath ? `Locked to project: ${activeTab.projectPath}` : 'Enter URL...'}
               />
               {isLoading && (
                 <div className="absolute right-2 top-1/2 -translate-y-1/2">
@@ -6535,43 +6605,7 @@ If you're not sure what the user wants, ask for clarification.
                   </div>
               )}
 
-              {/* Tool Execution Status - Shows running/completed tools */}
-              {toolTracker.toolCalls.length > 0 && (
-                <div className={`mb-4 p-3 rounded-lg ${isDarkMode ? 'bg-neutral-800' : 'bg-stone-100'}`}>
-                  <div className="text-xs font-medium mb-2 opacity-70">Tools Executing</div>
-                  <div className="space-y-1">
-                    {toolTracker.toolCalls.map(tool => (
-                      <div key={tool.id} className="flex items-center gap-2 text-xs">
-                        {/* Status indicator */}
-                        {tool.status === 'running' && (
-                          <Loader2 size={12} className="animate-spin text-blue-500" />
-                        )}
-                        {tool.status === 'success' && (
-                          <Check size={12} className="text-green-500" />
-                        )}
-                        {tool.status === 'error' && (
-                          <X size={12} className="text-red-500" />
-                        )}
-                        
-                        {/* Tool name */}
-                        <span className="font-mono font-medium">{tool.name}</span>
-                        
-                        {/* Duration (if completed) */}
-                        {tool.duration && (
-                          <span className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'}>
-                            {tool.duration}ms
-                          </span>
-                        )}
-                        
-                        {/* Error message (if failed) */}
-                        {tool.error && (
-                          <span className="text-red-500 text-[11px]">{tool.error}</span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* Tool chips now only shown in messages, not separately at top */}
 
               {messages.map((msg) => (
                   <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
@@ -6594,29 +6628,20 @@ If you're not sure what the user wants, ask for clarification.
                         </details>
                       )}
 
-                      {/* Tool Usage Display for Assistant Messages */}
+                      {/* Tool Usage Display for Assistant Messages - Compact chips */}
                       {msg.role === 'assistant' && msg.toolUsage && msg.toolUsage.length > 0 && (
-                        <div className={`mb-2 w-full space-y-1`}>
+                        <div className="mb-2 flex flex-wrap gap-1.5">
                           {msg.toolUsage.map((tool, idx) => (
                             <div
                               key={tool.id || idx}
-                              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
                                 tool.isError
-                                  ? isDarkMode ? 'bg-red-500/20 text-red-300 border border-red-500/30' : 'bg-red-50 text-red-700 border border-red-200'
-                                  : isDarkMode ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  ? isDarkMode ? 'bg-red-500/20 text-red-300' : 'bg-red-100 text-red-700'
+                                  : isDarkMode ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
                               }`}
                             >
-                              <span className="font-mono font-medium">{tool.name}</span>
-                              {tool.args && Object.keys(tool.args).length > 0 && (
-                                <span className="opacity-70">
-                                  ({Object.entries(tool.args).map(([k, v]) =>
-                                    `${k}: ${typeof v === 'string' ? (v.length > 30 ? v.slice(0, 30) + '...' : v) : JSON.stringify(v)}`
-                                  ).join(', ')})
-                                </span>
-                              )}
-                              <span className="ml-auto">
-                                {tool.isError ? '❌' : '✓'}
-                              </span>
+                              {tool.isError ? <X size={10} /> : <Check size={10} />}
+                              <span className="font-mono">{tool.name}</span>
                             </div>
                           ))}
                         </div>
@@ -6642,34 +6667,24 @@ If you're not sure what the user wants, ask for clarification.
               {/* Streaming Message Display */}
               {isStreaming && streamingMessage && (
                 <div className="flex flex-col items-start">
-                  {/* Streaming Tool Calls */}
+                  {/* Streaming Tool Calls - Compact chips */}
                   {streamingMessage.toolCalls.length > 0 && (
-                    <div className="mb-2 w-full space-y-1">
+                    <div className="mb-2 flex flex-wrap gap-1.5">
                       {streamingMessage.toolCalls.map((tool, idx) => (
                         <div
                           key={tool.id || idx}
-                          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-all ${
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all ${
                             tool.status === 'running'
-                              ? isDarkMode ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-blue-50 text-blue-700 border border-blue-200'
+                              ? isDarkMode ? 'bg-blue-500/20 text-blue-300' : 'bg-blue-100 text-blue-700'
                               : tool.status === 'error'
-                              ? isDarkMode ? 'bg-red-500/20 text-red-300 border border-red-500/30' : 'bg-red-50 text-red-700 border border-red-200'
-                              : isDarkMode ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              ? isDarkMode ? 'bg-red-500/20 text-red-300' : 'bg-red-100 text-red-700'
+                              : isDarkMode ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
                           }`}
                         >
-                          {tool.status === 'running' && (
-                            <Loader2 size={12} className="animate-spin" />
-                          )}
-                          <span className="font-mono font-medium">{tool.name}</span>
-                          {tool.args && Object.keys(tool.args as object).length > 0 && (
-                            <span className="opacity-70 truncate max-w-[200px]">
-                              ({Object.entries(tool.args as object).map(([k, v]) =>
-                                `${k}: ${typeof v === 'string' ? (v.length > 20 ? v.slice(0, 20) + '...' : v) : JSON.stringify(v)}`
-                              ).join(', ')})
-                            </span>
-                          )}
-                          <span className="ml-auto">
-                            {tool.status === 'running' ? '⏳' : tool.status === 'error' ? '❌' : '✓'}
-                          </span>
+                          {tool.status === 'running' && <Loader2 size={10} className="animate-spin" />}
+                          {tool.status === 'done' && <Check size={10} />}
+                          {tool.status === 'error' && <X size={10} />}
+                          <span className="font-mono">{tool.name}</span>
                         </div>
                       ))}
                     </div>
@@ -7366,7 +7381,7 @@ If you're not sure what the user wants, ask for clarification.
                                       setFileSearchQuery('');
                                       setDirectoryStack([]);
                                       setCurrentDirectory('');
-                                      loadDirectoryFiles();
+                                      loadDirectoryFiles(activeTab.projectPath || undefined);
                                       setInput('');
                                   }
                                   return;

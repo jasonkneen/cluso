@@ -69,6 +69,8 @@ Your tools:
 
 ${context.projectPath ? `Project: ${context.projectPath}` : ''}
 
+FORMATTING: Use separate paragraphs for distinct thoughts. Add a blank line between paragraphs.
+
 START WORKING IMMEDIATELY. Read files, make changes, execute.`
 }
 
@@ -87,6 +89,8 @@ CRITICAL BEHAVIOR:
 - When you need to see files: READ THEM with read_file or list_directory
 - When you need to search: USE search_in_files or find_files
 - BE PROACTIVE - just do the work, don't ask for permission
+
+FORMATTING: Use separate paragraphs for distinct thoughts. Add a blank line between paragraphs for readability.
 
 Your tools:
 - list_directory(path): List files in a directory

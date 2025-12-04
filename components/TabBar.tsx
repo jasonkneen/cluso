@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Plus, X, Sun, Moon, Settings, Globe, LayoutGrid, CheckSquare, FileText, Columns3, Zap } from 'lucide-react'
+import { Plus, X, Sun, Moon, Settings, Globe, LayoutGrid, CheckSquare, FileText, Columns3, Zap, FolderOpen } from 'lucide-react'
 
 export type TabType = 'browser' | 'kanban' | 'todos' | 'notes'
 
@@ -9,6 +9,7 @@ export interface Tab {
   url: string
   favicon?: string
   type: TabType
+  isProject?: boolean // True if this tab is linked to a project folder
 }
 
 interface TabBarProps {
@@ -132,8 +133,10 @@ export function TabBar({
               `}
               style={{ position: 'relative', top: '3px' }}
             >
-              {/* Tab Type Icon or Favicon */}
-              {tab.type === 'browser' && tab.favicon ? (
+              {/* Tab Type Icon or Favicon - Project tabs get folder icon */}
+              {tab.isProject ? (
+                <FolderOpen size={14} className="flex-shrink-0 text-amber-500" />
+              ) : tab.type === 'browser' && tab.favicon ? (
                 <img src={tab.favicon} alt="" className="w-4 h-4 flex-shrink-0" />
               ) : (
                 <TabIcon size={14} className="flex-shrink-0" />
