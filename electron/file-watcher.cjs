@@ -16,6 +16,24 @@ const watchers = new Map()
 // Reference to main window for sending events
 let mainWindow = null
 
+// Reference to LSP manager (set lazily to avoid circular deps)
+let lspManager = null
+
+/**
+ * Get the LSP manager (lazy load to avoid circular dependencies)
+ */
+function getLspManager() {
+  if (!lspManager) {
+    try {
+      const lsp = require('./lsp/index.cjs')
+      lspManager = lsp.getManager()
+    } catch (err) {
+      // LSP not available
+    }
+  }
+  return lspManager
+}
+
 /**
  * Set the main window reference for IPC
  */
@@ -24,7 +42,7 @@ function setMainWindow(win) {
 }
 
 /**
- * Send file change event to renderer
+ * Send file change event to renderer and notify LSP
  */
 function sendFileChange(type, filePath, projectPath) {
   if (!mainWindow || mainWindow.isDestroyed()) return
@@ -36,6 +54,23 @@ function sendFileChange(type, filePath, projectPath) {
     projectPath,
     timestamp: Date.now(),
   })
+
+  // Notify LSP of file changes (async, don't block)
+  const mgr = getLspManager()
+  if (mgr) {
+    if (type === 'add' || type === 'change') {
+      // Touch file to notify LSP servers
+      mgr.touchFile(filePath, false).catch(err => {
+        console.log('[FileWatcher] LSP touch failed:', err.message)
+      })
+    }
+    if (type === 'change') {
+      // Also notify of save (file was modified externally)
+      mgr.fileSaved(filePath).catch(err => {
+        console.log('[FileWatcher] LSP save notify failed:', err.message)
+      })
+    }
+  }
 }
 
 /**

@@ -12,6 +12,7 @@ const agentSdkWrapper = require('./agent-sdk-wrapper.cjs')
 const fileWatcher = require('./file-watcher.cjs')
 const backgroundValidator = require('./background-validator.cjs')
 const agentTodos = require('./agent-todos.cjs')
+const lsp = require('./lsp/index.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -1012,6 +1013,145 @@ function registerGitHandlers() {
 
   ipcMain.handle('agent-todos:agent-info', async (event, agentId) => {
     return agentTodos.getAgentInfo(agentId)
+  })
+
+  // LSP handlers - Language Server Protocol integration
+  ipcMain.handle('lsp:init', async (event, projectPath) => {
+    try {
+      await lsp.init(projectPath)
+      return { success: true }
+    } catch (error) {
+      console.error('[LSP] Init failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:shutdown', async () => {
+    try {
+      await lsp.shutdown()
+      return { success: true }
+    } catch (error) {
+      console.error('[LSP] Shutdown failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:status', async () => {
+    try {
+      const manager = lsp.getManager()
+      return { success: true, data: await manager.getStatus() }
+    } catch (error) {
+      console.error('[LSP] Status failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:touch-file', async (event, filePath, waitForDiagnostics = false) => {
+    try {
+      const manager = lsp.getManager()
+      const count = await manager.touchFile(filePath, waitForDiagnostics)
+      return { success: true, clientCount: count }
+    } catch (error) {
+      console.error('[LSP] Touch file failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:file-changed', async (event, filePath, content) => {
+    try {
+      const manager = lsp.getManager()
+      await manager.fileChanged(filePath, content)
+      return { success: true }
+    } catch (error) {
+      console.error('[LSP] File changed failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:file-saved', async (event, filePath) => {
+    try {
+      const manager = lsp.getManager()
+      await manager.fileSaved(filePath)
+      return { success: true }
+    } catch (error) {
+      console.error('[LSP] File saved failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:diagnostics', async () => {
+    try {
+      const manager = lsp.getManager()
+      return { success: true, data: manager.getAllDiagnostics() }
+    } catch (error) {
+      console.error('[LSP] Get diagnostics failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:diagnostics-for-file', async (event, filePath) => {
+    try {
+      const manager = lsp.getManager()
+      return { success: true, data: manager.getDiagnosticsForFile(filePath) }
+    } catch (error) {
+      console.error('[LSP] Get diagnostics for file failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:hover', async (event, filePath, line, character) => {
+    try {
+      const manager = lsp.getManager()
+      const result = await manager.hover(filePath, line, character)
+      return { success: true, data: result }
+    } catch (error) {
+      console.error('[LSP] Hover failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:completion', async (event, filePath, line, character) => {
+    try {
+      const manager = lsp.getManager()
+      const result = await manager.completion(filePath, line, character)
+      return { success: true, data: result }
+    } catch (error) {
+      console.error('[LSP] Completion failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:definition', async (event, filePath, line, character) => {
+    try {
+      const manager = lsp.getManager()
+      const result = await manager.definition(filePath, line, character)
+      return { success: true, data: result }
+    } catch (error) {
+      console.error('[LSP] Definition failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:references', async (event, filePath, line, character) => {
+    try {
+      const manager = lsp.getManager()
+      const result = await manager.references(filePath, line, character)
+      return { success: true, data: result }
+    } catch (error) {
+      console.error('[LSP] References failed:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('lsp:set-server-enabled', async (event, serverId, enabled) => {
+    try {
+      const manager = lsp.getManager()
+      manager.setServerEnabled(serverId, enabled)
+      return { success: true }
+    } catch (error) {
+      console.error('[LSP] Set server enabled failed:', error)
+      return { success: false, error: error.message }
+    }
   })
 
   // Get file stats (size, modified time, etc)
@@ -2482,6 +2622,7 @@ app.whenReady().then(async () => {
   aiSdkWrapper.setMainWindow(mainWindow)
   agentSdkWrapper.setMainWindow(mainWindow)
   fileWatcher.setMainWindow(mainWindow)
+  lsp.setMainWindow(mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

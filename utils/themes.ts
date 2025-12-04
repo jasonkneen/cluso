@@ -252,20 +252,37 @@ export function getTheme(themeId: string): AppTheme {
 export function applyThemeToDocument(theme: AppTheme): void {
   const root = document.documentElement
 
-  // System default: remove custom theme and use system preferences
+  // Check if dark mode is enabled (via .dark class)
+  const isDarkMode = root.classList.contains('dark') ||
+    window.matchMedia('(prefers-color-scheme: dark)').matches
+
+  // System default: use default dark/light colors based on system preference
   if (theme.id === 'system-default') {
     root.removeAttribute('data-theme')
-    // Remove custom properties
-    root.style.removeProperty('--color-background')
-    root.style.removeProperty('--color-foreground')
-    root.style.removeProperty('--color-primary')
-    root.style.removeProperty('--color-secondary')
-    root.style.removeProperty('--color-accent')
-    root.style.removeProperty('--color-border')
-    root.style.removeProperty('--color-success')
-    root.style.removeProperty('--color-error')
-    root.style.removeProperty('--color-warning')
-    root.style.removeProperty('--color-info')
+    // Set default colors based on dark/light mode
+    if (isDarkMode) {
+      root.style.setProperty('--color-background', '#171717') // neutral-900
+      root.style.setProperty('--color-foreground', '#f5f5f5') // neutral-100
+      root.style.setProperty('--color-primary', '#3b82f6') // blue-500
+      root.style.setProperty('--color-secondary', '#8b5cf6') // violet-500
+      root.style.setProperty('--color-accent', '#06b6d4') // cyan-500
+      root.style.setProperty('--color-border', '#404040') // neutral-700
+      root.style.setProperty('--color-success', '#22c55e') // green-500
+      root.style.setProperty('--color-error', '#ef4444') // red-500
+      root.style.setProperty('--color-warning', '#f59e0b') // amber-500
+      root.style.setProperty('--color-info', '#3b82f6') // blue-500
+    } else {
+      root.style.setProperty('--color-background', '#d6d3d1') // stone-300 - matches title bar
+      root.style.setProperty('--color-foreground', '#171717') // neutral-900
+      root.style.setProperty('--color-primary', '#2563eb') // blue-600
+      root.style.setProperty('--color-secondary', '#7c3aed') // violet-600
+      root.style.setProperty('--color-accent', '#0891b2') // cyan-600
+      root.style.setProperty('--color-border', '#e7e5e4') // stone-200
+      root.style.setProperty('--color-success', '#16a34a') // green-600
+      root.style.setProperty('--color-error', '#dc2626') // red-600
+      root.style.setProperty('--color-warning', '#d97706') // amber-600
+      root.style.setProperty('--color-info', '#2563eb') // blue-600
+    }
     return
   }
 

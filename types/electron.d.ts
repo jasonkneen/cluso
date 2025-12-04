@@ -766,6 +766,92 @@ interface ElectronAgentTodosAPI {
   getAgentInfo: (agentId: string) => Promise<AgentInfo | null>
 }
 
+// LSP Diagnostic from language servers
+interface LSPDiagnostic {
+  range: {
+    start: { line: number; character: number }
+    end: { line: number; character: number }
+  }
+  severity?: 1 | 2 | 3 | 4 // Error, Warning, Info, Hint
+  code?: string | number
+  source?: string
+  message: string
+  relatedInformation?: Array<{
+    location: { uri: string; range: LSPDiagnostic['range'] }
+    message: string
+  }>
+}
+
+// LSP Hover result
+interface LSPHoverResult {
+  contents: string | { kind: 'plaintext' | 'markdown'; value: string } | Array<string | { kind: string; value: string }>
+  range?: LSPDiagnostic['range']
+}
+
+// LSP Completion item
+interface LSPCompletionItem {
+  label: string
+  kind?: number
+  detail?: string
+  documentation?: string | { kind: string; value: string }
+  sortText?: string
+  filterText?: string
+  insertText?: string
+  textEdit?: {
+    range: LSPDiagnostic['range']
+    newText: string
+  }
+}
+
+// LSP Location (for definition/references)
+interface LSPLocation {
+  uri: string
+  range: LSPDiagnostic['range']
+}
+
+// LSP Server status for UI
+interface LSPServerStatus {
+  id: string
+  name: string
+  extensions: string[]
+  enabled: boolean
+  installed: boolean
+  installable: boolean
+  running: boolean
+  instances: Array<{
+    root: string
+    openDocuments: number
+    diagnosticCount: number
+  }>
+}
+
+// LSP Event types
+interface LSPEvent {
+  type: 'diagnostics' | 'server-started' | 'server-closed' | 'server-status-changed'
+  path?: string
+  diagnostics?: LSPDiagnostic[]
+  serverId?: string
+  root?: string
+  enabled?: boolean
+}
+
+interface ElectronLSPAPI {
+  init: (projectPath: string) => Promise<{ success: boolean; error?: string }>
+  shutdown: () => Promise<{ success: boolean; error?: string }>
+  getStatus: () => Promise<{ success: boolean; data?: LSPServerStatus[]; error?: string }>
+  touchFile: (filePath: string, waitForDiagnostics?: boolean) => Promise<{ success: boolean; clientCount?: number; error?: string }>
+  fileChanged: (filePath: string, content?: string) => Promise<{ success: boolean; error?: string }>
+  fileSaved: (filePath: string) => Promise<{ success: boolean; error?: string }>
+  getDiagnostics: () => Promise<{ success: boolean; data?: Record<string, LSPDiagnostic[]>; error?: string }>
+  getDiagnosticsForFile: (filePath: string) => Promise<{ success: boolean; data?: LSPDiagnostic[]; error?: string }>
+  hover: (filePath: string, line: number, character: number) => Promise<{ success: boolean; data?: LSPHoverResult | null; error?: string }>
+  completion: (filePath: string, line: number, character: number) => Promise<{ success: boolean; data?: LSPCompletionItem[]; error?: string }>
+  definition: (filePath: string, line: number, character: number) => Promise<{ success: boolean; data?: LSPLocation | LSPLocation[] | null; error?: string }>
+  references: (filePath: string, line: number, character: number) => Promise<{ success: boolean; data?: LSPLocation[]; error?: string }>
+  setServerEnabled: (serverId: string, enabled: boolean) => Promise<{ success: boolean; error?: string }>
+  onEvent: (callback: (event: LSPEvent) => void) => () => void
+}
+
 interface ElectronAPI {
   git: ElectronGitAPI
   files: ElectronFilesAPI
@@ -783,6 +869,7 @@ interface ElectronAPI {
   fileWatcher?: ElectronFileWatcherAPI
   validator?: ElectronValidatorAPI
   agentTodos?: ElectronAgentTodosAPI
+  lsp?: ElectronLSPAPI
   getWebviewPreloadPath: () => Promise<string>
   isElectron: boolean
 }

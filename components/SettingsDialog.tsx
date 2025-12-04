@@ -36,7 +36,7 @@ import { debugLog } from '../utils/debug'
 import { FastApplySettings } from './FastApplySettings'
 import { useTheme } from '../hooks/useTheme'
 
-type SettingsSection = 'general' | 'display' | 'providers' | 'models' | 'mcp' | 'themes' | 'pro'
+type SettingsSection = 'general' | 'display' | 'providers' | 'models' | 'mcp' | 'lsp' | 'themes' | 'pro'
 
 export interface Provider {
   id: string
@@ -172,6 +172,7 @@ const SECTIONS: { id: SettingsSection; label: string; icon: React.ReactNode }[] 
   { id: 'providers', label: 'Providers', icon: <Cpu size={18} /> },
   { id: 'models', label: 'Models', icon: <Brain size={18} /> },
   { id: 'mcp', label: 'MCP Servers', icon: <Server size={18} /> },
+  { id: 'lsp', label: 'Language Servers', icon: <Terminal size={18} /> },
   { id: 'themes', label: 'Themes', icon: <Palette size={18} /> },
   { id: 'pro', label: 'Pro Features', icon: <Zap size={18} /> },
 ]
@@ -233,6 +234,10 @@ export function SettingsDialog({
   const [isDiscovering, setIsDiscovering] = useState(false)
   const [disabledServers, setDisabledServers] = useState<Set<string>>(new Set())
 
+  // LSP Server state
+  const [lspServers, setLspServers] = useState<LSPServerStatus[]>([])
+  const [isLoadingLsp, setIsLoadingLsp] = useState(false)
+
   // Check Claude Code OAuth status on mount and when dialog opens
   useEffect(() => {
     if (isOpen && window.electronAPI?.oauth) {
@@ -275,6 +280,11 @@ export function SettingsDialog({
     if (isOpen && window.electronAPI?.mcp?.discover) {
       discoverMcpServers()
     }
+
+    // Load LSP server status when dialog opens
+    if (isOpen && window.electronAPI?.lsp?.getStatus) {
+      loadLspStatus()
+    }
   }, [isOpen])
 
   // Discover MCP servers from Claude Desktop, project, etc.
@@ -301,6 +311,36 @@ export function SettingsDialog({
       console.error('Failed to discover MCP servers:', err)
     } finally {
       setIsDiscovering(false)
+    }
+  }
+
+  // Load LSP server status
+  const loadLspStatus = async () => {
+    if (!window.electronAPI?.lsp?.getStatus) return
+
+    setIsLoadingLsp(true)
+    try {
+      const result = await window.electronAPI.lsp.getStatus()
+      if (result.success && result.data) {
+        setLspServers(result.data)
+      }
+    } catch (err) {
+      console.error('Failed to load LSP status:', err)
+    } finally {
+      setIsLoadingLsp(false)
+    }
+  }
+
+  // Toggle LSP server enabled/disabled
+  const toggleLspServer = async (serverId: string, enabled: boolean) => {
+    if (!window.electronAPI?.lsp?.setServerEnabled) return
+
+    try {
+      await window.electronAPI.lsp.setServerEnabled(serverId, enabled)
+      // Refresh status
+      loadLspStatus()
+    } catch (err) {
+      console.error('Failed to toggle LSP server:', err)
     }
   }
 
@@ -1586,28 +1626,6 @@ export function SettingsDialog({
                                     c.id === mcpConn.id ? { ...c, status: 'disconnected', toolCount: undefined, error: undefined } : c
                                   ) as Connection[],
                                 })
-                                {mcpConn.toolCount} tools
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {/* Connect/Disconnect/Cancel Button */}
-                        {window.electronAPI?.mcp && (
-                          <button
-                            onClick={async () => {
-                              const mcp = window.electronAPI?.mcp
-                              if (!mcp) return
-
-                              if (mcpConn.status === 'connected' || mcpConn.status === 'connecting') {
-                                // Disconnect or Cancel
-                                await mcp.disconnect(mcpConn.id)
-                                updateSettings({
-                                  connections: settings.connections.map(c =>
-                                    c.id === mcpConn.id ? { ...c, status: 'disconnected', toolCount: undefined, error: undefined } : c
-                                  ) as Connection[],
-                                })
                               } else {
                                 // Connect
                                 updateSettings({
@@ -1903,6 +1921,149 @@ export function SettingsDialog({
           </div>
         )
 
+      case 'lsp':
+        return (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                  Language Servers
+                </h3>
+                <p className={`text-xs mt-1 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                  LSP servers provide code intelligence in the background
+                </p>
+              </div>
+              <button
+                onClick={loadLspStatus}
+                disabled={isLoadingLsp}
+                className={`p-2 rounded-lg transition-colors ${
+                  isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'
+                } ${isLoadingLsp ? 'animate-spin' : ''}`}
+              >
+                <RefreshCw size={16} />
+              </button>
+            </div>
+
+            {/* Server List */}
+            <div className="space-y-3">
+              {isLoadingLsp && lspServers.length === 0 ? (
+                <div className={`p-4 text-center ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                  <Loader2 size={20} className="animate-spin mx-auto mb-2" />
+                  <p className="text-sm">Loading language servers...</p>
+                </div>
+              ) : lspServers.length === 0 ? (
+                <div className={`p-4 text-center ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                  <Terminal size={24} className="mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No language servers available</p>
+                </div>
+              ) : (
+                lspServers.map(server => (
+                  <div
+                    key={server.id}
+                    className={`p-4 rounded-lg border ${
+                      isDarkMode ? 'bg-neutral-800/50 border-neutral-700' : 'bg-stone-50 border-stone-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {/* Status indicator */}
+                        <div className={`w-2 h-2 rounded-full ${
+                          server.running
+                            ? 'bg-green-500'
+                            : server.installed
+                            ? 'bg-yellow-500'
+                            : 'bg-neutral-500'
+                        }`} />
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                              {server.name}
+                            </span>
+                            {server.running && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                                isDarkMode ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'
+                              }`}>
+                                Running
+                              </span>
+                            )}
+                            {!server.installed && server.installable && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                                isDarkMode ? 'bg-yellow-500/20 text-yellow-400' : 'bg-yellow-100 text-yellow-700'
+                              }`}>
+                                Not installed
+                              </span>
+                            )}
+                          </div>
+                          <div className={`text-xs mt-0.5 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                            {server.extensions.join(', ')}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Enable/disable toggle */}
+                      <button
+                        onClick={() => toggleLspServer(server.id, !server.enabled)}
+                        className={`w-10 h-6 rounded-full transition-colors relative ${
+                          server.enabled
+                            ? 'bg-blue-500'
+                            : isDarkMode ? 'bg-neutral-600' : 'bg-stone-300'
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                            server.enabled ? 'left-5' : 'left-1'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {/* Running instances */}
+                    {server.running && server.instances.length > 0 && (
+                      <div className={`mt-3 pt-3 border-t ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
+                        <div className="space-y-1">
+                          {server.instances.map((instance, idx) => (
+                            <div
+                              key={idx}
+                              className={`flex items-center justify-between text-xs ${
+                                isDarkMode ? 'text-neutral-400' : 'text-stone-500'
+                              }`}
+                            >
+                              <span className="font-mono truncate max-w-[200px]" title={instance.root}>
+                                {instance.root.split('/').pop()}
+                              </span>
+                              <div className="flex items-center gap-3">
+                                <span>{instance.openDocuments} files</span>
+                                {instance.diagnosticCount > 0 && (
+                                  <span className={`flex items-center gap-1 ${
+                                    isDarkMode ? 'text-yellow-400' : 'text-yellow-600'
+                                  }`}>
+                                    <AlertCircle size={12} />
+                                    {instance.diagnosticCount}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Info Box */}
+            <div className={`p-3 rounded-lg ${
+              isDarkMode ? 'bg-blue-500/10 border border-blue-500/20' : 'bg-blue-50 border border-blue-100'
+            }`}>
+              <p className={`text-xs ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
+                <strong>Language Servers</strong> provide real-time diagnostics, completions, and code navigation.
+                They run in the background and activate automatically based on file types.
+              </p>
+            </div>
+          </div>
+        )
+
       case 'themes':
         return (
           <div className="space-y-6">
@@ -2013,7 +2174,7 @@ export function SettingsDialog({
 
       {/* Dialog */}
       <div
-        className={`relative w-full max-w-3xl h-[600px] rounded-2xl shadow-2xl flex overflow-hidden ${
+        className={`relative w-full max-w-5xl h-[700px] rounded-2xl shadow-2xl flex overflow-hidden ${
           isDarkMode ? 'bg-neutral-900' : 'bg-white'
         }`}
       >

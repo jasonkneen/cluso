@@ -449,6 +449,42 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAgentInfo: (agentId) => ipcRenderer.invoke('agent-todos:agent-info', agentId),
   },
 
+  // LSP (Language Server Protocol) - background language intelligence
+  lsp: {
+    // Initialize LSP for a project
+    init: (projectPath) => ipcRenderer.invoke('lsp:init', projectPath),
+    // Shutdown all LSP servers
+    shutdown: () => ipcRenderer.invoke('lsp:shutdown'),
+    // Get status of all language servers
+    getStatus: () => ipcRenderer.invoke('lsp:status'),
+    // Touch a file (notify LSP it's open)
+    touchFile: (filePath, waitForDiagnostics) => ipcRenderer.invoke('lsp:touch-file', filePath, waitForDiagnostics),
+    // Notify file changed
+    fileChanged: (filePath, content) => ipcRenderer.invoke('lsp:file-changed', filePath, content),
+    // Notify file saved
+    fileSaved: (filePath) => ipcRenderer.invoke('lsp:file-saved', filePath),
+    // Get all diagnostics
+    getDiagnostics: () => ipcRenderer.invoke('lsp:diagnostics'),
+    // Get diagnostics for a specific file
+    getDiagnosticsForFile: (filePath) => ipcRenderer.invoke('lsp:diagnostics-for-file', filePath),
+    // Get hover information at position
+    hover: (filePath, line, character) => ipcRenderer.invoke('lsp:hover', filePath, line, character),
+    // Get completions at position
+    completion: (filePath, line, character) => ipcRenderer.invoke('lsp:completion', filePath, line, character),
+    // Get definition at position
+    definition: (filePath, line, character) => ipcRenderer.invoke('lsp:definition', filePath, line, character),
+    // Get references at position
+    references: (filePath, line, character) => ipcRenderer.invoke('lsp:references', filePath, line, character),
+    // Enable/disable a specific server
+    setServerEnabled: (serverId, enabled) => ipcRenderer.invoke('lsp:set-server-enabled', serverId, enabled),
+    // Listen for LSP events (diagnostics, server status changes)
+    onEvent: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('lsp:event', handler)
+      return () => ipcRenderer.removeListener('lsp:event', handler)
+    },
+  },
+
   // Check if running in Electron
   isElectron: true,
 })

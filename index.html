@@ -55,24 +55,36 @@
       }
 
       /* When a custom theme is applied, use the theme colors */
-      [data-theme] {
+      html[data-theme],
+      html[data-theme] body {
         background-color: var(--color-background) !important;
         color: var(--color-foreground) !important;
       }
 
-      [data-theme] body {
+      /* Theme-aware UI elements */
+      html[data-theme] .theme-bg {
         background-color: var(--color-background) !important;
+      }
+      html[data-theme] .theme-fg {
         color: var(--color-foreground) !important;
       }
+      html[data-theme] .theme-primary {
+        color: var(--color-primary) !important;
+      }
+      html[data-theme] .theme-border {
+        border-color: var(--color-border) !important;
+      }
 
-      /* Code block styling for dark mode - Shiki one-dark-pro theme colors */
+      /* Code block styling - theme aware */
+      [data-theme] [data-streamdown="code-block"],
       .dark [data-streamdown="code-block"] {
-        background-color: #282c34 !important;
-        border-color: #3e4451 !important;
+        background-color: var(--color-background, #282c34) !important;
+        border-color: var(--color-border, #3e4451) !important;
       }
 
+      [data-theme] [data-streamdown="code-block"] pre,
       .dark [data-streamdown="code-block"] pre {
-        background-color: #282c34 !important;
+        background-color: var(--color-background, #282c34) !important;
       }
 
       /* Inline code styling */
@@ -83,8 +95,8 @@
 
       body {
         margin: 0;
-        background-color: #09090b; /* zinc-950 */
-        color: #fff;
+        background-color: var(--color-background, #09090b);
+        color: var(--color-foreground, #fff);
         font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
         overflow: hidden;
       }
