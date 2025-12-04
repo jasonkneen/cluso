@@ -65,12 +65,13 @@ type SendResponse = (id: string, name: string, response: ToolResponse) => void
 
 /**
  * Individual tool handler type
+ * Returns void for sync handlers, Promise<void> for async handlers
  */
 type ToolHandler = (
   call: ToolCall,
   handlers: ToolHandlers,
   sendResponse: SendResponse
-) => void
+) => void | Promise<void>
 
 /**
  * Tool handlers registry

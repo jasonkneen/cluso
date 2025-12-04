@@ -4,7 +4,7 @@ import { createAudioBlob, base64ToArrayBuffer, pcmToAudioBuffer } from '../utils
 import { StreamState, SelectedElement } from '../types';
 import { voiceLogger } from '../utils/voiceLogger';
 import { debugLog, debug } from '../utils/debug';
-import { dispatchToolCall, ToolCall, ToolHandlers } from '../utils/toolRouter';
+import { executeToolCalls, ToolCall, ToolHandlers, ToolResponse } from '../utils/toolRouter';
 
 interface UseLiveGeminiParams {
   videoRef: React.RefObject<HTMLVideoElement>;
@@ -573,12 +573,12 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
             scriptProcessorRef.current = processor;
           },
           onmessage: async (message: LiveServerMessage) => {
-            // Handle Tool Calls via router
+            // Handle Tool Calls via router with proper async orchestration
             if (message.toolCall) {
                 debugLog.liveGemini.log("Tool call received", message.toolCall);
                 const functionCalls = message.toolCall.functionCalls;
                 if (functionCalls && functionCalls.length > 0) {
-                    // Build handlers object from callback props (once, reuse for all calls)
+                    // Build handlers object from callback props
                     const handlers: ToolHandlers = {
                       onCodeUpdate,
                       onElementSelect,
@@ -598,27 +598,42 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                       onCloseBrowser,
                     };
 
-                    // Create send response function (once, reuse for all calls)
-                    const sendResponse = (id: string, name: string, response: Record<string, unknown>) => {
+                    // Convert to typed tool calls
+                    const toolCalls: ToolCall[] = functionCalls.map(call => ({
+                      id: call.id,
+                      name: call.name,
+                      args: call.args || {},
+                    })) as ToolCall[];
+
+                    try {
+                      // Execute all tool calls and AWAIT results (proper orchestration)
+                      // This enables multi-step reasoning - model waits for tool results
+                      debugLog.liveGemini.log(`Executing ${toolCalls.length} tool call(s) in parallel...`);
+                      const results = await executeToolCalls(toolCalls, handlers, { parallel: true });
+                      debugLog.liveGemini.log('Tool execution complete:', results.map(r => `${r.name}: ${r.response.error || 'success'}`));
+
+                      // Send all results back to Gemini in a single batch
                       withSession(session => {
                         session.sendToolResponse({
-                          functionResponses: { id, name, response }
+                          functionResponses: results.map(r => ({
+                            id: r.id,
+                            name: r.name,
+                            response: r.response,
+                          })),
                         });
                       });
-                    };
-
-                    // Process ALL tool calls, not just the first one
-                    // Each tool call is dispatched and can execute in parallel
-                    for (const call of functionCalls) {
-                      const toolCall = call as ToolCall;
-                      try {
-                        dispatchToolCall(toolCall, handlers, sendResponse);
-                      } catch (err) {
-                        debugLog.liveGemini.error(`Failed to dispatch tool ${toolCall.name}:`, err);
-                        sendResponse(toolCall.id, toolCall.name, {
-                          error: err instanceof Error ? err.message : 'Unknown error'
+                    } catch (err) {
+                      debugLog.liveGemini.error('Tool execution batch failed:', err);
+                      // Send error responses for all tools
+                      withSession(session => {
+                        session.sendToolResponse({
+                          functionResponses: toolCalls.map(call => ({
+                            id: call.id,
+                            name: call.name,
+                            response: { error: err instanceof Error ? err.message : 'Unknown error' },
+                          })),
                         });
-                      }
+                      });
                     }
                 }
             }
