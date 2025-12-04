@@ -6,6 +6,7 @@ const oauth = require('./oauth.cjs')
 const codex = require('./codex-oauth.cjs')
 const claudeSession = require('./claude-session.cjs')
 const mcp = require('./mcp.cjs')
+const selectorAgent = require('./selector-agent.cjs')
 const aiSdkWrapper = require('./ai-sdk-wrapper.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
@@ -1674,6 +1675,136 @@ function registerClaudeCodeHandlers() {
   })
 }
 
+// Register Selector Agent IPC handlers
+function registerSelectorAgentHandlers() {
+  // Initialize selector agent session
+  ipcMain.handle('selector-agent:init', async (_event, options = {}) => {
+    try {
+      // Check if OAuth is authenticated
+      const tokens = oauth.getOAuthTokens()
+      if (!tokens) {
+        return {
+          success: false,
+          error: 'Selector agent requires OAuth authentication. Please login in Settings.'
+        }
+      }
+
+      // Start the session - responses will be streamed via events
+      selectorAgent.initializeSession({
+        cwd: options.cwd || process.cwd(),
+        onTextChunk: (text) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('selector-agent:text-chunk', text)
+          }
+        },
+        onSelectionResult: (result) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('selector-agent:selection-result', result)
+          }
+        },
+        onError: (error) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('selector-agent:error', error)
+          }
+        },
+        onReady: () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('selector-agent:ready')
+          }
+        },
+      })
+
+      return { success: true }
+    } catch (error) {
+      console.error('Error initializing selector agent:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // Prime context with page elements
+  ipcMain.handle('selector-agent:prime', async (_event, context) => {
+    try {
+      await selectorAgent.primeContext(context)
+      return { success: true }
+    } catch (error) {
+      console.error('Error priming selector context:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // Request element selection
+  ipcMain.handle('selector-agent:select', async (_event, { description, options }) => {
+    try {
+      await selectorAgent.selectElement(description, options)
+      return { success: true }
+    } catch (error) {
+      console.error('Error requesting selection:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // Send message to session
+  ipcMain.handle('selector-agent:send', async (_event, text) => {
+    try {
+      await selectorAgent.sendMessage(text)
+      return { success: true }
+    } catch (error) {
+      console.error('Error sending selector message:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // Check if session is active
+  ipcMain.handle('selector-agent:is-active', () => {
+    return { active: selectorAgent.isSessionActive() }
+  })
+
+  // Get context state
+  ipcMain.handle('selector-agent:context-state', () => {
+    return selectorAgent.getContextState()
+  })
+
+  // Reset session
+  ipcMain.handle('selector-agent:reset', async () => {
+    try {
+      await selectorAgent.resetSession()
+      return { success: true }
+    } catch (error) {
+      console.error('Error resetting selector session:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // Interrupt current response
+  ipcMain.handle('selector-agent:interrupt', async () => {
+    try {
+      const interrupted = await selectorAgent.interruptResponse()
+      return { success: interrupted }
+    } catch (error) {
+      console.error('Error interrupting selector response:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+}
+
 // Register MCP IPC handlers
 function registerMCPHandlers() {
   // Connect to an MCP server
@@ -2120,6 +2251,7 @@ app.whenReady().then(async () => {
   registerCodexHandlers()
   registerClaudeCodeHandlers()
   registerMCPHandlers()
+  registerSelectorAgentHandlers()
   registerFastApplyHandlers()
 
   // Register AI SDK handlers and initialize
