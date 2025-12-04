@@ -227,6 +227,7 @@ const MODEL_ICONS: Record<string, IconComponent> = {
 const PROVIDER_ICONS: Record<string, IconComponent> = {
   'google': GeminiIcon,
   'openai': OpenAIIcon,
+  'codex': OpenAIIcon,  // Codex OAuth uses OpenAI icon
   'anthropic': AnthropicIcon,
   'claude-code': ClaudeIcon,
 };
@@ -234,6 +235,16 @@ const PROVIDER_ICONS: Record<string, IconComponent> = {
 // Helper to get icon for a model
 const getModelIcon = (modelId: string, providerId: string): IconComponent => {
   return MODEL_ICONS[modelId] || PROVIDER_ICONS[providerId] || Sparkles;
+};
+
+// Helper to get short model name (removes provider prefix for compact display)
+const getShortModelName = (name: string): string => {
+  // Remove "Claude " prefix for Anthropic models
+  if (name.startsWith('Claude ')) return name.slice(7)
+  // Remove "Gemini " prefix for Google models
+  if (name.startsWith('Gemini ')) return name.slice(7)
+  // Keep others as-is (GPT-4o, etc are already short)
+  return name
 };
 
 // Legacy MODELS constant for backwards compatibility
@@ -7520,13 +7531,13 @@ If you're not sure what the user wants, ask for clarification.
                   </div>
 
                   {/* Input Toolbar */}
-                  <div className={`flex items-center justify-between px-3 py-2 border-t ${isDarkMode ? 'border-neutral-600' : 'border-stone-100'}`}>
-                      <div className="flex items-center gap-1">
+                  <div className={`flex items-center justify-between px-2 py-1.5 border-t ${isDarkMode ? 'border-neutral-600' : 'border-stone-100'}`}>
+                      <div className="flex items-center gap-0.5">
                           {/* Agent Selector */}
                           <div className="relative">
                               <button
                                   onClick={() => !isInspectorActive && setIsModelMenuOpen(!isModelMenuOpen)}
-                                  className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-full border transition ${
+                                  className={`flex items-center gap-1.5 px-2 py-1 text-sm rounded-full border transition ${
                                     isInspectorActive
                                       ? isDarkMode
                                         ? 'border-blue-500/50 bg-blue-500/10 text-blue-300 cursor-not-allowed'
@@ -7535,14 +7546,14 @@ If you're not sure what the user wants, ask for clarification.
                                         ? 'border-neutral-600 hover:bg-neutral-600 text-neutral-200 bg-neutral-700'
                                         : 'border-stone-200 hover:bg-stone-50 text-stone-700 bg-white'
                                   }`}
-                                  title={isInspectorActive ? 'Model locked while inspector is active' : ''}
+                                  title={isInspectorActive ? 'Model locked while inspector is active' : selectedModel.name}
                               >
-                                  <selectedModel.Icon size={16} className="flex-shrink-0" />
-                                  <span className="truncate max-w-[120px]">{selectedModel.name}</span>
+                                  <selectedModel.Icon size={14} className="flex-shrink-0" />
+                                  <span className="truncate max-w-[100px]">{getShortModelName(selectedModel.name)}</span>
                                   {isInspectorActive ? (
-                                    <MousePointer2 size={12} className={isDarkMode ? 'text-blue-400' : 'text-blue-500'} />
+                                    <MousePointer2 size={10} className={isDarkMode ? 'text-blue-400' : 'text-blue-500'} />
                                   ) : (
-                                    <ChevronDown size={12} className={isDarkMode ? 'text-neutral-400' : 'text-stone-400'} />
+                                    <ChevronDown size={10} className={isDarkMode ? 'text-neutral-400' : 'text-stone-400'} />
                                   )}
                               </button>
 
@@ -7560,18 +7571,18 @@ If you're not sure what the user wants, ask for clarification.
                                                       setIsModelMenuOpen(false);
                                                     }
                                                   }}
-                                                  className={`w-full text-left px-3 py-2.5 text-sm flex items-center gap-2 ${
+                                                  className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 ${
                                                       !model.isAvailable
                                                         ? 'opacity-40 cursor-not-allowed'
                                                         : isDarkMode ? 'hover:bg-neutral-600 text-neutral-200' : 'hover:bg-stone-50'
                                                   }`}
                                                   disabled={!model.isAvailable}
-                                                  title={!model.isProviderConfigured ? 'Configure provider API key in Settings' : ''}
+                                                  title={!model.isProviderConfigured ? 'Configure provider API key in Settings' : model.name}
                                               >
-                                                  <model.Icon size={16} className={model.isAvailable ? (isDarkMode ? 'text-neutral-400' : 'text-stone-500') : 'text-stone-300'} />
-                                                  <span className={`flex-1 ${selectedModel.id === model.id ? 'font-medium' : ''}`}>{model.name}</span>
+                                                  <model.Icon size={14} className={model.isAvailable ? (isDarkMode ? 'text-neutral-400' : 'text-stone-500') : 'text-stone-300'} />
+                                                  <span className={`flex-1 ${selectedModel.id === model.id ? 'font-medium' : ''}`}>{getShortModelName(model.name)}</span>
                                                   {selectedModel.id === model.id && (
-                                                      <Check size={14} className="text-blue-600" />
+                                                      <Check size={12} className="text-blue-600" />
                                                   )}
                                               </button>
                                           ))}

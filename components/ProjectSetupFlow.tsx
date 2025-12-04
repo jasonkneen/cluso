@@ -405,7 +405,8 @@ export function ProjectSetupFlow({
   }, [hasRun, runSetup])
 
   const handleLaunch = () => {
-    const port = projectInfo.port || initialPort || 3000
+    // User-specified port (from edit) takes priority over auto-detected port
+    const port = initialPort || projectInfo.port || 3000
     const url = `http://localhost:${port}`
     onComplete(url, port)
   }
@@ -537,7 +538,7 @@ export function ProjectSetupFlow({
       {/* Port info subtle hint */}
       {isComplete && (
         <p className={`mt-4 text-xs ${isDarkMode ? 'text-neutral-600' : 'text-stone-400'}`}>
-          localhost:{projectInfo.port || initialPort || 3000}
+          localhost:{initialPort || projectInfo.port || 3000}
         </p>
       )}
     </div>

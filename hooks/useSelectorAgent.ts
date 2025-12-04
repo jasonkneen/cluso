@@ -169,6 +169,9 @@ export function useSelectorAgent(options: UseSelectorAgentOptions = {}): UseSele
   })
   callbacksRef.current = { onSelectionResult, onTextChunk, onReady, onError }
 
+  // Guard against concurrent init calls (React Strict Mode fires effects twice)
+  const isInitializingRef = useRef(false)
+
   // Check if Selector Agent API is available (Electron only)
   useEffect(() => {
     const available = !!(window.electronAPI?.selectorAgent)
@@ -192,12 +195,14 @@ export function useSelectorAgent(options: UseSelectorAgentOptions = {}): UseSele
     })
 
     const unsubReady = selectorAgent.onReady(() => {
+      isInitializingRef.current = false  // Clear init guard
       setIsActive(true)
       setError(null)
       callbacksRef.current.onReady?.()
     })
 
     const unsubError = selectorAgent.onError((err) => {
+      isInitializingRef.current = false  // Clear init guard on error
       setIsWaiting(false)
       setError(err)
       callbacksRef.current.onError?.(err)
@@ -237,6 +242,13 @@ export function useSelectorAgent(options: UseSelectorAgentOptions = {}): UseSele
       return false
     }
 
+    // Guard against concurrent init calls (React Strict Mode double-fires effects)
+    if (isInitializingRef.current || isActive) {
+      debugLog.general.log('[SelectorAgent] Skipping init - already initializing or active')
+      return true
+    }
+
+    isInitializingRef.current = true
     setError(null)
 
     try {
@@ -246,17 +258,20 @@ export function useSelectorAgent(options: UseSelectorAgentOptions = {}): UseSele
 
       if (!result.success) {
         setError(result.error || 'Failed to initialize selector agent')
+        isInitializingRef.current = false
         return false
       }
 
       // Note: isActive will be set when onReady event fires
+      // Keep isInitializingRef true until ready or error
       return true
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error'
       setError(errorMessage)
+      isInitializingRef.current = false
       return false
     }
-  }, [cwd])
+  }, [cwd, isActive])
 
   /**
    * Prime the agent with page context
