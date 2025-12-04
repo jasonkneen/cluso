@@ -5,13 +5,11 @@
  * Supports multiple strategies:
  * - Fast Path: Direct string manipulation for simple CSS/text/src changes
  * - Fast Apply: Local LLM inference (Pro feature)
- * - Gemini: Cloud-based AI for complex modifications
+ * - AI SDK: Uses configured provider (Claude/OpenAI/etc) via existing streaming connection
  */
 
-import { createGoogleGenerativeAI } from '@ai-sdk/google'
-import { generateText } from 'ai'
 import { SelectedElement } from '../types'
-import { getProviderForModel, ProviderConfig } from '../hooks/useAIChat'
+import { ProviderConfig } from '../hooks/useAIChat'
 
 // Result of a successful patch generation
 export interface SourcePatch {
@@ -349,9 +347,10 @@ async function tryFastApply(
 }
 
 /**
- * Use Gemini AI for complex code modifications
+ * Use AI SDK for complex code modifications
+ * Uses the configured provider (Claude Haiku, etc.) via the existing streaming connection
  */
-async function useGeminiForPatch(
+async function useAIForPatch(
   codeSnippet: string,
   element: SelectedElement,
   cssChanges: Record<string, string>,
@@ -362,15 +361,12 @@ async function useGeminiForPatch(
   endLine: number,
   userRequest?: string
 ): Promise<string | null> {
-  const providerType = getProviderForModel(providerConfig.modelId)
-  const provider = providerConfig.providers.find(p => p.id === providerType)
-
-  if (!provider?.apiKey) {
-    console.log('[Source Patch] No API key available for provider:', providerType)
+  // Check if AI SDK is available
+  if (!window.electronAPI?.aiSdk?.generate) {
+    console.log('[Source Patch] AI SDK generate not available')
     return null
   }
 
-  const google = createGoogleGenerativeAI({ apiKey: provider.apiKey })
   const hasCssChanges = Object.keys(cssChanges).length > 0
 
   const cssString = hasCssChanges
@@ -438,16 +434,14 @@ ${hasCssChanges ? '5' : '3'}. Output ONLY the modified snippet (lines ${startLin
 ${hasCssChanges ? '6' : '4'}. Preserve exact indentation and formatting
 ${hasCssChanges ? '7' : '5'}. CRITICAL: Do NOT duplicate elements - modify in-place`
 
-  const prompt = `You are a React/TypeScript code modifier. Given a code snippet and requested changes, output ONLY the modified snippet.
+  const systemPrompt = `You are a React/TypeScript code modifier. Given a code snippet and requested changes, output ONLY the modified snippet. Do not include explanations, markdown code blocks, or any other text - just the raw code.`
 
-Source file: ${sourceFile}
+  const userPrompt = `Source file: ${sourceFile}
 ${lineNumberReliable ? `Target line in original file: ${targetLine}` : '(Line number from source map may be inaccurate - search by element characteristics)'}
 Snippet shows lines ${startLine + 1} to ${endLine}
 
 Code snippet:
-\`\`\`
 ${codeSnippet}
-\`\`\`
 
 Element being modified:
 - Tag: ${element.tagName}
@@ -463,14 +457,32 @@ ${instructions}
 Output the modified code snippet:`
 
   try {
-    console.log('[Source Patch] Calling Gemini for code modification...')
-    const result = await generateText({
-      model: google('gemini-2.0-flash-001'),
-      prompt,
-      maxTokens: 8000,
+    // Use the configured model (likely claude-haiku-4-5) via the existing connection
+    const modelId = providerConfig.modelId || 'claude-haiku-4-5'
+    console.log('[Source Patch] Calling AI SDK for code modification with model:', modelId)
+
+    // Build provider configs for the generate call
+    const providers: Record<string, string> = {}
+    for (const p of providerConfig.providers) {
+      if (p.apiKey) {
+        providers[p.id] = p.apiKey
+      }
+    }
+
+    const result = await window.electronAPI.aiSdk.generate({
+      modelId,
+      messages: [{ role: 'user', content: userPrompt }],
+      providers,
+      system: systemPrompt,
+      maxSteps: 1, // Single step, no tools needed
     })
 
-    console.log('[Source Patch] Gemini response received, length:', result.text.length)
+    if (!result.success || !result.text) {
+      console.log('[Source Patch] AI SDK generate failed:', result.error || 'No text returned')
+      return null
+    }
+
+    console.log('[Source Patch] AI SDK response received, length:', result.text.length)
     let patchedSnippet = result.text.trim()
 
     // Remove markdown code blocks if present
@@ -480,7 +492,7 @@ Output the modified code snippet:`
       console.log('[Source Patch] Extracted code from markdown block')
     }
 
-    // Validate that Gemini returned actual code, not prose explanation
+    // Validate that AI returned actual code, not prose explanation
     const proseIndicators = [
       /^The provided/i,
       /^I cannot/i,
@@ -497,14 +509,14 @@ Output the modified code snippet:`
     const isProse = proseIndicators.some(p => p.test(firstLine))
 
     if (isProse) {
-      console.log('[Source Patch] Gemini returned PROSE instead of code - aborting')
+      console.log('[Source Patch] AI returned PROSE instead of code - aborting')
       console.log('[Source Patch] First line:', firstLine.substring(0, 100))
       return null
     }
 
     return patchedSnippet
   } catch (error) {
-    console.error('[Source Patch] EXCEPTION during Gemini generation:', error)
+    console.error('[Source Patch] EXCEPTION during AI SDK generation:', error)
     return null
   }
 }
@@ -716,10 +728,10 @@ export async function generateSourcePatch(
   }
 
   const codeSnippet = lines.slice(startLine, endLine).join('\n')
-  console.log('[Source Patch] Gemini snippet: lines', startLine + 1, 'to', endLine, '(', codeSnippet.length, 'chars)')
+  console.log('[Source Patch] AI SDK snippet: lines', startLine + 1, 'to', endLine, '(', codeSnippet.length, 'chars)')
 
-  // Fall back to Gemini
-  const patchedSnippet = await useGeminiForPatch(
+  // Fall back to AI SDK (uses configured provider - Claude Haiku, etc.)
+  const patchedSnippet = await useAIForPatch(
     codeSnippet,
     element,
     cssChanges,
