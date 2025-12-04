@@ -247,8 +247,12 @@ const getShortModelName = (name: string): string => {
   return name
 };
 
+// Default model - Claude Haiku 4.5 for fast, efficient responses
+const DEFAULT_MODEL = { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', Icon: Zap, provider: 'claude-code' };
+
 // Legacy MODELS constant for backwards compatibility
 const MODELS = [
+  DEFAULT_MODEL,
   { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro', Icon: Sparkles },
   { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', Icon: Zap },
   { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', Icon: Rocket },
@@ -621,8 +625,8 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Model State
-  const [selectedModel, setSelectedModel] = useState(MODELS[0]);
+  // Model State - default to Claude Haiku 4.5
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
 
   // Popup Input State
