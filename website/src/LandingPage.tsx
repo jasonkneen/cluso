@@ -687,7 +687,7 @@ const styles = `
   }
 
   .pricing-card.featured::before {
-    content: 'Most Popular';
+    content: 'Cloud Services';
     position: absolute;
     top: -12px;
     left: 50%;
@@ -1219,33 +1219,33 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
 
             <div className="pricing-grid">
               <div className="pricing-card">
-                <h3>Free</h3>
-                <div className="price">$0</div>
-                <p className="price-note">Forever free</p>
+                <h3>Starter Lifetime</h3>
+                <div className="price"><span className="original-price">$99</span>$49</div>
+                <p className="price-note">Free forever</p>
                 <ul>
                   <li>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <polyline points="20 6 9 17 4 12"/>
                     </svg>
-                    Voice-powered UI editing
+                    Fast local edits
                   </li>
                   <li>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <polyline points="20 6 9 17 4 12"/>
                     </svg>
-                    Element selection & inspection
+                    Bring your own keys
                   </li>
                   <li>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <polyline points="20 6 9 17 4 12"/>
                     </svg>
-                    Real-time preview
+                    Private data
                   </li>
                   <li>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <polyline points="20 6 9 17 4 12"/>
                     </svg>
-                    Basic AI requests
+                    Free updates for life
                   </li>
                 </ul>
                 <a href="#download" className="btn btn-secondary">Get Started</a>
@@ -1254,26 +1254,32 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               <div className="pricing-card-wrapper">
                 <div className="pricing-card featured">
                   <h3>Pro</h3>
-                  <div className="price">$19<span>/mo</span></div>
+                  <div className="price"><span className="original-price">$29</span>$19<span>/mo</span></div>
                   <p className="price-note">For serious developers</p>
                   <ul>
                     <li>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12"/>
                       </svg>
-                      Everything in Free
+                      Ultra fast cloud edits
                     </li>
                     <li>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12"/>
                       </svg>
-                      Unlimited AI requests
+                      Everything in Starter
                     </li>
                     <li>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12"/>
                     </svg>
-                      Advanced code generation
+                      Cloud memory
+                    </li>
+                    <li>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Unlimited context
                     </li>
                     <li>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1282,14 +1288,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                       Priority support
                     </li>
                   </ul>
-                  <a href="#download" className="btn btn-primary">Start Free Trial</a>
+                  <a href="#download" className="btn btn-primary">Start 7 day trial</a>
                 </div>
               </div>
 
               <div className="pricing-card-wrapper">
-                <div className="pricing-card">
+                <div className="pricing-card featured">
                   <h3>Team</h3>
-                  <div className="price"><span className="original-price">$99</span>$49<span>/mo</span></div>
+                  <div className="price"><span className="original-price">$99</span>$59<span>/mo</span></div>
                   <p className="price-note">Per seat, billed annually</p>
                   <ul>
                     <li>
@@ -1302,24 +1308,30 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12"/>
                       </svg>
-                      Team collaboration
+                      Team keys
                     </li>
                     <li>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12"/>
                       </svg>
-                      Shared component library
+                      Team stats
                     </li>
                     <li>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12"/>
                       </svg>
-                      Admin dashboard
+                      Shared knowledge base
+                    </li>
+                    <li>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Team management
                     </li>
                   </ul>
-                  <a href="#download" className="btn btn-secondary">Contact Sales</a>
-</div>
-</div>
+                  <a href="#download" className="btn btn-primary">Start 7 day trial</a>
+                </div>
+              </div>
             </div>
           </div>
         </section>

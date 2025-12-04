@@ -562,11 +562,26 @@ const BUILT_IN_TOOL_EXECUTORS = {
       if (!targetPath) {
         return { error: 'write_file requires "path"' }
       }
+      // Read original content for undo capability
+      let originalContent
+      try {
+        originalContent = await fs.readFile(targetPath, 'utf-8')
+      } catch {
+        // File doesn't exist yet - no original content
+      }
       // Ensure parent directory exists
       const parentDir = require('path').dirname(targetPath)
       await fs.mkdir(parentDir, { recursive: true })
-      await fs.writeFile(targetPath, String(content), 'utf-8')
-      return { success: true, path: targetPath, bytesWritten: Buffer.byteLength(String(content), 'utf-8') }
+      const newContent = String(content)
+      await fs.writeFile(targetPath, newContent, 'utf-8')
+      // Notify renderer about file modification for edited files drawer
+      sendToRenderer('ai-sdk:file-modified', {
+        type: 'write',
+        path: targetPath,
+        originalContent,
+        newContent,
+      })
+      return { success: true, path: targetPath, bytesWritten: Buffer.byteLength(newContent, 'utf-8') }
     } catch (error) {
       return { error: error.message }
     }
@@ -588,7 +603,14 @@ const BUILT_IN_TOOL_EXECUTORS = {
       // Ensure parent directory exists
       const parentDir = require('path').dirname(targetPath)
       await fs.mkdir(parentDir, { recursive: true })
-      await fs.writeFile(targetPath, String(content ?? ''), 'utf-8')
+      const newContent = String(content ?? '')
+      await fs.writeFile(targetPath, newContent, 'utf-8')
+      // Notify renderer about file creation for edited files drawer
+      sendToRenderer('ai-sdk:file-modified', {
+        type: 'create',
+        path: targetPath,
+        newContent,
+      })
       return { success: true, path: targetPath }
     } catch (error) {
       return { error: error.message }
@@ -602,7 +624,20 @@ const BUILT_IN_TOOL_EXECUTORS = {
       if (!targetPath) {
         return { error: 'delete_file requires a "path" argument' }
       }
+      // Read original content for undo capability
+      let originalContent
+      try {
+        originalContent = await fs.readFile(targetPath, 'utf-8')
+      } catch {
+        // File doesn't exist - won't be able to undo
+      }
       await fs.unlink(targetPath)
+      // Notify renderer about file deletion for edited files drawer
+      sendToRenderer('ai-sdk:file-modified', {
+        type: 'delete',
+        path: targetPath,
+        originalContent,
+      })
       return { success: true, path: targetPath }
     } catch (error) {
       return { error: error.message }

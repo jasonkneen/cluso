@@ -3178,21 +3178,29 @@ export default function App() {
       } else if (channel === 'inline-edit-accept') {
         // Handle inline text edit acceptance
         const data = args[0] as { oldText: string; newText: string; element: SelectedElement };
-        console.log('[Inline Edit] Accepted:', { old: data.oldText?.substring(0, 30), new: data.newText?.substring(0, 30) });
+        console.log('[Inline Edit] Accepted:', {
+          old: data.oldText?.substring(0, 30),
+          new: data.newText?.substring(0, 30),
+          hasSourceLocation: !!data.element?.sourceLocation,
+          sourceFile: data.element?.sourceLocation?.sources?.[0]?.file
+        });
 
-        // Get current selected element and project path from refs
-        const currentSelectedElement = selectedElementRef.current;
+        // Use element from message (now includes source location from when editing started)
+        // Fall back to ref if message doesn't have source location (backwards compat)
+        const elementWithSource = data.element?.sourceLocation?.sources?.[0]
+          ? data.element
+          : selectedElementRef.current;
         const currentTab = tabsRef.current.find(t => t.id === tabId);
         const projectPath = currentTab?.projectPath;
 
         // Trigger source patch with the text change
-        if (currentSelectedElement?.sourceLocation?.sources?.[0] && projectPath) {
+        if (elementWithSource?.sourceLocation?.sources?.[0] && projectPath) {
           const textChangePayload = { oldText: data.oldText, newText: data.newText };
 
           const approvalId = `inline-${Date.now()}`;
           setPendingDOMApproval({
             id: approvalId,
-            element: currentSelectedElement,
+            element: elementWithSource,
             cssChanges: {},
             textChange: data.newText,
             description: `Change text: "${data.oldText?.substring(0, 20)}..." → "${data.newText?.substring(0, 20)}..."`,
@@ -3204,7 +3212,7 @@ export default function App() {
 
           prepareDomPatch(
             approvalId,
-            currentSelectedElement,
+            elementWithSource,
             {},
             `Change text to "${data.newText?.substring(0, 30)}..."`,
             '',
@@ -3215,9 +3223,9 @@ export default function App() {
           );
         } else {
           console.log('[Inline Edit] Cannot create source patch - missing source location or project path', {
-            hasSourceLocation: !!currentSelectedElement?.sourceLocation?.sources?.[0],
+            hasSourceLocation: !!elementWithSource?.sourceLocation?.sources?.[0],
             projectPath,
-            element: currentSelectedElement?.tagName
+            element: elementWithSource?.tagName
           });
         }
 
@@ -3688,6 +3696,102 @@ export default function App() {
       setIsEditedFilesDrawerOpen(true);
     };
   }, [addEditedFile]);
+
+  // Listen for Agent SDK file modifications (from main process tools)
+  // These come from write_file, create_file, delete_file in ai-sdk-wrapper
+  useEffect(() => {
+    if (!isElectron || !window.electronAPI?.agentSdk?.onFileModified) return;
+
+    const removeListener = window.electronAPI.agentSdk.onFileModified((event: {
+      type: 'write' | 'create' | 'delete';
+      path: string;
+      originalContent?: string;
+      newContent?: string;
+    }) => {
+      console.log('[Agent SDK File Modified]', event.type, event.path);
+
+      // Calculate additions/deletions
+      let additions = 0;
+      let deletions = 0;
+
+      if (event.type === 'write' && event.originalContent && event.newContent) {
+        const oldLines = event.originalContent.split('\n').length;
+        const newLines = event.newContent.split('\n').length;
+        additions = Math.max(0, newLines - oldLines);
+        deletions = Math.max(0, oldLines - newLines);
+        if (additions === 0 && deletions === 0) {
+          additions = 1;
+          deletions = 1;
+        }
+      } else if (event.type === 'create' && event.newContent) {
+        additions = event.newContent.split('\n').length;
+      } else if (event.type === 'delete' && event.originalContent) {
+        deletions = event.originalContent.split('\n').length;
+      }
+
+      // Add to edited files drawer
+      addEditedFile({
+        path: event.path,
+        additions,
+        deletions,
+        originalContent: event.originalContent,
+        isFileModification: true,
+      });
+
+      // Auto-open the drawer
+      setIsEditedFilesDrawerOpen(true);
+    });
+
+    return removeListener;
+  }, [isElectron, addEditedFile]);
+
+  // File watcher - watch project folder for any file changes (from any source)
+  // This picks up changes from VS Code, terminal, git, AI tools, etc.
+  useEffect(() => {
+    if (!isElectron || !activeTab.projectPath) return;
+    if (!window.electronAPI?.fileWatcher) return;
+
+    const projectPath = activeTab.projectPath;
+    console.log('[FileWatcher] Starting watch on project:', projectPath);
+
+    // Start watching the project folder
+    window.electronAPI.fileWatcher.start(projectPath);
+
+    // Listen for file change events
+    const removeListener = window.electronAPI.fileWatcher.onChange((event: {
+      type: 'add' | 'change' | 'unlink';
+      path: string;
+      relativePath: string;
+      projectPath: string;
+    }) => {
+      console.log('[FileWatcher] File changed:', event.type, event.relativePath);
+
+      // Map watcher event types to our drawer types
+      const typeMap: Record<string, 'write' | 'create' | 'delete'> = {
+        'add': 'create',
+        'change': 'write',
+        'unlink': 'delete',
+      };
+
+      // Add to edited files drawer
+      addEditedFile({
+        path: event.path,
+        additions: event.type === 'add' ? 1 : event.type === 'change' ? 1 : 0,
+        deletions: event.type === 'unlink' ? 1 : event.type === 'change' ? 1 : 0,
+        isFileModification: true,
+      });
+
+      // Auto-open the drawer when files change
+      setIsEditedFilesDrawerOpen(true);
+    });
+
+    // Cleanup: stop watching when project changes or unmounts
+    return () => {
+      console.log('[FileWatcher] Stopping watch on project:', projectPath);
+      removeListener();
+      window.electronAPI?.fileWatcher?.stop(projectPath);
+    };
+  }, [isElectron, activeTab.projectPath, addEditedFile]);
 
   // Sync Inspector State with Webview
   useEffect(() => {

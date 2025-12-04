@@ -93,6 +93,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stat: (path) => ipcRenderer.invoke('files:stat', path),
   },
 
+  // File watcher operations
+  fileWatcher: {
+    start: (projectPath) => ipcRenderer.invoke('file-watcher:start', projectPath),
+    stop: (projectPath) => ipcRenderer.invoke('file-watcher:stop', projectPath),
+    getWatched: () => ipcRenderer.invoke('file-watcher:get-watched'),
+    // Listen for file change events
+    onChange: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('file-watcher:change', handler)
+      return () => ipcRenderer.removeListener('file-watcher:change', handler)
+    },
+  },
+
   // Dialog operations
   dialog: {
     openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
@@ -350,6 +363,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('agent-sdk:interrupted', handler)
       return () => ipcRenderer.removeListener('agent-sdk:interrupted', handler)
     },
+    // Listen for file modifications (for edited files drawer)
+    onFileModified: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('ai-sdk:file-modified', handler)
+      return () => ipcRenderer.removeListener('ai-sdk:file-modified', handler)
+    },
     // Remove all listeners
     removeAllListeners: () => {
       ipcRenderer.removeAllListeners('agent-sdk:text-chunk')
@@ -362,6 +381,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeAllListeners('agent-sdk:complete')
       ipcRenderer.removeAllListeners('agent-sdk:error')
       ipcRenderer.removeAllListeners('agent-sdk:interrupted')
+      ipcRenderer.removeAllListeners('ai-sdk:file-modified')
     },
   },
 

@@ -881,6 +881,7 @@ let dropLabel = null
 let originalTextContent = null
 let isEditing = false
 let editToolbar = null
+let editingSourceLocation = null // Store source location when editing starts
 
 function getDropAction(element, dataTransfer) {
   const hasFiles = dataTransfer.types.includes('Files')
@@ -947,10 +948,12 @@ function createEditToolbar(element) {
   acceptBtn.addEventListener('click', function(e) {
     e.stopPropagation()
     const newText = element.textContent
+    const xpath = getXPath(element)
+    // Include source location captured when editing started
     ipcRenderer.sendToHost('inline-edit-accept', {
       oldText: originalTextContent,
       newText: newText,
-      element: getElementSummary(element)
+      element: { ...getElementSummary(element), xpath, sourceLocation: editingSourceLocation }
     })
     finishEditing(element)
   })
@@ -965,7 +968,7 @@ function createEditToolbar(element) {
   return editToolbar
 }
 
-function startEditing(element) {
+async function startEditing(element) {
   if (isEditing) return
 
   // Only allow editing for text-like elements
@@ -975,6 +978,10 @@ function startEditing(element) {
 
   isEditing = true
   originalTextContent = element.textContent
+
+  // Get source location now so we have it when accepting the edit
+  editingSourceLocation = await getSourceLocation(element)
+  console.log('[Inline Edit] Started editing, source location:', editingSourceLocation?.summary || 'none')
 
   element.contentEditable = 'true'
   element.classList.add('inspector-inline-editing')
@@ -995,6 +1002,7 @@ function finishEditing(element) {
   element.contentEditable = 'false'
   element.classList.remove('inspector-inline-editing')
   originalTextContent = null
+  editingSourceLocation = null // Clear stored source location
 
   if (editToolbar) {
     editToolbar.remove()

@@ -9,6 +9,7 @@ const mcp = require('./mcp.cjs')
 const selectorAgent = require('./selector-agent.cjs')
 const aiSdkWrapper = require('./ai-sdk-wrapper.cjs')
 const agentSdkWrapper = require('./agent-sdk-wrapper.cjs')
+const fileWatcher = require('./file-watcher.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -969,6 +970,19 @@ function registerGitHandlers() {
     } catch {
       return { success: true, exists: false }
     }
+  })
+
+  // File watcher handlers
+  ipcMain.handle('file-watcher:start', async (event, projectPath) => {
+    return fileWatcher.startWatching(projectPath)
+  })
+
+  ipcMain.handle('file-watcher:stop', async (event, projectPath) => {
+    return fileWatcher.stopWatching(projectPath)
+  })
+
+  ipcMain.handle('file-watcher:get-watched', async () => {
+    return fileWatcher.getWatchedPaths()
   })
 
   // Get file stats (size, modified time, etc)
@@ -2363,10 +2377,11 @@ app.whenReady().then(async () => {
 
   createWindow()
 
-  // Set main window reference for MCP events, AI SDK events, and Agent SDK events
+  // Set main window reference for MCP events, AI SDK events, Agent SDK events, and file watcher
   mcp.setMainWindow(mainWindow)
   aiSdkWrapper.setMainWindow(mainWindow)
   agentSdkWrapper.setMainWindow(mainWindow)
+  fileWatcher.setMainWindow(mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -2376,6 +2391,8 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  // Stop all file watchers before quitting
+  fileWatcher.stopAll()
   if (process.platform !== 'darwin') {
     app.quit()
   }
