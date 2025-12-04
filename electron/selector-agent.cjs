@@ -203,15 +203,22 @@ async function initializeSession(options = {}) {
 
   try {
     // Create the query session
+    // Note: Haiku doesn't support thinking, so maxThinkingTokens must be 0
+    const cliPath = resolveClaudeCodeCli()
+    console.log('[SelectorAgent] Creating session:', {
+      model: SELECTOR_MODEL_ID,
+      cwd,
+      cliPath,
+    })
     selectorSession = query({
       prompt: messageGenerator(),
       options: {
         model: SELECTOR_MODEL_ID,
-        maxThinkingTokens: 8_000,
+        maxThinkingTokens: 0, // Haiku doesn't support thinking
         settingSources: ['project'],
         permissionMode: 'acceptEdits',
         allowedTools: [], // Selector agent doesn't need tools, just analysis
-        pathToClaudeCodeExecutable: resolveClaudeCodeCli(),
+        pathToClaudeCodeExecutable: cliPath,
         cwd,
         includePartialMessages: true,
         systemPrompt: SELECTOR_SYSTEM_PROMPT,
@@ -261,7 +268,13 @@ async function initializeSession(options = {}) {
       }
     }
   } catch (error) {
-    console.error('Error in selector session:', error)
+    console.error('[SelectorAgent] Error in session:', error)
+    console.error('[SelectorAgent] Error stack:', error?.stack)
+    console.error('[SelectorAgent] Error details:', JSON.stringify({
+      message: error?.message,
+      code: error?.code,
+      exitCode: error?.exitCode,
+    }, null, 2))
     onError?.(error instanceof Error ? error.message : 'Unknown error')
   } finally {
     isProcessing = false

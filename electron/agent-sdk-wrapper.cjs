@@ -302,6 +302,7 @@ async function streamChat(options) {
     }
   }
 
+  const cliPath = resolveClaudeCodeCli()
   console.log('[Agent-SDK-Wrapper] Starting stream:', {
     requestId,
     model: normalizedModel,
@@ -309,6 +310,8 @@ async function streamChat(options) {
     thinkingBudget,
     cwd: workingDir,
     mcpTools: mcpTools.length,
+    cliPath,
+    cliExists: existsSync(cliPath),
   })
 
   try {
@@ -324,7 +327,7 @@ async function streamChat(options) {
         settingSources: ['project'],
         permissionMode: 'acceptEdits',
         allowedTools,
-        pathToClaudeCodeExecutable: resolveClaudeCodeCli(),
+        pathToClaudeCodeExecutable: cliPath,
         cwd: workingDir,
         includePartialMessages: true,
         systemPrompt: {
@@ -513,6 +516,12 @@ async function streamChat(options) {
 
   } catch (error) {
     console.error('[Agent-SDK-Wrapper] Stream error:', error)
+    console.error('[Agent-SDK-Wrapper] Error stack:', error.stack)
+    console.error('[Agent-SDK-Wrapper] Error details:', JSON.stringify({
+      message: error.message,
+      code: error.code,
+      exitCode: error.exitCode,
+    }, null, 2))
     sendToRenderer('agent-sdk:error', {
       requestId,
       error: error.message || 'Unknown error',
