@@ -183,6 +183,25 @@ const FONT_SIZE_MAP: Record<FontSize, string> = {
   large: '18px',
 }
 
+// Helper function to adjust hex color brightness
+function adjustBrightness(hex: string, percent: number): string {
+  // Remove # if present
+  hex = hex.replace(/^#/, '')
+
+  // Parse RGB
+  let r = parseInt(hex.substring(0, 2), 16)
+  let g = parseInt(hex.substring(2, 4), 16)
+  let b = parseInt(hex.substring(4, 6), 16)
+
+  // Adjust brightness
+  r = Math.min(255, Math.max(0, Math.round(r + (r * percent / 100))))
+  g = Math.min(255, Math.max(0, Math.round(g + (g * percent / 100))))
+  b = Math.min(255, Math.max(0, Math.round(b + (b * percent / 100))))
+
+  // Convert back to hex
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+}
+
 export function SettingsDialog({
   isOpen,
   onClose,
@@ -2064,95 +2083,143 @@ export function SettingsDialog({
           </div>
         )
 
-      case 'themes':
+      case 'themes': {
+        // Helper to detect if a theme is light or dark based on background luminance
+        const isLightTheme = (theme: typeof themes[0]) => {
+          if (!theme.colors) return false
+          const bg = theme.colors.background
+          const r = parseInt(bg.slice(1, 3), 16)
+          const g = parseInt(bg.slice(3, 5), 16)
+          const b = parseInt(bg.slice(5, 7), 16)
+          const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+          return luminance > 0.5
+        }
+
+        const systemTheme = themes.find(t => t.id === 'system-default')
+        const darkThemes = themes.filter(t => t.id !== 'system-default' && !isLightTheme(t))
+        const lightThemes = themes.filter(t => t.id !== 'system-default' && isLightTheme(t))
+
+        const renderThemeButton = (theme: typeof themes[0]) => {
+          const isSelected = currentTheme.id === theme.id
+          const previewBg = theme.colors?.background || (isDarkMode ? '#1a1b26' : '#d6d3d1')
+          const previewFg = theme.colors?.foreground || (isDarkMode ? '#c0caf5' : '#171717')
+          const previewPrimary = theme.colors?.primary || '#7aa2f7'
+          const previewAccent = theme.colors?.accent || '#7dcfff'
+
+          return (
+            <button
+              key={theme.id}
+              onClick={() => setTheme(theme.id)}
+              className="relative p-3 rounded-xl border-2 transition-all text-left"
+              style={{
+                borderColor: isSelected ? primaryColor : borderColor,
+                boxShadow: isSelected ? `0 0 0 3px ${primaryColor}33` : 'none',
+              }}
+            >
+              {/* Theme Preview */}
+              <div
+                className="h-16 rounded-lg mb-2 relative overflow-hidden"
+                style={{ backgroundColor: previewBg }}
+              >
+                {/* Preview elements */}
+                <div className="absolute inset-2 flex flex-col gap-1">
+                  <div
+                    className="h-2 w-3/4 rounded"
+                    style={{ backgroundColor: previewFg, opacity: 0.8 }}
+                  />
+                  <div
+                    className="h-2 w-1/2 rounded"
+                    style={{ backgroundColor: previewPrimary }}
+                  />
+                  <div className="flex gap-1 mt-auto">
+                    <div
+                      className="h-3 w-8 rounded"
+                      style={{ backgroundColor: previewPrimary }}
+                    />
+                    <div
+                      className="h-3 w-6 rounded"
+                      style={{ backgroundColor: previewAccent }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Theme Info */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium" style={{ color: fgColor }}>
+                    {theme.name}
+                  </span>
+                  <p className="text-xs" style={{ color: mutedFg }}>
+                    {theme.description}
+                  </p>
+                </div>
+                {isSelected && (
+                  <CheckCircle size={16} style={{ color: primaryColor }} className="flex-shrink-0" />
+                )}
+              </div>
+            </button>
+          )
+        }
+
         return (
           <div className="space-y-6">
             <div>
-              <h3 className={`text-sm font-medium mb-2 ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+              <h3 className="text-sm font-medium mb-2" style={{ color: fgColor }}>
                 Application Theme
               </h3>
-              <p className={`text-xs mb-4 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+              <p className="text-xs mb-4" style={{ color: mutedFg }}>
                 Choose a color theme for the application. Themes change the overall look and feel.
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              {themes.map((theme) => {
-                const isSelected = currentTheme.id === theme.id
-                const previewBg = theme.colors?.background || (isDarkMode ? '#1a1b26' : '#ffffff')
-                const previewFg = theme.colors?.foreground || (isDarkMode ? '#c0caf5' : '#1a1a1a')
-                const previewPrimary = theme.colors?.primary || '#7aa2f7'
-                const previewAccent = theme.colors?.accent || '#7dcfff'
+            {/* System Default */}
+            {systemTheme && (
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: mutedFg }}>
+                  Automatic
+                </h4>
+                <div className="grid grid-cols-2 gap-3">
+                  {renderThemeButton(systemTheme)}
+                </div>
+              </div>
+            )}
 
-                return (
-                  <button
-                    key={theme.id}
-                    onClick={() => setTheme(theme.id)}
-                    className={`relative p-3 rounded-xl border-2 transition-all text-left ${
-                      isSelected
-                        ? 'border-blue-500 ring-2 ring-blue-500/20'
-                        : isDarkMode
-                          ? 'border-neutral-700 hover:border-neutral-600'
-                          : 'border-stone-200 hover:border-stone-300'
-                    }`}
-                  >
-                    {/* Theme Preview */}
-                    <div
-                      className="h-16 rounded-lg mb-2 relative overflow-hidden"
-                      style={{ backgroundColor: previewBg }}
-                    >
-                      {/* Preview elements */}
-                      <div className="absolute inset-2 flex flex-col gap-1">
-                        <div
-                          className="h-2 w-3/4 rounded"
-                          style={{ backgroundColor: previewFg, opacity: 0.8 }}
-                        />
-                        <div
-                          className="h-2 w-1/2 rounded"
-                          style={{ backgroundColor: previewPrimary }}
-                        />
-                        <div className="flex gap-1 mt-auto">
-                          <div
-                            className="h-3 w-8 rounded"
-                            style={{ backgroundColor: previewPrimary }}
-                          />
-                          <div
-                            className="h-3 w-6 rounded"
-                            style={{ backgroundColor: previewAccent }}
-                          />
-                        </div>
-                      </div>
-                    </div>
+            {/* Dark Themes */}
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: mutedFg }}>
+                Dark Themes
+              </h4>
+              <div className="grid grid-cols-2 gap-3">
+                {darkThemes.map(renderThemeButton)}
+              </div>
+            </div>
 
-                    {/* Theme Info */}
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
-                          {theme.name}
-                        </span>
-                        <p className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-                          {theme.description}
-                        </p>
-                      </div>
-                      {isSelected && (
-                        <CheckCircle size={16} className="text-blue-500 flex-shrink-0" />
-                      )}
-                    </div>
-                  </button>
-                )
-              })}
+            {/* Light Themes */}
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: mutedFg }}>
+                Light Themes
+              </h4>
+              <div className="grid grid-cols-2 gap-3">
+                {lightThemes.map(renderThemeButton)}
+              </div>
             </div>
 
             {/* Info Box */}
-            <div className={`p-3 rounded-lg ${
-              isDarkMode ? 'bg-blue-500/10 border border-blue-500/20' : 'bg-blue-50 border border-blue-100'
-            }`}>
-              <p className={`text-xs ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
+            <div
+              className="p-3 rounded-lg border"
+              style={{
+                backgroundColor: `${primaryColor}10`,
+                borderColor: `${primaryColor}30`,
+              }}
+            >
+              <p className="text-xs" style={{ color: primaryColor }}>
                 <strong>Tip:</strong> Select "System Default" to automatically follow your system's light/dark mode preference.
               </p>
             </div>
           </div>
         )
+      }
 
       case 'pro':
         return (
@@ -2164,6 +2231,17 @@ export function SettingsDialog({
     }
   }
 
+  // Get theme colors - use custom theme colors if available, otherwise fallback to dark/light mode defaults
+  // CRITICAL: Light mode default background MUST be #d6d3d1 (stone-300) to match the title bar
+  const themeColors = currentTheme.colors
+  const bgColor = themeColors?.background || (isDarkMode ? '#171717' : '#d6d3d1')
+  const fgColor = themeColors?.foreground || (isDarkMode ? '#f5f5f5' : '#171717')
+  const borderColor = themeColors?.border || (isDarkMode ? '#404040' : '#a8a29e')
+  const primaryColor = themeColors?.primary || (isDarkMode ? '#3b82f6' : '#2563eb')
+  // Sidebar slightly darker/lighter than main background
+  const sidebarBg = themeColors ? adjustBrightness(themeColors.background, -10) : (isDarkMode ? '#262626' : '#c4c0bc')
+  const mutedFg = themeColors ? adjustBrightness(themeColors.foreground, -30) : (isDarkMode ? '#a3a3a3' : '#57534e')
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
@@ -2174,61 +2252,58 @@ export function SettingsDialog({
 
       {/* Dialog */}
       <div
-        className={`relative w-full max-w-5xl h-[700px] rounded-2xl shadow-2xl flex overflow-hidden ${
-          isDarkMode ? 'bg-neutral-900' : 'bg-white'
-        }`}
+        className="relative w-full max-w-5xl h-[700px] rounded-2xl shadow-2xl flex overflow-hidden"
+        style={{ backgroundColor: bgColor, color: fgColor }}
       >
         {/* Sidebar */}
-        <div className={`w-52 flex-shrink-0 border-r ${
-          isDarkMode ? 'bg-neutral-800/50 border-neutral-700' : 'bg-stone-50 border-stone-200'
-        }`}>
-          <div className={`p-4 border-b ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
-            <h2 className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-stone-900'}`}>
+        <div
+          className="w-52 flex-shrink-0 border-r"
+          style={{ backgroundColor: sidebarBg, borderColor }}
+        >
+          <div className="p-4 border-b" style={{ borderColor }}>
+            <h2 className="text-lg font-semibold" style={{ color: fgColor }}>
               Settings
             </h2>
           </div>
 
           <nav className="p-2">
-            {SECTIONS.map((section) => (
-              <button
-                key={section.id}
-                onClick={() => setActiveSection(section.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors ${
-                  activeSection === section.id
-                    ? isDarkMode
-                      ? 'bg-neutral-700 text-white'
-                      : 'bg-stone-200 text-stone-900'
-                    : isDarkMode
-                      ? 'text-neutral-400 hover:bg-neutral-700/50 hover:text-neutral-200'
-                      : 'text-stone-500 hover:bg-stone-100 hover:text-stone-700'
-                }`}
-              >
-                {section.icon}
-                <span className="text-sm font-medium">{section.label}</span>
-                {activeSection === section.id && (
-                  <ChevronRight size={14} className="ml-auto" />
-                )}
-              </button>
-            ))}
+            {SECTIONS.map((section) => {
+              const isActive = activeSection === section.id
+              return (
+                <button
+                  key={section.id}
+                  onClick={() => setActiveSection(section.id)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors"
+                  style={{
+                    backgroundColor: isActive ? (themeColors ? adjustBrightness(bgColor, 15) : (isDarkMode ? '#404040' : '#e7e5e4')) : 'transparent',
+                    color: isActive ? fgColor : mutedFg,
+                  }}
+                >
+                  {section.icon}
+                  <span className="text-sm font-medium">{section.label}</span>
+                  {isActive && (
+                    <ChevronRight size={14} className="ml-auto" />
+                  )}
+                </button>
+              )
+            })}
           </nav>
         </div>
 
         {/* Content */}
         <div className="flex-1 flex flex-col">
           {/* Header */}
-          <div className={`flex items-center justify-between p-4 border-b ${
-            isDarkMode ? 'border-neutral-700' : 'border-stone-200'
-          }`}>
-            <h3 className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-stone-900'}`}>
+          <div
+            className="flex items-center justify-between p-4 border-b"
+            style={{ borderColor }}
+          >
+            <h3 className="text-lg font-medium" style={{ color: fgColor }}>
               {SECTIONS.find(s => s.id === activeSection)?.label}
             </h3>
             <button
               onClick={onClose}
-              className={`p-2 rounded-lg transition-colors ${
-                isDarkMode
-                  ? 'hover:bg-neutral-700 text-neutral-400'
-                  : 'hover:bg-stone-100 text-stone-500'
-              }`}
+              className="p-2 rounded-lg transition-colors"
+              style={{ color: mutedFg }}
             >
               <X size={18} />
             </button>

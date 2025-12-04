@@ -2,6 +2,7 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useLiveGemini } from './hooks/useLiveGemini';
 import { useGit } from './hooks/useGit';
+import { useTheme } from './hooks/useTheme';
 import { INJECTION_SCRIPT } from './utils/iframe-injection';
 import { SelectedElement, Message as ChatMessage, ToolUsage } from './types';
 import { TabState, createNewTab } from './types/tab';
@@ -98,6 +99,27 @@ import { generateText } from 'ai';
 import { generateSourcePatch, SourcePatch } from './utils/generateSourcePatch';
 
 // --- Helper Functions ---
+
+// Helper function to get luminance of a hex color (0-1 scale)
+function getLuminance(hex: string): number {
+  hex = hex.replace(/^#/, '');
+  const r = parseInt(hex.substring(0, 2), 16) / 255;
+  const g = parseInt(hex.substring(2, 4), 16) / 255;
+  const b = parseInt(hex.substring(4, 6), 16) / 255;
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+// Helper function to adjust hex color brightness for theme variations
+function adjustBrightness(hex: string, percent: number): string {
+  hex = hex.replace(/^#/, '');
+  let r = parseInt(hex.substring(0, 2), 16);
+  let g = parseInt(hex.substring(2, 4), 16);
+  let b = parseInt(hex.substring(4, 6), 16);
+  r = Math.min(255, Math.max(0, Math.round(r + (r * percent / 100))));
+  g = Math.min(255, Math.max(0, Math.round(g + (g * percent / 100))));
+  b = Math.min(255, Math.max(0, Math.round(b + (b * percent / 100))));
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
 
 // Instant UI Update - uses Gemini Flash for fast DOM modifications
 interface UIUpdateResult {
@@ -707,6 +729,28 @@ export default function App() {
     }
     return false;
   });
+
+  // Theme context - get current theme colors
+  const { currentTheme } = useTheme();
+  const themeColors = currentTheme.colors;
+
+  // Detect if current theme is dark based on background luminance
+  const isThemeDark = themeColors ? getLuminance(themeColors.background) < 0.5 : isDarkMode;
+
+  // Panel colors derived from theme - used for all content panels
+  // For dark themes: panels should be LIGHTER than background (creates depth)
+  // For light themes: panels should be white/light
+  const panelBg = themeColors?.background
+    ? adjustBrightness(themeColors.background, isThemeDark ? 25 : 3)
+    : (isDarkMode ? '#262626' : '#ffffff');
+  const panelBorder = themeColors?.border || (isDarkMode ? '#404040' : '#e7e5e4');
+  const panelText = themeColors?.foreground || (isDarkMode ? '#f5f5f5' : '#171717');
+  const panelMuted = themeColors?.foreground
+    ? adjustBrightness(themeColors.foreground, isThemeDark ? -30 : 30)
+    : (isDarkMode ? '#a3a3a3' : '#78716c');
+  const headerBg = themeColors?.background
+    ? adjustBrightness(themeColors.background, isThemeDark ? 10 : -3)
+    : (isDarkMode ? '#1a1a1a' : '#fafaf9');
 
   // Settings Dialog State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -5915,11 +5959,7 @@ If you're not sure what the user wants, ask for clarification.
 
   return (
     <div
-      className={`flex flex-col h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'dark bg-neutral-900 text-neutral-100' : 'bg-stone-300 text-neutral-900'}`}
-      style={{
-        backgroundColor: 'var(--color-background)',
-        color: 'var(--color-foreground)'
-      }}
+      className={`flex flex-col h-screen w-full overflow-hidden font-sans theme-root ${isDarkMode ? 'dark text-neutral-100' : 'text-neutral-900'}`}
     >
 
       {/* Tab Bar - at the very top with traffic light area */}
@@ -5942,7 +5982,10 @@ If you're not sure what the user wants, ask for clarification.
 
         {/* --- Left Pane: Browser, New Tab Page, Kanban, Todos, Notes, or Project Setup --- */}
         {setupProject ? (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
+          <div
+            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+          >
             <ProjectSetupFlow
               projectPath={setupProject.path}
               projectName={setupProject.name}
@@ -5953,7 +5996,10 @@ If you're not sure what the user wants, ask for clarification.
             />
           </div>
         ) : activeTab.type === 'kanban' ? (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
+          <div
+            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+          >
             <KanbanTab
               columns={activeTab.kanbanData?.columns || []}
               boardTitle={activeTab.kanbanData?.boardTitle || 'New Board'}
@@ -5963,7 +6009,10 @@ If you're not sure what the user wants, ask for clarification.
             />
           </div>
         ) : activeTab.type === 'todos' ? (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
+          <div
+            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+          >
             <TodosTab
               items={activeTab.todosData?.items || []}
               isDarkMode={isDarkMode}
@@ -5971,7 +6020,10 @@ If you're not sure what the user wants, ask for clarification.
             />
           </div>
         ) : activeTab.type === 'notes' ? (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
+          <div
+            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+          >
             <NotesTab
               content={activeTab.notesData?.content || ''}
               isDarkMode={isDarkMode}
@@ -5979,7 +6031,10 @@ If you're not sure what the user wants, ask for clarification.
             />
           </div>
         ) : isNewTabPage ? (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
+          <div
+            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+          >
             <NewTabPage
               onOpenProject={handleOpenProject}
               onOpenUrl={handleOpenUrl}
@@ -5987,10 +6042,16 @@ If you're not sure what the user wants, ask for clarification.
             />
           </div>
         ) : (
-          <div className={`flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`}>
+          <div
+            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+          >
 
             {/* Browser Toolbar */}
-            <div className={`h-12 border-b flex items-center gap-2 px-3 flex-shrink-0 ${isDarkMode ? 'border-neutral-700 bg-neutral-800' : 'border-stone-100 bg-stone-50'}`}>
+            <div
+              className="h-12 border-b flex items-center gap-2 px-3 flex-shrink-0"
+              style={{ borderColor: panelBorder, backgroundColor: headerBg }}
+            >
           {/* Navigation Buttons */}
           <div className="flex items-center gap-1">
             <button
@@ -6817,10 +6878,13 @@ If you're not sure what the user wants, ask for clarification.
 
         {/* --- Right Pane: Chat --- */}
       {isSidebarOpen && (
-      <div className={`flex flex-col rounded-xl shadow-sm flex-shrink-0 border ${isDarkMode ? 'bg-neutral-800 border-neutral-700/50' : 'bg-white border-stone-200/60'}`} style={{ width: sidebarWidth, minWidth: 430 }}>
+      <div
+        className="flex flex-col rounded-xl shadow-sm flex-shrink-0 border"
+        style={{ width: sidebarWidth, minWidth: 430, backgroundColor: panelBg, borderColor: panelBorder }}
+      >
 
           {/* Git Header */}
-          <div className={`h-12 border-b flex items-center justify-between px-3 flex-shrink-0 ${isDarkMode ? 'border-neutral-700' : 'border-stone-100'}`}>
+          <div className="h-12 border-b flex items-center justify-between px-3 flex-shrink-0" style={{ borderColor: panelBorder }}>
               <div className="flex items-center gap-2">
                   {/* Branch Selector */}
                   <div className="relative">

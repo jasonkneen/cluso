@@ -19,10 +19,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   })
 
   const setTheme = useCallback((themeId: string) => {
+    console.log('[Theme] Setting theme:', themeId)
     const theme = getTheme(themeId)
+    console.log('[Theme] Theme object:', theme)
     setCurrentTheme(theme)
     localStorage.setItem('app-theme-id', themeId)
     applyThemeToDocument(theme)
+    console.log('[Theme] Applied. Root style:', document.documentElement.style.cssText)
   }, [])
 
   const reapplyTheme = useCallback(() => {

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { Plus, X, Sun, Moon, Settings, Globe, LayoutGrid, CheckSquare, FileText, Columns3, Zap, FolderOpen, Eye } from 'lucide-react'
+import { useTheme } from '../hooks/useTheme'
 
 export type TabType = 'browser' | 'kanban' | 'todos' | 'notes'
 
@@ -56,12 +57,20 @@ export function TabBar({
   fastApplyReady,
   fileWatcherActive
 }: TabBarProps) {
+  const { currentTheme } = useTheme()
   const [showMenu, setShowMenu] = useState(false)
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null)
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null)
   const menuTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+
+  // Theme colors - use custom theme if available, otherwise use dark/light mode defaults
+  // CRITICAL: Light mode default background MUST be #d6d3d1 (stone-300) to match title bar
+  const themeColors = currentTheme.colors
+  const bgColor = themeColors?.background || (isDarkMode ? '#171717' : '#d6d3d1')
+  const fgColor = themeColors?.foreground || (isDarkMode ? '#f5f5f5' : '#171717')
+  const borderColor = themeColors?.border || (isDarkMode ? '#404040' : '#a8a29e')
 
   // Handle mouse enter on button
   const handleMouseEnter = () => {
@@ -154,12 +163,8 @@ export function TabBar({
 
   return (
     <div
-      className={`h-11 flex items-center justify-between select-none ${
-        isDarkMode
-          ? 'bg-neutral-900'
-          : 'bg-stone-300'
-      }`}
-      style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+      className="h-11 flex items-center justify-between select-none"
+      style={{ WebkitAppRegion: 'drag', backgroundColor: bgColor } as React.CSSProperties}
     >
       {/* Traffic light spacer - macOS window controls */}
       <div className="w-20 flex-shrink-0" />
@@ -332,18 +337,20 @@ export function TabBar({
           </div>
         )}
 
-        {/* Dark Mode Toggle */}
-        <button
-          onClick={onToggleDarkMode}
-          className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
-            isDarkMode
-              ? 'hover:bg-neutral-700 text-yellow-400'
-              : 'hover:bg-stone-200 text-stone-500'
-          }`}
-          title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-        >
-          {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
-        </button>
+        {/* Dark Mode Toggle - only show when using system-default theme */}
+        {currentTheme.id === 'system-default' && (
+          <button
+            onClick={onToggleDarkMode}
+            className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
+              isDarkMode
+                ? 'hover:bg-neutral-700 text-yellow-400'
+                : 'hover:bg-stone-200 text-stone-500'
+            }`}
+            title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          >
+            {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
+          </button>
+        )}
 
         {/* Settings */}
         <button
