@@ -1,0 +1,46 @@
+{
+  "name": "@ai-cluso/mgrep-local",
+  "version": "1.0.0",
+  "description": "Local semantic code search using transformer embeddings and vector similarity",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "mgrep-local": "dist/mcp/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "search",
+    "semantic",
+    "embeddings",
+    "transformers",
+    "vector-database",
+    "sqlite",
+    "mcp",
+    "code-search"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "@modelcontextprotocol/sdk": "^1.23.0",
+    "@xenova/transformers": "^2.17.0",
+    "better-sqlite3": "^11.0.0",
+    "sqlite-vec": "^0.1.6"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
+}

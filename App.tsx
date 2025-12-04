@@ -5957,9 +5957,13 @@ If you're not sure what the user wants, ask for clarification.
   // Check if current tab is "new tab" (no URL)
   const isNewTabPage = !activeTab.url;
 
+  // Background color - MUST match title bar. This is THE source of truth.
+  const appBgColor = themeColors?.background || (isDarkMode ? '#171717' : '#d6d3d1');
+
   return (
     <div
-      className={`flex flex-col h-screen w-full overflow-hidden font-sans theme-root ${isDarkMode ? 'dark text-neutral-100' : 'text-neutral-900'}`}
+      className={`flex flex-col h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'dark text-neutral-100' : 'text-neutral-900'}`}
+      style={{ backgroundColor: appBgColor }}
     >
 
       {/* Tab Bar - at the very top with traffic light area */}

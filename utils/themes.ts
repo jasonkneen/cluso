@@ -379,9 +379,11 @@ export function getTheme(themeId: string): AppTheme {
 export function applyThemeToDocument(theme: AppTheme): void {
   const root = document.documentElement
 
-  // Check if dark mode is enabled (via .dark class)
+  // Check if dark mode is enabled (via .dark class on the root or body)
+  // Only check the app's dark mode state, not system preference
   const isDarkMode = root.classList.contains('dark') ||
-    window.matchMedia('(prefers-color-scheme: dark)').matches
+    document.body.classList.contains('dark') ||
+    document.querySelector('.dark') !== null
 
   // System default: use default dark/light colors based on system preference
   if (theme.id === 'system-default') {
