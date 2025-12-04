@@ -296,16 +296,40 @@ async function streamChat(options) {
     mcpTools = [],
   } = options
 
-  // Check if already processing - clean up stale state from previous failed sessions
+  // Check if already processing - wait for previous session to complete
   if (isProcessing || querySession) {
-    console.log('[Agent-SDK-Wrapper] Cleaning up stale session state')
-    // Reset state to prevent deadlock from previous failed sessions
-    isProcessing = false
-    querySession = null
+    console.log('[Agent-SDK-Wrapper] Session already active, cleaning up...')
+    // Signal abort to the running session
+    shouldAbortSession = true
+    abortGenerator()
+
+    // Try to properly interrupt the session
+    if (querySession) {
+      try {
+        await querySession.interrupt()
+        console.log('[Agent-SDK-Wrapper] Previous session interrupted')
+      } catch (e) {
+        console.warn('[Agent-SDK-Wrapper] Could not interrupt session:', e.message)
+      }
+    }
+
+    // Wait for the session to terminate (max 2 seconds)
+    let waitCount = 0
+    while ((isProcessing || querySession) && waitCount < 40) {
+      await new Promise(resolve => setTimeout(resolve, 50))
+      waitCount++
+    }
+
+    // Force cleanup if still stuck
+    if (isProcessing || querySession) {
+      console.log('[Agent-SDK-Wrapper] Force cleaning stale session state')
+      isProcessing = false
+      querySession = null
+    }
+
     currentRequestId = null
     streamIndexToToolId.clear()
     resetMessageQueue()
-    // Don't return - allow the new request to proceed after cleanup
   }
 
   // Validate model support
@@ -432,6 +456,7 @@ async function streamChat(options) {
     // Process streaming responses
     let fullText = ''
     let fullThinking = ''
+    let completeSent = false  // Track if complete event was sent
 
     for await (const sdkMessage of querySession) {
       if (shouldAbortSession) {
@@ -509,6 +534,18 @@ async function streamChat(options) {
           sendToRenderer('agent-sdk:message-stop', {
             requestId,
           })
+
+          // Send complete event immediately since we're done
+          if (!completeSent) {
+            console.log('[Agent-SDK-Wrapper] Message stop received, sending complete')
+            sendToRenderer('agent-sdk:complete', {
+              requestId,
+              text: fullText,
+              thinking: fullThinking || undefined,
+            })
+            completeSent = true
+          }
+
           // Signal end of conversation to break out of the for-await loop
           // The SDK is waiting for the next user message, but we're done
           shouldAbortSession = true
@@ -561,12 +598,15 @@ async function streamChat(options) {
       }
     }
 
-    // Session complete
-    sendToRenderer('agent-sdk:complete', {
-      requestId,
-      text: fullText,
-      thinking: fullThinking || undefined,
-    })
+    // Session complete (only if not already sent from message_stop)
+    if (!completeSent) {
+      sendToRenderer('agent-sdk:complete', {
+        requestId,
+        text: fullText,
+        thinking: fullThinking || undefined,
+      })
+      completeSent = true
+    }
 
     console.log('[Agent-SDK-Wrapper] Stream completed:', requestId)
 

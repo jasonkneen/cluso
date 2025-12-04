@@ -696,6 +696,20 @@ function registerGitHandlers() {
     return gitExecSafe(['checkout', validation.ref])
   })
 
+  ipcMain.handle('git:checkoutFile', async (event, filePath) => {
+    // Restore a specific file to its last committed state
+    if (!filePath || typeof filePath !== 'string') {
+      return { success: false, error: 'Invalid file path' }
+    }
+    // Validate path - must be within project folder
+    const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(projectFolder, filePath)
+    if (!absolutePath.startsWith(projectFolder)) {
+      return { success: false, error: 'File path outside project folder' }
+    }
+    // Use -- to separate path from command to prevent path injection
+    return gitExecSafe(['checkout', 'HEAD', '--', absolutePath])
+  })
+
   ipcMain.handle('git:createBranch', async (event, name) => {
     // Validate branch name to prevent injection
     const validation = validateGitRef(name)

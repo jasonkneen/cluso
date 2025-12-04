@@ -700,30 +700,8 @@ const styles = `
     border-radius: 9999px;
   }
 
-  .pricing-card.blurred {
-    filter: blur(8px);
-    pointer-events: none;
-    user-select: none;
-    position: relative;
-  }
-
   .pricing-card-wrapper {
     position: relative;
-  }
-
-  .pricing-card-wrapper .coming-soon {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 10;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    padding: 0.5rem 1rem;
-    border-radius: 9999px;
-    font-weight: 600;
-    font-size: 0.9rem;
-    color: var(--text-secondary);
   }
 
   .pricing-card h3 {
@@ -1274,8 +1252,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               </div>
 
               <div className="pricing-card-wrapper">
-                <span className="coming-soon">Coming Soon</span>
-                <div className="pricing-card featured blurred">
+                <div className="pricing-card featured">
                   <h3>Pro</h3>
                   <div className="price">$19<span>/mo</span></div>
                   <p className="price-note">For serious developers</p>
@@ -1310,8 +1287,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               </div>
 
               <div className="pricing-card-wrapper">
-                <span className="coming-soon">Coming Soon</span>
-                <div className="pricing-card blurred">
+                <div className="pricing-card">
                   <h3>Team</h3>
                   <div className="price"><span className="original-price">$99</span>$49<span>/mo</span></div>
                   <p className="price-note">Per seat, billed annually</p>

@@ -913,6 +913,26 @@ export default function App() {
         toolTracker.trackError(toolResult.toolCallId, errorMsg)
       } else {
         toolTracker.trackSuccess(toolResult.toolCallId, toolResult.result)
+
+        // Track file modifications from Agent SDK tools (Write, Edit, MultiEdit)
+        // These bypass our local tools, so we need to track them here
+        const toolName = toolResult.toolName?.toLowerCase() || '';
+        if (toolName.includes('write') || toolName.includes('edit')) {
+          const result = toolResult.result as Record<string, unknown> | undefined;
+          // Try to extract file path from result or args
+          const filePath = result?.path || result?.file_path || result?.filePath;
+          if (typeof filePath === 'string') {
+            console.log('[Tool Result] File modification detected:', toolName, filePath);
+            // Note: We can't get originalContent here as the file is already modified
+            // The edited files drawer will show but undo will need git revert
+            fileModificationHandlerRef.current({
+              type: 'write',
+              path: filePath,
+              // originalContent is undefined - file already modified by SDK
+              newContent: undefined, // We don't have the new content either
+            });
+          }
+        }
       }
     },
   });
@@ -1087,6 +1107,24 @@ export default function App() {
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const [selectedLogIndices, setSelectedLogIndices] = useState<Set<number>>(new Set());
   const lastClickedLogIndex = useRef<number | null>(null);
+
+  // Debug Mode - shows all activity in console panel
+  const [debugMode, setDebugMode] = useState(false);
+
+  // Debug logger that shows in both console.log and the console panel when debug mode is on
+  const debugLog = useCallback((prefix: string, message: string, data?: unknown) => {
+    const fullMessage = data !== undefined
+      ? `[${prefix}] ${message}: ${typeof data === 'object' ? JSON.stringify(data, null, 2) : data}`
+      : `[${prefix}] ${message}`;
+    console.log(fullMessage);
+    if (debugMode) {
+      setConsoleLogs(prev => [...prev.slice(-199), {
+        type: 'info',
+        message: fullMessage,
+        timestamp: new Date()
+      }]);
+    }
+  }, [debugMode]);
 
   // AI Element Selection State (pending confirmation)
   const [aiSelectedElement, setAiSelectedElement] = useState<{
@@ -1332,27 +1370,51 @@ export default function App() {
   }, []);
 
   // Reject pending code change - undo and clear
-  const handleRejectChange = useCallback(() => {
+  const handleRejectChange = useCallback(async () => {
     const webview = webviewRefs.current.get(activeTabId);
     console.log('[Exec] Rejecting change, pendingChange:', pendingChange);
     console.log('[Exec] undoCode:', pendingChange?.undoCode);
     console.log('[Exec] webview:', !!webview);
 
+    let undoSucceeded = false;
+
     if (pendingChange?.undoCode && webview) {
       console.log('[Exec] Rejecting - running undo code:', pendingChange.undoCode);
-      webview.executeJavaScript(pendingChange.undoCode)
-        .then(() => console.log('[Exec] Undo executed successfully'))
-        .catch((err: Error) => console.error('[Exec] Undo error:', err));
+      try {
+        await webview.executeJavaScript(pendingChange.undoCode);
+        console.log('[Exec] Undo executed successfully');
+        undoSucceeded = true;
+      } catch (err) {
+        console.error('[Exec] Undo error:', err);
+      }
     } else {
       console.log('[Exec] No undo code available or no webview');
     }
+
+    // If undo failed and we have a webview, reload the page as fallback
+    if (!undoSucceeded && webview) {
+      console.log('[Exec] Undo failed - reloading page as fallback');
+      try {
+        (webview as Electron.WebviewTag).reload();
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          role: 'system',
+          content: 'Changes discarded. Page reloaded to restore state.',
+          timestamp: new Date()
+        }]);
+      } catch (e) {
+        console.error('[Exec] Failed to reload:', e);
+      }
+    } else {
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        role: 'system',
+        content: 'Changes discarded.',
+        timestamp: new Date()
+      }]);
+    }
+
     setPendingChange(null);
-    setMessages(prev => [...prev, {
-      id: Date.now().toString(),
-      role: 'system',
-      content: 'Changes discarded.',
-      timestamp: new Date()
-    }]);
   }, [pendingChange, activeTabId]);
 
   // Browser navigation functions - update active tab's URL
@@ -3525,6 +3587,29 @@ export default function App() {
           })
           .catch((err: Error) => console.error('[Undo] Error:', err));
       }
+    } else if (file.isFileModification) {
+      // File was modified but we don't have originalContent - use git to restore
+      console.log('[Undo] Using git checkoutFile to restore:', path);
+      const { api: electronAPI } = getElectronAPI();
+      if (electronAPI?.git?.checkoutFile) {
+        try {
+          const result = await electronAPI.git.checkoutFile(path);
+          if (result.success) {
+            console.log('[Undo] File restored via git checkoutFile');
+            setEditedFiles(prev => prev.filter(f => f.path !== path));
+          } else {
+            console.error('[Undo] Git checkoutFile failed:', result.error);
+            // Still remove from list - user will need to manually revert
+            setEditedFiles(prev => prev.filter(f => f.path !== path));
+          }
+        } catch (err) {
+          console.error('[Undo] Git checkoutFile error:', err);
+          setEditedFiles(prev => prev.filter(f => f.path !== path));
+        }
+      } else {
+        console.warn('[Undo] Git checkoutFile not available, cannot restore file');
+        setEditedFiles(prev => prev.filter(f => f.path !== path));
+      }
     } else {
       // No undo mechanism, just remove from list
       setEditedFiles(prev => prev.filter(f => f.path !== path));
@@ -3539,10 +3624,15 @@ export default function App() {
     const filesToUndo = [...editedFiles].reverse();
 
     for (const file of filesToUndo) {
-      // Handle file-based undo
+      // Handle file-based undo with original content
       if (file.isFileModification && file.originalContent !== undefined) {
         if (electronAPI?.files?.writeFile) {
           await electronAPI.files.writeFile(file.path, file.originalContent).catch(() => {});
+        }
+      } else if (file.isFileModification) {
+        // No original content - use git to restore
+        if (electronAPI?.git?.checkoutFile) {
+          await electronAPI.git.checkoutFile(file.path).catch(() => {});
         }
       } else if (file.undoCode && webview) {
         // Handle DOM-based undo
@@ -3645,6 +3735,8 @@ export default function App() {
     if (!isInspectorActive && !isMoveActive) {
       setSelectedElement(null);
       setShowElementChat(false);
+      // Clear canvas indicators when modes are deactivated
+      webview?.send('clear-selection');
     }
   }, [isInspectorActive, isScreenshotActive, isMoveActive, isElectron, isWebviewReady, activeTabId]);
 
@@ -3980,14 +4072,22 @@ ${f.content}
       | { type: 'text'; text: string }
       | { type: 'image'; image: { base64Data: string; mimeType?: string } };
 
+    // Get project context
+    const projectPath = activeTab?.projectPath;
+    const projectName = projectPath ? projectPath.split('/').pop() : null;
+
     let fullPromptText = `
 Current Page: ${urlInput}
 ${pageTitle ? `Page Title: ${pageTitle}` : ''}
+${projectPath ? `Project Folder: ${projectPath}` : ''}
+${projectName ? `Project Name: ${projectName}` : ''}
 
 User Request: ${userMessage.content}
 ${elementContext}
 ${fileContext}
 ${screenshotElement ? `Context: User selected element for visual reference: <${screenshotElement.tagName}>` : ''}
+
+${projectPath ? `IMPORTANT: The source files for this page are in ${projectPath}. Use the Read and Glob tools to explore the project structure and find relevant source files before making changes.` : ''}
     `;
 
     if (attachLogs && logs.length > 0) {
@@ -4018,26 +4118,31 @@ ${screenshotElement ? `Context: User selected element for visual reference: <${s
     if (wantsModification) {
       fullPromptText += `
 Instructions:
-You are an AI UI assistant that can modify web pages in real-time.
+You are an AI UI assistant that can modify web pages. The user has selected an element to focus on.
 
-When the user asks you to change, modify, or update something on the page:
-1. Output a JSON code block with BOTH forward and undo JavaScript for IMMEDIATE PREVIEW
-2. Use the format: \`\`\`json-exec {"code": "...", "undo": "..."}\`\`\`
-3. The "code" will be executed immediately, "undo" restores the original
-4. For QUICK edits: Just provide the json-exec preview. Don't call tools.
-5. Only use 'write_file' to save to source code if user explicitly says "save", "commit", or "make permanent".
+CRITICAL WORKFLOW FOR SOURCE CODE CHANGES:
+1. FIRST: Use the Read tool to read the ENTIRE source file (the component/page containing this element)
+2. UNDERSTAND the full context - how this element fits in the page structure, what styles affect it, what props/data it uses
+3. THEN make your changes, considering how they impact the whole page
+4. The selected element is just the FOCUS AREA - you need the full file context to make good edits
 
-Examples:
-- Change text: \`\`\`json-exec {"code": "document.querySelector('#myId').textContent = 'New'", "undo": "document.querySelector('#myId').textContent = 'Old'"}\`\`\`
-- Change style: \`\`\`json-exec {"code": "document.querySelector('.btn').style.backgroundColor = 'red'", "undo": "document.querySelector('.btn').style.backgroundColor = 'blue'"}\`\`\`
-- XPath example: \`\`\`json-exec {"code": "document.evaluate('${selectedElement?.xpath || ''}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue.textContent = 'New'", "undo": "document.evaluate('${selectedElement?.xpath || ''}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue.textContent = 'Original'"}\`\`\`
+For QUICK DOM PREVIEWS (temporary, not saved):
+- Output: \`\`\`json-exec {"code": "...", "undo": "..."}\`\`\`
+- The "code" executes immediately, "undo" restores original
+- Use for quick style/text changes before committing to source
 
-For the selected element, you can use:
+For SOURCE CODE EDITS (permanent):
+1. READ the full source file first using the Read tool
+2. Understand the component structure and how the element is rendered
+3. Use the Edit tool to modify the source, preserving the overall structure
+4. NEVER guess at the source code - always read it first
+
+Selected Element Context:
 - XPath: ${selectedElement?.xpath || 'N/A'}
 - ID: ${selectedElement?.id || 'N/A'}
 - Classes: ${selectedElement?.className || 'N/A'}
 
-IMPORTANT: Always provide the ORIGINAL value in the "undo" code so the user can preview before/after.
+IMPORTANT: The selected element HTML above is just a snippet. For source edits, you MUST read the full file to understand the complete context. Don't assume the structure - READ IT.
 
 Be concise. Confirm what you changed.
       `;
@@ -4054,8 +4159,15 @@ If you're not sure what the user wants, ask for clarification.
       { type: 'text', text: fullPromptText },
     ];
 
-    // Add all attached images
-    attachedImages.forEach(img => {
+    // Add all attached images with explicit numbering for multi-image context
+    attachedImages.forEach((img, index) => {
+      // Add a text label before each image when multiple images are attached
+      if (attachedImages.length > 1) {
+        userContentParts.push({
+          type: 'text',
+          text: `\n[Image ${index + 1} of ${attachedImages.length}]:`,
+        });
+      }
       const base64Data = img.split(',')[1];
       const mimeType = img.split(';')[0].split(':')[1] || 'image/png';
       userContentParts.push({
@@ -4070,6 +4182,8 @@ If you're not sure what the user wants, ask for clarification.
     setAttachLogs(false);
     setAttachedImages([]);
     setScreenshotElement(null);
+    setCapturedScreenshot(null); // Clear screenshot thumbnail
+    setShowScreenshotPreview(false); // Close preview modal if open
     setAttachedSearchResults(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
 
@@ -4958,8 +5072,8 @@ If you're not sure what the user wants, ask for clarification.
           toolCalls: [],
         });
 
-        // Track accumulated tool calls for display
-        const accumulatedToolCalls: Array<{ name: string; status: 'running' | 'done' | 'error'; result?: unknown }> = [];
+        // Track accumulated tool calls for display - must include id for proper UI mapping
+        const accumulatedToolCalls: Array<{ id: string; name: string; args: unknown; status: 'running' | 'done' | 'error'; result?: unknown }> = [];
 
         // Use streaming API for real-time response
         console.log('[AI SDK] Starting stream...');
@@ -4992,10 +5106,11 @@ If you're not sure what the user wants, ask for clarification.
             // Update streaming message with tool activity
             if (step?.toolCalls && step.toolCalls.length > 0) {
               for (const tc of step.toolCalls) {
+                const toolId = tc.toolCallId || `tool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
                 const toolName = tc.toolName?.replace(/^mcp_[^_]+_/, '') || 'tool';
-                const existing = accumulatedToolCalls.find(t => t.name === toolName && t.status === 'running');
+                const existing = accumulatedToolCalls.find(t => t.id === toolId);
                 if (!existing) {
-                  accumulatedToolCalls.push({ name: toolName, status: 'running' });
+                  accumulatedToolCalls.push({ id: toolId, name: toolName, args: tc.args || {}, status: 'running' });
                 }
               }
             }
@@ -5003,8 +5118,12 @@ If you're not sure what the user wants, ask for clarification.
             // Mark tools as done when results come in
             if (step?.toolResults && step.toolResults.length > 0) {
               for (const tr of step.toolResults) {
+                const toolId = tr.toolCallId;
                 const toolName = tr.toolName?.replace(/^mcp_[^_]+_/, '') || 'tool';
-                const existing = accumulatedToolCalls.find(t => t.name === toolName && t.status === 'running');
+                // Match by ID first, then by name (fallback for tools without IDs)
+                const existing = toolId
+                  ? accumulatedToolCalls.find(t => t.id === toolId)
+                  : accumulatedToolCalls.find(t => t.name === toolName && t.status === 'running');
                 if (existing) {
                   existing.status = (tr.result as any)?.error ? 'error' : 'done';
                   existing.result = tr.result;
@@ -5012,7 +5131,7 @@ If you're not sure what the user wants, ask for clarification.
               }
             }
 
-            // Update streaming message to show tool activity
+            // Update streaming message to show tool activity with full structure
             const toolSummary = accumulatedToolCalls.map(t => {
               const icon = t.status === 'running' ? '⏳' : t.status === 'error' ? '❌' : '✓';
               return `${icon} ${t.name}`;
@@ -5022,7 +5141,13 @@ If you're not sure what the user wants, ask for clarification.
               setStreamingMessage(prev => prev ? {
                 ...prev,
                 content: streamedTextBuffer || `Working: ${toolSummary}`,
-                toolCalls: accumulatedToolCalls.map(t => ({ name: t.name, status: t.status }))
+                toolCalls: accumulatedToolCalls.map(t => ({
+                  id: t.id,
+                  name: t.name,
+                  args: t.args,
+                  status: t.status === 'done' ? 'complete' : t.status,
+                  result: t.result
+                }))
               } : null);
             }
           },
@@ -5035,8 +5160,11 @@ If you're not sure what the user wants, ask for clarification.
         });
 
         // Stream complete - finalize the message
+        console.log('[AI SDK] Stream complete, clearing streaming state');
         setIsStreaming(false);
         setAgentProcessing(false);
+        // Clear streaming message immediately to remove spinning indicators
+        setStreamingMessage(null);
 
         let resolvedText = (result.text || streamedTextBuffer || '').trim();
         if (!resolvedText && result.toolResults && result.toolResults.length > 0) {
@@ -5089,13 +5217,20 @@ If you're not sure what the user wants, ask for clarification.
           resolvedText = summaries || 'Tasks completed.';
         }
         if (!resolvedText) {
-          resolvedText = 'No response generated.';
+          // Check if tools were used via accumulatedToolCalls (Agent SDK path)
+          if (accumulatedToolCalls.length > 0) {
+            const toolSummary = accumulatedToolCalls
+              .map(t => `✓ ${t.name}${t.status === 'error' ? ' (error)' : ''}`)
+              .join('\n');
+            resolvedText = `Done.\n\n${toolSummary}`;
+          } else {
+            resolvedText = 'No response generated.';
+          }
         }
         text = resolvedText;
 
-        // Get the final streaming message state for tool usage
-        const finalStreamingMessage = streamingMessage;
-        setStreamingMessage(null);
+        // Note: streamingMessage was already cleared above to remove spinning indicators
+        // finalStreamingMessage would be null now, but we don't need it since result contains tool info
 
         // If we got reasoning, log it
         if (result.reasoning) {
@@ -5264,6 +5399,9 @@ If you're not sure what the user wants, ask for clarification.
       setIsStreaming(false);
       setStreamingMessage(null);
       setAgentProcessing(false);
+      // Failsafe: ensure isAIGenerating is also reset by calling cancel
+      // This handles cases where the complete event wasn't received properly
+      cancelAI();
     }
   };
 
@@ -6174,6 +6312,9 @@ If you're not sure what the user wants, ask for clarification.
                                     <button onClick={() => {
                                         setShowElementChat(false);
                                         setSelectedElement(null);
+                                        // Clear canvas indicators
+                                        const webview = webviewRefs.current.get(activeTabId);
+                                        webview?.send('clear-selection');
                                     }} className={isDarkMode ? 'hover:text-neutral-200' : 'hover:text-stone-900'}>
                                         <X size={14} />
                                     </button>
@@ -7277,9 +7418,13 @@ If you're not sure what the user wants, ask for clarification.
                                   <button
                                       onClick={(e) => {
                                         e.stopPropagation();
+                                        // Clear selection state
                                         setSelectedElement(null);
                                         setDisplayedSourceCode(null);
                                         setMoveTargetPosition(null);
+                                        // Clear canvas indicators
+                                        const webview = webviewRefs.current.get(activeTabId);
+                                        webview?.send('clear-selection');
                                       }}
                                       className={`ml-0.5 ${selectedElement.targetPosition ? 'hover:text-orange-900' : 'hover:text-blue-900'}`}
                                   >
@@ -7295,6 +7440,9 @@ If you're not sure what the user wants, ask for clarification.
                                       onClick={() => {
                                           setScreenshotElement(null);
                                           setCapturedScreenshot(null);
+                                          // Clear canvas indicators
+                                          const webview = webviewRefs.current.get(activeTabId);
+                                          webview?.send('clear-selection');
                                       }}
                                       className="ml-0.5 hover:text-purple-900"
                                   >

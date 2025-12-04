@@ -155,8 +155,28 @@ async function startStreamingSession(options) {
     onError,
   } = options
 
+  // Check if already processing - wait for previous session to complete
   if (isProcessing || querySession) {
-    throw new Error('Session already active')
+    console.log('[Claude-Session] Session already active, cleaning up...')
+    // Signal abort to the running session
+    shouldAbortSession = true
+    abortGenerator()
+
+    // Wait for the session to terminate (max 2 seconds)
+    let waitCount = 0
+    while ((isProcessing || querySession) && waitCount < 40) {
+      await new Promise(resolve => setTimeout(resolve, 50))
+      waitCount++
+    }
+
+    // Force cleanup if still stuck
+    if (isProcessing || querySession) {
+      console.log('[Claude-Session] Force cleaning stale session state')
+      isProcessing = false
+      querySession = null
+    }
+
+    resetMessageQueue()
   }
 
   // Reset state

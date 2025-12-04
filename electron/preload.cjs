@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getCurrentBranch: () => ipcRenderer.invoke('git:getCurrentBranch'),
     getBranches: () => ipcRenderer.invoke('git:getBranches'),
     checkout: (branch) => ipcRenderer.invoke('git:checkout', branch),
+    checkoutFile: (filePath) => ipcRenderer.invoke('git:checkoutFile', filePath),
     createBranch: (name) => ipcRenderer.invoke('git:createBranch', name),
     getStatus: () => ipcRenderer.invoke('git:getStatus'),
     commit: (message) => ipcRenderer.invoke('git:commit', message),

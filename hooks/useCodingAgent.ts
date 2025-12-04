@@ -288,20 +288,32 @@ Current intent: ${intent.type} (${intent.description})
 Confidence: ${Math.round(intent.confidence * 100)}%`)
 
   if (context.projectPath) {
-    parts.push(`\nProject root: ${context.projectPath}`)
+    parts.push(`\n## Project Context
+Project root: ${context.projectPath}
+
+IMPORTANT: This is where the source files live. When the user asks about the page or wants changes:
+1. Use Glob to find relevant source files (e.g., *.tsx, *.jsx, *.html)
+2. Use Read to examine the full file before making changes
+3. Common patterns: src/, components/, pages/, app/`)
   }
 
   if (context.selectedElement) {
-    parts.push(`\n## Selected UI Element
+    parts.push(`\n## Selected UI Element (FOCUS AREA - but read the FULL file for context)
 Tag: ${context.selectedElement.tagName}
 ${context.selectedElement.id ? `ID: ${context.selectedElement.id}` : ''}
 ${context.selectedElement.className ? `Classes: ${context.selectedElement.className}` : ''}
 ${context.selectedElement.text ? `Text: ${context.selectedElement.text.substring(0, 100)}` : ''}
 ${context.selectedElement.xpath ? `XPath: ${context.selectedElement.xpath}` : ''}
-${context.selectedElement.sourceLocation?.summary ? `Source: ${context.selectedElement.sourceLocation.summary}` : ''}`)
+${context.selectedElement.sourceLocation?.summary ? `Source: ${context.selectedElement.sourceLocation.summary}` : ''}
+
+⚠️ CRITICAL FOR UI EDITS:
+1. This HTML snippet is just the SELECTED element - the user wants to focus on this area
+2. You MUST read the ENTIRE source file to understand the full context before editing
+3. The element exists within a larger component/page - understand that structure first
+4. Don't assume what's around it - READ THE FILE to see the full picture`)
 
     if (context.selectedElement.outerHTML) {
-      parts.push(`\nHTML:\n\`\`\`html\n${context.selectedElement.outerHTML.substring(0, 500)}\n\`\`\``)
+      parts.push(`\nHTML Snippet (selected element only):\n\`\`\`html\n${context.selectedElement.outerHTML.substring(0, 500)}\n\`\`\``)
     }
   }
 

@@ -474,6 +474,8 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
         const removeComplete = agentSdk.onComplete((data: { requestId: string; text: string; thinking?: string }) => {
           if (data.requestId !== requestId) return
 
+          debugLog.aiChat.log('[Agent SDK] Complete received, resetting isGenerating')
+
           // Cleanup all listeners
           removeTextChunk()
           removeThinkingStart()
