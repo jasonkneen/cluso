@@ -18,6 +18,18 @@
         --border: 231 229 228; /* stone-200 */
         --primary: 28 25 23; /* stone-900 */
         --primary-foreground: 250 250 249; /* stone-50 */
+
+        /* Theme color variables (defaults) */
+        --color-background: #ffffff;
+        --color-foreground: #1a1a1a;
+        --color-primary: #3b82f6;
+        --color-secondary: #8b5cf6;
+        --color-accent: #06b6d4;
+        --color-border: #e5e7eb;
+        --color-success: #22c55e;
+        --color-error: #ef4444;
+        --color-warning: #f59e0b;
+        --color-info: #3b82f6;
       }
 
       .dark {
@@ -28,6 +40,29 @@
         --border: 64 64 64; /* neutral-700 */
         --primary: 59 130 246; /* blue-500 */
         --primary-foreground: 255 255 255; /* white */
+
+        /* Theme color variables (dark defaults) */
+        --color-background: #1a1b26;
+        --color-foreground: #c0caf5;
+        --color-primary: #7aa2f7;
+        --color-secondary: #bb9af7;
+        --color-accent: #7dcfff;
+        --color-border: #3b3f5c;
+        --color-success: #9ece6a;
+        --color-error: #f7768e;
+        --color-warning: #e0af68;
+        --color-info: #7aa2f7;
+      }
+
+      /* When a custom theme is applied, use the theme colors */
+      [data-theme] {
+        background-color: var(--color-background) !important;
+        color: var(--color-foreground) !important;
+      }
+
+      [data-theme] body {
+        background-color: var(--color-background) !important;
+        color: var(--color-foreground) !important;
       }
 
       /* Code block styling for dark mode - Shiki one-dark-pro theme colors */

@@ -29,11 +29,14 @@ import {
   AlertCircle,
   Play,
   Square,
+  Palette,
+  Server,
 } from 'lucide-react'
 import { debugLog } from '../utils/debug'
 import { FastApplySettings } from './FastApplySettings'
+import { useTheme } from '../hooks/useTheme'
 
-type SettingsSection = 'general' | 'display' | 'providers' | 'models' | 'connections' | 'pro'
+type SettingsSection = 'general' | 'display' | 'providers' | 'models' | 'mcp' | 'themes' | 'pro'
 
 export interface Provider {
   id: string
@@ -168,7 +171,8 @@ const SECTIONS: { id: SettingsSection; label: string; icon: React.ReactNode }[] 
   { id: 'display', label: 'Display', icon: <Monitor size={18} /> },
   { id: 'providers', label: 'Providers', icon: <Cpu size={18} /> },
   { id: 'models', label: 'Models', icon: <Brain size={18} /> },
-  { id: 'connections', label: 'Connections', icon: <Plug size={18} /> },
+  { id: 'mcp', label: 'MCP Servers', icon: <Server size={18} /> },
+  { id: 'themes', label: 'Themes', icon: <Palette size={18} /> },
   { id: 'pro', label: 'Pro Features', icon: <Zap size={18} /> },
 ]
 
@@ -188,6 +192,7 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general')
   const [showApiKeys, setShowApiKeys] = useState<Record<string, boolean>>({})
+  const { currentTheme, setTheme, themes } = useTheme()
 
   // OAuth state
   const [oauthLoading, setOauthLoading] = useState(false)
@@ -1239,7 +1244,7 @@ export function SettingsDialog({
           </div>
         )
 
-      case 'connections':
+      case 'mcp':
         return (
           <div className="space-y-4">
             {/* Header with Add button */}
@@ -1677,6 +1682,96 @@ export function SettingsDialog({
               <p className={`text-xs ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
                 <strong>MCP (Model Context Protocol)</strong> servers extend AI capabilities with custom tools.
                 Use <strong>stdio</strong> for local servers (npx, node, python) or <strong>SSE</strong> for remote HTTP servers.
+              </p>
+            </div>
+          </div>
+        )
+
+      case 'themes':
+        return (
+          <div className="space-y-6">
+            <div>
+              <h3 className={`text-sm font-medium mb-2 ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                Application Theme
+              </h3>
+              <p className={`text-xs mb-4 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                Choose a color theme for the application. Themes change the overall look and feel.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {themes.map((theme) => {
+                const isSelected = currentTheme.id === theme.id
+                const previewBg = theme.colors?.background || (isDarkMode ? '#1a1b26' : '#ffffff')
+                const previewFg = theme.colors?.foreground || (isDarkMode ? '#c0caf5' : '#1a1a1a')
+                const previewPrimary = theme.colors?.primary || '#7aa2f7'
+                const previewAccent = theme.colors?.accent || '#7dcfff'
+
+                return (
+                  <button
+                    key={theme.id}
+                    onClick={() => setTheme(theme.id)}
+                    className={`relative p-3 rounded-xl border-2 transition-all text-left ${
+                      isSelected
+                        ? 'border-blue-500 ring-2 ring-blue-500/20'
+                        : isDarkMode
+                          ? 'border-neutral-700 hover:border-neutral-600'
+                          : 'border-stone-200 hover:border-stone-300'
+                    }`}
+                  >
+                    {/* Theme Preview */}
+                    <div
+                      className="h-16 rounded-lg mb-2 relative overflow-hidden"
+                      style={{ backgroundColor: previewBg }}
+                    >
+                      {/* Preview elements */}
+                      <div className="absolute inset-2 flex flex-col gap-1">
+                        <div
+                          className="h-2 w-3/4 rounded"
+                          style={{ backgroundColor: previewFg, opacity: 0.8 }}
+                        />
+                        <div
+                          className="h-2 w-1/2 rounded"
+                          style={{ backgroundColor: previewPrimary }}
+                        />
+                        <div className="flex gap-1 mt-auto">
+                          <div
+                            className="h-3 w-8 rounded"
+                            style={{ backgroundColor: previewPrimary }}
+                          />
+                          <div
+                            className="h-3 w-6 rounded"
+                            style={{ backgroundColor: previewAccent }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Theme Info */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                          {theme.name}
+                        </span>
+                        <p className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                          {theme.description}
+                        </p>
+                      </div>
+                      {isSelected && (
+                        <CheckCircle size={16} className="text-blue-500 flex-shrink-0" />
+                      )}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Info Box */}
+            <div className={`p-3 rounded-lg ${
+              isDarkMode ? 'bg-blue-500/10 border border-blue-500/20' : 'bg-blue-50 border border-blue-100'
+            }`}>
+              <p className={`text-xs ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
+                <strong>Tip:</strong> Select "System Default" to automatically follow your system's light/dark mode preference.
               </p>
             </div>
           </div>
