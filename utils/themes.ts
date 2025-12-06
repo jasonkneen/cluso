@@ -402,6 +402,13 @@ export function applyThemeToDocument(theme: AppTheme): void {
       root.style.setProperty('--color-info', '#3b82f6') // blue-500
       root.style.setProperty('--color-panel', '#262626') // slightly lighter than bg
       root.style.setProperty('--color-muted', '#a3a3a3') // muted text
+      // Contrast-safe text colors for colored backgrounds
+      root.style.setProperty('--color-on-primary', '#ffffff')
+      root.style.setProperty('--color-on-secondary', '#ffffff')
+      root.style.setProperty('--color-on-accent', '#000000')
+      root.style.setProperty('--color-on-success', '#000000')
+      root.style.setProperty('--color-on-error', '#ffffff')
+      root.style.setProperty('--color-on-warning', '#000000')
     } else {
       root.style.setProperty('--color-background', '#d6d3d1') // stone-300 - matches title bar
       root.style.setProperty('--color-foreground', '#171717') // neutral-900
@@ -415,6 +422,13 @@ export function applyThemeToDocument(theme: AppTheme): void {
       root.style.setProperty('--color-info', '#2563eb') // blue-600
       root.style.setProperty('--color-panel', '#ffffff') // white panels in light mode
       root.style.setProperty('--color-muted', '#78716c') // muted text
+      // Contrast-safe text colors for colored backgrounds
+      root.style.setProperty('--color-on-primary', '#ffffff')
+      root.style.setProperty('--color-on-secondary', '#ffffff')
+      root.style.setProperty('--color-on-accent', '#ffffff')
+      root.style.setProperty('--color-on-success', '#ffffff')
+      root.style.setProperty('--color-on-error', '#ffffff')
+      root.style.setProperty('--color-on-warning', '#000000')
     }
     return
   }
@@ -455,6 +469,15 @@ export function applyThemeToDocument(theme: AppTheme): void {
   // Muted: foreground at reduced intensity
   root.style.setProperty('--color-muted', adjustBrightness(colors.foreground, isDarkTheme ? -30 : 30))
 
+  // Add contrast-safe text colors for colored backgrounds
+  // These ensure text on primary/accent backgrounds is always readable
+  root.style.setProperty('--color-on-primary', getContrastingTextForColor(colors.primary))
+  root.style.setProperty('--color-on-secondary', getContrastingTextForColor(colors.secondary))
+  root.style.setProperty('--color-on-accent', getContrastingTextForColor(colors.accent))
+  root.style.setProperty('--color-on-success', getContrastingTextForColor(colors.success))
+  root.style.setProperty('--color-on-error', getContrastingTextForColor(colors.error))
+  root.style.setProperty('--color-on-warning', getContrastingTextForColor(colors.warning))
+
   // Set data attribute for CSS targeting
   root.setAttribute('data-theme', theme.id)
 }
@@ -478,4 +501,33 @@ function adjustBrightness(hex: string, percent: number): string {
   g = Math.min(255, Math.max(0, Math.round(g + (g * percent / 100))))
   b = Math.min(255, Math.max(0, Math.round(b + (b * percent / 100))))
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+}
+
+// Calculate contrast ratio between two colors (WCAG formula)
+export function getContrastRatio(color1: string, color2: string): number {
+  const l1 = getLuminance(color1)
+  const l2 = getLuminance(color2)
+  const lighter = Math.max(l1, l2)
+  const darker = Math.min(l1, l2)
+  return (lighter + 0.05) / (darker + 0.05)
+}
+
+// Check if two colors have sufficient contrast (WCAG AA = 4.5:1, AAA = 7:1)
+export function hasMinimumContrast(foreground: string, background: string, level: 'AA' | 'AAA' = 'AA'): boolean {
+  const ratio = getContrastRatio(foreground, background)
+  return level === 'AAA' ? ratio >= 7 : ratio >= 4.5
+}
+
+// Get a contrasting text color for a given background
+export function getContrastingText(background: string): string {
+  const bgLuminance = getLuminance(background)
+  // If background is dark (luminance < 0.5), use light text; otherwise dark text
+  return bgLuminance < 0.5 ? '#ffffff' : '#000000'
+}
+
+// Get contrasting text for a specific color (used for --color-on-* variables)
+function getContrastingTextForColor(color: string): string {
+  const luminance = getLuminance(color)
+  // Use a higher threshold for better contrast
+  return luminance < 0.5 ? '#ffffff' : '#1a1a1a'
 }

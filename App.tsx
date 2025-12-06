@@ -1025,6 +1025,28 @@ export default function App() {
   } | null>(null)
   const [isStreaming, setIsStreaming] = useState(false)
 
+  // Connection state: 'idle' = connected but not actively generating, 'streaming' = actively processing
+  // This allows proper button states while maintaining persistent connection
+  const [connectionState, setConnectionState] = useState<'disconnected' | 'idle' | 'streaming'>('disconnected')
+
+  // Track completed tool calls that persist after streaming ends (for showing final success/error states)
+  const [completedToolCalls, setCompletedToolCalls] = useState<Array<{
+    id: string
+    name: string
+    status: 'success' | 'error'
+    timestamp: Date
+  }>>([])
+
+  // Auto-clear completed tool calls after a delay
+  useEffect(() => {
+    if (completedToolCalls.length > 0) {
+      const timer = setTimeout(() => {
+        setCompletedToolCalls([])
+      }, 5000) // Clear after 5 seconds
+      return () => clearTimeout(timer)
+    }
+  }, [completedToolCalls])
+
   // Pending UI Patch State - stores patches that need user confirmation
   interface PendingPatch {
     id: string
@@ -1062,7 +1084,7 @@ export default function App() {
   const [isGeneratingSourcePatch, setIsGeneratingSourcePatch] = useState(false)
 
   // Initialize AI Chat hook with streaming support
-  const { generate: generateAI, stream: streamAI, cancel: cancelAI, isLoading: isAILoading, isGenerating: isAIGenerating } = useAIChat({
+  const { generate: generateAI, stream: streamAI, cancel: cancelAI, isLoading: isAILoading, isGenerating: isAIGenerating, isInitialized: isAIInitialized } = useAIChat({
     onError: (err) => console.error('[AI SDK] Error:', err),
     onTextDelta: (delta) => {
       // Update streaming message content as chunks arrive
@@ -1142,6 +1164,13 @@ export default function App() {
       }
     },
   });
+
+  // Update connection state when AI SDK initializes
+  useEffect(() => {
+    if (isAIInitialized && connectionState === 'disconnected') {
+      setConnectionState('idle')
+    }
+  }, [isAIInitialized, connectionState])
 
   // Initialize MCP hook for Model Context Protocol server connections
   // Extract MCP server configs from settings connections
@@ -4818,6 +4847,8 @@ If you're not sure what the user wants, ask for clarification.
 
         // Show progress feedback for instant UI path
         setIsStreaming(true);
+        setConnectionState('streaming');
+        setCompletedToolCalls([]); // Clear previous tool states
         setStreamingMessage({
           id: `instant-ui-${Date.now()}`,
           content: `🎯 Analyzing \`<${selectedElement.tagName.toLowerCase()}>\` element...`,
@@ -5420,6 +5451,8 @@ If you're not sure what the user wants, ask for clarification.
 
         setAgentProcessing(true);
         setIsStreaming(true);
+        setConnectionState('streaming');
+        setCompletedToolCalls([]); // Clear previous tool states
 
         // Create streaming message placeholder with initial activity indicator
         const streamingId = `streaming-${Date.now()}`;
@@ -5521,7 +5554,20 @@ If you're not sure what the user wants, ask for clarification.
         console.log('[AI SDK] Stream complete, clearing streaming state');
         setIsStreaming(false);
         setAgentProcessing(false);
-        // Clear streaming message immediately to remove spinning indicators
+        setConnectionState('idle'); // Move to idle state (connected but not streaming)
+
+        // Capture final tool states before clearing streaming message
+        if (streamingMessage?.toolCalls && streamingMessage.toolCalls.length > 0) {
+          const finalToolStates = streamingMessage.toolCalls.map(tc => ({
+            id: tc.id,
+            name: tc.name,
+            status: (tc.status === 'error' ? 'error' : 'success') as 'success' | 'error',
+            timestamp: new Date(),
+          }));
+          setCompletedToolCalls(finalToolStates);
+        }
+
+        // Clear streaming message after capturing tool states
         setStreamingMessage(null);
 
         let resolvedText = (result.text || streamedTextBuffer || '').trim();
@@ -5644,6 +5690,8 @@ If you're not sure what the user wants, ask for clarification.
         ];
 
         setIsStreaming(true);
+        setConnectionState('streaming');
+        setCompletedToolCalls([]); // Clear previous tool states
         setStreamingMessage({
           id: `streaming-fallback-${Date.now()}`,
           content: '',
@@ -7317,6 +7365,25 @@ If you're not sure what the user wants, ask for clarification.
                 </div>
               )}
 
+              {/* Completed Tool Calls - Shows success/error states after streaming ends */}
+              {!isStreaming && completedToolCalls.length > 0 && (
+                <div className="mb-3 flex flex-wrap gap-1.5 animate-in fade-in duration-300">
+                  {completedToolCalls.map((tool) => (
+                    <div
+                      key={tool.id}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all ${
+                        tool.status === 'error'
+                          ? isDarkMode ? 'bg-red-500/20 text-red-300' : 'bg-red-100 text-red-700'
+                          : isDarkMode ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
+                      }`}
+                    >
+                      {tool.status === 'error' ? <X size={10} /> : <Check size={10} />}
+                      <span className="font-mono">{tool.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Loading indicator when processing but no streaming content yet */}
               {isAgentProcessing && !isStreaming && (
                 <div className="flex items-center gap-2 text-sm opacity-60">
@@ -8336,12 +8403,13 @@ If you're not sure what the user wants, ask for clarification.
                               <Camera size={18} />
                           </button>
 
-                          {/* Stop button (visible only during active generation, not idle connection) */}
-                          {(isAIGenerating || isStreaming) && (
+                          {/* Stop button (visible only during active streaming, not idle connection) */}
+                          {connectionState === 'streaming' && (
                               <button
                                   onClick={() => {
                                       cancelAI()
                                       setIsStreaming(false)
+                                      setConnectionState('idle')
                                       setStreamingMessage(null)
                                       setStreamingContent('')
                                   }}
@@ -8352,12 +8420,22 @@ If you're not sure what the user wants, ask for clarification.
                               </button>
                           )}
 
+                          {/* Connection state indicator (shows idle = connected but not streaming) */}
+                          {connectionState === 'idle' && (
+                              <div
+                                  className={`p-1.5 rounded-lg ${isDarkMode ? 'bg-emerald-600/20 text-emerald-400' : 'bg-emerald-100 text-emerald-600'}`}
+                                  title="Connected (idle)"
+                              >
+                                  <Check size={12} />
+                              </div>
+                          )}
+
                           {/* Send button (always visible - queues messages during streaming) */}
                           <button
                               onClick={() => processPrompt(input)}
                               disabled={!input.trim()}
                               className={`p-1.5 rounded-lg transition-colors ml-1 disabled:opacity-30 disabled:cursor-not-allowed ${isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-800'}`}
-                              title={isAIGenerating || isStreaming ? "Queue message" : "Send message"}
+                              title={connectionState === 'streaming' ? "Queue message" : "Send message"}
                           >
                               <ArrowUp size={14} />
                           </button>
