@@ -10,7 +10,86 @@ npm install @ai-cluso/mgrep-local
 pnpm add @ai-cluso/mgrep-local
 ```
 
-## Usage
+## CLI Usage
+
+### Index a directory
+
+```bash
+# Index current directory
+mgrep-local index
+
+# Index a specific path
+mgrep-local index /path/to/project
+
+# Index with verbose output
+mgrep-local index -v
+```
+
+### Watch mode (index on file changes)
+
+```bash
+# Watch current directory
+mgrep-local watch
+
+# Watch a specific path
+mgrep-local watch /path/to/project
+
+# Watch with verbose output
+mgrep-local watch . -v
+```
+
+### Check index status
+
+```bash
+mgrep-local status
+```
+
+### Start MCP server (for Claude Code)
+
+```bash
+mgrep-local serve
+```
+
+### Options
+
+```
+--db-path <path>      Path to database directory
+                      Default: ~/.cache/mgrep-local/vectors
+
+--model-cache <path>  Directory to cache embedding models
+                      Default: ~/.cache/mgrep-local/models
+
+--verbose, -v         Enable verbose logging
+
+--help, -h            Show help message
+```
+
+## Claude Code Integration
+
+Add to your `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "mgrep-local": {
+      "command": "npx",
+      "args": ["@ai-cluso/mgrep-local", "serve"]
+    }
+  }
+}
+```
+
+This exposes the following MCP tools:
+
+| Tool | Description |
+|------|-------------|
+| `semantic_search` | Search code by meaning (natural language queries) |
+| `index_directory` | Index all code files in a directory |
+| `index_file` | Index a single file (with optional content) |
+| `index_status` | Get indexing statistics |
+| `clear_index` | Clear all indexed data |
+
+## Programmatic Usage
 
 ### Basic Usage
 
@@ -36,36 +115,41 @@ await indexer.indexFile('src/main.ts', fileContent)
 const results = await searcher.search('authentication handler')
 ```
 
-### As MCP Server
-
-The package includes an MCP (Model Context Protocol) server for use with AI assistants:
-
-```bash
-# Run the MCP server
-npx mgrep-local
-```
-
 ### With Electron
 
 ```typescript
-import { ElectronMgrepBridge } from '@ai-cluso/mgrep-local/electron'
+import { MgrepLocalService } from '@ai-cluso/mgrep-local/electron'
 
-const bridge = new ElectronMgrepBridge({
-  projectPath: '/path/to/project',
-  dbPath: '/path/to/index.db'
+const service = new MgrepLocalService({
+  dbPath: '/path/to/index.db',
+  verbose: true
 })
 
-await bridge.initialize()
-const results = await bridge.search('find user validation')
+await service.initialize()
+const results = await service.search('find user validation')
 ```
 
 ## Features
 
 - **Semantic search**: Find code by meaning, not just keywords
 - **Local-first**: All processing happens on your machine
-- **Fast indexing**: Efficient chunking and embedding pipeline
-- **Multiple entry points**: Core library, Electron bridge, or MCP server
+- **Watch mode**: Automatically index file changes
+- **Fast indexing**: Incremental updates, only re-indexes changed files
 - **Code-aware chunking**: Understands code structure for better results
+
+## Indexed File Types
+
+The CLI indexes common code files:
+- TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`)
+- Python (`.py`)
+- Rust (`.rs`)
+- Go (`.go`)
+- Java/Kotlin (`.java`, `.kt`)
+- C/C++ (`.c`, `.h`, `.cpp`, `.hpp`)
+- Ruby (`.rb`)
+- And many more...
+
+Skipped directories: `node_modules`, `.git`, `dist`, `build`, `__pycache__`, etc.
 
 ## Architecture
 
@@ -78,32 +162,7 @@ const results = await bridge.search('find user validation')
 │   ├── Indexer     # File indexing pipeline
 │   └── Searcher    # Semantic search interface
 ├── electron/       # Electron IPC bridge
-└── mcp/            # MCP server for AI assistants
-```
-
-## Exports
-
-```typescript
-// Main entry
-import { Embedder, VectorStore, Chunker, Indexer, Searcher } from '@ai-cluso/mgrep-local'
-
-// Subpath exports
-import { /* ... */ } from '@ai-cluso/mgrep-local/core'
-import { ElectronMgrepBridge } from '@ai-cluso/mgrep-local/electron'
-import { createServer } from '@ai-cluso/mgrep-local/mcp'
-```
-
-## CLI
-
-```bash
-# Index a directory
-mgrep-local index /path/to/project
-
-# Search
-mgrep-local search "authentication middleware"
-
-# Start MCP server
-mgrep-local serve
+└── mcp/            # MCP server + CLI
 ```
 
 ## Dependencies

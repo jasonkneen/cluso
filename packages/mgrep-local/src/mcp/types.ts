@@ -10,6 +10,9 @@ import type { SearchResult, IndexStats } from '../core/types'
 export const MCP_TOOLS = {
   SEMANTIC_SEARCH: 'semantic_search',
   INDEX_STATUS: 'index_status',
+  INDEX_DIRECTORY: 'index_directory',
+  INDEX_FILE: 'index_file',
+  CLEAR_INDEX: 'clear_index',
 } as const
 
 /**
@@ -41,6 +44,39 @@ export interface IndexStatusOutput {
   ready: boolean
   stats: IndexStats | null
   timestamp: string
+}
+
+/**
+ * Input schema for index_directory tool
+ */
+export interface IndexDirectoryInput {
+  directory: string
+}
+
+/**
+ * Output for index_directory tool
+ */
+export interface IndexDirectoryOutput {
+  filesIndexed: number
+  totalChunks: number
+  errors: number
+  durationMs: number
+}
+
+/**
+ * Input schema for index_file tool
+ */
+export interface IndexFileInput {
+  filePath: string
+  content?: string
+}
+
+/**
+ * Output for index_file tool
+ */
+export interface IndexFileOutput {
+  chunks: number
+  indexed: boolean
 }
 
 /**

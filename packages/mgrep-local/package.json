@@ -38,7 +38,10 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
+    "dev": "npx tsx src/mcp/cli.ts",
+    "start": "node dist/mcp/cli.js",
     "clean": "rm -rf dist",
+    "link": "npm run build && npm link",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
