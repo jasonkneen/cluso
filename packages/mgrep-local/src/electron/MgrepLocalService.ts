@@ -14,18 +14,18 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { randomUUID } from 'crypto'
 
-import { VectorStore } from '../core/VectorStore'
-import { Chunker } from '../core/Chunker'
-import { Searcher } from '../core/Searcher'
-import { Embedder } from '../core/Embedder'
-import { Indexer } from '../core/Indexer'
+import { VectorStore } from '../core/VectorStore.js'
+import { Chunker } from '../core/Chunker.js'
+import { Searcher } from '../core/Searcher.js'
+import { Embedder } from '../core/Embedder.js'
+import { Indexer } from '../core/Indexer.js'
 
 import type {
   SearchOptions,
   SearchResult,
   IndexStats,
   FileChangeEvent,
-} from '../core/types'
+} from '../core/types.js'
 
 import type {
   MgrepServiceOptions,
@@ -35,7 +35,7 @@ import type {
   WorkerTask,
   WorkerResult,
   WorkerEmbedBatchResult,
-} from './types'
+} from './types.js'
 
 // Default paths - LanceDB uses directories
 const DEFAULT_DB_DIR = join(homedir(), '.cache', 'mgrep-local', 'vectors')

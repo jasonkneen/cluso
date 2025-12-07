@@ -4,7 +4,7 @@
  * Defines the tools exposed by the MCP server.
  */
 
-import { MCP_TOOLS } from './types'
+import { MCP_TOOLS } from './types.js'
 
 /**
  * Tool definition type (matches MCP SDK)

@@ -16,11 +16,11 @@ import type {
   IndexProgressCallback,
   VectorInsertOptions,
   Indexer as IIndexer,
-} from './types'
+} from './types.js'
 
-import { Embedder } from './Embedder'
-import { VectorStore } from './VectorStore'
-import { Chunker } from './Chunker'
+import { Embedder } from './Embedder.js'
+import { VectorStore } from './VectorStore.js'
+import { Chunker } from './Chunker.js'
 
 // Default batch size for embedding
 const DEFAULT_BATCH_SIZE = 32

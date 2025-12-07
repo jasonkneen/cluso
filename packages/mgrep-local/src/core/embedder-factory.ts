@@ -11,10 +11,10 @@
  *   // Automatically uses best available backend
  */
 
-import { Embedder } from './Embedder'
-import { MlxEmbedder, checkMlxServer } from './MlxEmbedder'
-import { LlamaCppEmbedder, checkGpuAvailable, type EmbeddingModelName } from './LlamaCppEmbedder'
-import type { EmbedderFactoryOptions, Embedder as IEmbedder } from './types'
+import { Embedder } from './Embedder.js'
+import { MlxEmbedder, checkMlxServer } from './MlxEmbedder.js'
+import { LlamaCppEmbedder, checkGpuAvailable, type EmbeddingModelName } from './LlamaCppEmbedder.js'
+import type { EmbedderFactoryOptions, Embedder as IEmbedder } from './types.js'
 
 export type EmbedderBackend = 'auto' | 'llamacpp' | 'mlx' | 'cpu'
 

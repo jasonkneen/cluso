@@ -12,16 +12,16 @@ import { cpus } from 'os'
 import { createHash } from 'crypto'
 import { join } from 'path'
 
-import { ShardedVectorStore } from './ShardedVectorStore'
-import { Embedder } from './Embedder'
-import { Chunker } from './Chunker'
+import { ShardedVectorStore } from './ShardedVectorStore.js'
+import { Embedder } from './Embedder.js'
+import { Chunker } from './Chunker.js'
 import type {
   IndexProgress,
   IndexProgressCallback,
   VectorInsertOptions,
   IndexStats,
   EmbedderOptions,
-} from './types'
+} from './types.js'
 
 /**
  * Options for ShardedIndexer

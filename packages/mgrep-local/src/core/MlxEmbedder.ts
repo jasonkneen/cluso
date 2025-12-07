@@ -24,7 +24,7 @@ import type {
   ModelDownloadProgress,
   ModelInfo,
   Embedder as IEmbedder,
-} from './types'
+} from './types.js'
 
 // MLX model configurations
 const MLX_MODELS = {

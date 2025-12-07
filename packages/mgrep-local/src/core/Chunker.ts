@@ -13,7 +13,7 @@ import type {
   ChunkerOptions,
   Chunk,
   Chunker as IChunker,
-} from './types'
+} from './types.js'
 
 // Default configuration
 const DEFAULT_MAX_CHUNK_SIZE = 500

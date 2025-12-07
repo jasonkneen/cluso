@@ -4,7 +4,7 @@
  * Defines worker thread communication protocol and service configuration.
  */
 
-import type { SearchOptions, SearchResult, IndexStats, FileChangeEvent } from '../core/types'
+import type { SearchOptions, SearchResult, IndexStats, FileChangeEvent } from '../core/types.js'
 
 // =============================================================================
 // Worker Thread Types

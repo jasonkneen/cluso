@@ -18,7 +18,7 @@ import type {
   SearchResult,
   IndexStats,
   VectorStore as IVectorStore,
-} from './types'
+} from './types.js'
 
 // Default configuration - LanceDB uses a directory, not a file
 const DEFAULT_DB_PATH = join(homedir(), '.cache', 'mgrep-local', 'vectors')

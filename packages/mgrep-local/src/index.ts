@@ -31,13 +31,13 @@
  */
 
 // Re-export everything from core
-export * from './core'
+export * from './core/index.js'
 
 // Re-export Electron integration
-export * from './electron'
+export * from './electron/index.js'
 
 // Re-export MCP server
-export * from './mcp'
+export * from './mcp/index.js'
 
 // Package version
 export const VERSION = '1.0.0'

@@ -2,7 +2,7 @@
  * Electron integration exports for mgrep-local
  */
 
-export { MgrepLocalService } from './MgrepLocalService'
+export { MgrepLocalService } from './MgrepLocalService.js'
 
 export type {
   // Worker types
@@ -26,6 +26,6 @@ export type {
 
   // IPC types
   MgrepIPCHandlers,
-} from './types'
+} from './types.js'
 
-export { IPC_CHANNELS } from './types'
+export { IPC_CHANNELS } from './types.js'

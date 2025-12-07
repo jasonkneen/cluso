@@ -7,9 +7,9 @@
  * - Parallel shard querying
  */
 
-import { ShardedVectorStore, ShardedSearchResult } from './ShardedVectorStore'
-import { Embedder } from './Embedder'
-import type { SearchResult, SearchOptions } from './types'
+import { ShardedVectorStore, ShardedSearchResult } from './ShardedVectorStore.js'
+import { Embedder } from './Embedder.js'
+import type { SearchResult, SearchOptions } from './types.js'
 
 /**
  * Extended search options for sharded search

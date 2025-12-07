@@ -18,7 +18,7 @@ import type {
   ModelDownloadProgress,
   ModelInfo,
   Embedder as IEmbedder,
-} from './types'
+} from './types.js'
 
 // Default model configuration
 const DEFAULT_MODEL = 'Xenova/all-MiniLM-L6-v2'

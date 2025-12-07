@@ -11,7 +11,7 @@
 
 import { parentPort, workerData } from 'worker_threads'
 
-import { Embedder } from '../core/Embedder'
+import { Embedder } from '../core/Embedder.js'
 import type {
   WorkerTask,
   WorkerResult,
@@ -19,7 +19,7 @@ import type {
   WorkerEmbedResult,
   WorkerEmbedBatchResult,
   WorkerDisposeResult,
-} from './types'
+} from './types.js'
 
 // Ensure we're running as a worker thread
 if (!parentPort) {

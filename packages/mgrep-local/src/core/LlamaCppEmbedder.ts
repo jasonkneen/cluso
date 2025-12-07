@@ -25,7 +25,7 @@ import type {
   ModelDownloadProgress,
   ModelInfo,
   Embedder as IEmbedder,
-} from './types'
+} from './types.js'
 
 // Lazy-load node-llama-cpp to avoid ESM issues
 type LlamaModule = typeof import('node-llama-cpp')

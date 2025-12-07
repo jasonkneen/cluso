@@ -2,7 +2,7 @@
  * MCP-specific types for mgrep-local
  */
 
-import type { SearchResult, IndexStats } from '../core/types'
+import type { SearchResult, IndexStats } from '../core/types.js'
 
 /**
  * Tool names exposed by the MCP server

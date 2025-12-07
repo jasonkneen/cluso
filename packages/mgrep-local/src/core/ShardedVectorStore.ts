@@ -15,14 +15,14 @@ import { join } from 'path'
 import { mkdirSync, existsSync, readdirSync, rmSync } from 'fs'
 import { createHash } from 'crypto'
 
-import { VectorStore } from './VectorStore'
+import { VectorStore } from './VectorStore.js'
 import type {
   VectorStoreOptions,
   VectorInsertOptions,
   SearchResult,
   IndexStats,
   Vector,
-} from './types'
+} from './types.js'
 
 /**
  * Shard metadata stored in meta-index

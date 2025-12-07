@@ -16,14 +16,14 @@ import { resolve, join, extname, relative } from 'path'
 import { readFileSync, statSync, readdirSync } from 'fs'
 import { homedir } from 'os'
 
-import { Embedder } from '../core/Embedder'
-import { VectorStore } from '../core/VectorStore'
-import { Chunker } from '../core/Chunker'
-import { Indexer } from '../core/Indexer'
-import { Searcher } from '../core/Searcher'
+import { Embedder } from '../core/Embedder.js'
+import { VectorStore } from '../core/VectorStore.js'
+import { Chunker } from '../core/Chunker.js'
+import { Indexer } from '../core/Indexer.js'
+import { Searcher } from '../core/Searcher.js'
 
-import { ALL_TOOLS } from './tools'
-import { MCP_TOOLS } from './types'
+import { ALL_TOOLS } from './tools.js'
+import { MCP_TOOLS } from './types.js'
 import type {
   McpServerConfig,
   SemanticSearchInput,
@@ -33,7 +33,7 @@ import type {
   IndexDirectoryOutput,
   IndexFileInput,
   IndexFileOutput,
-} from './types'
+} from './types.js'
 
 // Default paths
 const DEFAULT_DB_DIR = join(homedir(), '.cache', 'mgrep-local', 'vectors')

@@ -11,10 +11,10 @@ import type {
   SearchOptions,
   SearchResult,
   Searcher as ISearcher,
-} from './types'
+} from './types.js'
 
-import { Embedder } from './Embedder'
-import { VectorStore } from './VectorStore'
+import { Embedder } from './Embedder.js'
+import { VectorStore } from './VectorStore.js'
 
 // Default search options
 const DEFAULT_LIMIT = 10

@@ -6,21 +6,21 @@
  */
 
 // Classes - Standard (single database)
-export { Embedder } from './Embedder'
-export { VectorStore } from './VectorStore'
-export { Chunker } from './Chunker'
-export { Indexer } from './Indexer'
-export { Searcher } from './Searcher'
+export { Embedder } from './Embedder.js'
+export { VectorStore } from './VectorStore.js'
+export { Chunker } from './Chunker.js'
+export { Indexer } from './Indexer.js'
+export { Searcher } from './Searcher.js'
 
 // Classes - GPU Acceleration
-export { MlxEmbedder, checkMlxServer } from './MlxEmbedder'
-export { LlamaCppEmbedder, checkGpuAvailable, listEmbeddingModels, EMBEDDING_MODELS } from './LlamaCppEmbedder'
-export { createEmbedder, createEmbedderWithBackend, type EmbedderBackend, type GpuEmbedderOptions } from './embedder-factory'
+export { MlxEmbedder, checkMlxServer } from './MlxEmbedder.js'
+export { LlamaCppEmbedder, checkGpuAvailable, listEmbeddingModels, EMBEDDING_MODELS } from './LlamaCppEmbedder.js'
+export { createEmbedder, createEmbedderWithBackend, type EmbedderBackend, type GpuEmbedderOptions } from './embedder-factory.js'
 
 // Classes - Sharded (multiple databases with meta-index)
-export { ShardedVectorStore } from './ShardedVectorStore'
-export { ShardedIndexer } from './ShardedIndexer'
-export { ShardedSearcher } from './ShardedSearcher'
+export { ShardedVectorStore } from './ShardedVectorStore.js'
+export { ShardedIndexer } from './ShardedIndexer.js'
+export { ShardedSearcher } from './ShardedSearcher.js'
 
 // Types
 export type {
@@ -58,10 +58,10 @@ export type {
   // Service types
   MgrepLocalServiceOptions,
   ServiceStatus,
-} from './types'
+} from './types.js'
 
 // Re-export LlamaCpp types
-export type { LlamaCppEmbedderOptions, EmbeddingModelName } from './LlamaCppEmbedder'
+export type { LlamaCppEmbedderOptions, EmbeddingModelName } from './LlamaCppEmbedder.js'
 
 // Sharded types
 export type {
@@ -69,16 +69,16 @@ export type {
   ShardedSearchResult,
   ShardedVectorStoreOptions,
   ProgressiveSearchCallback,
-} from './ShardedVectorStore'
+} from './ShardedVectorStore.js'
 
 export type {
   ShardedIndexerOptions,
   FileToIndex,
   IndexBatchResult,
   ShardedIndexProgress,
-} from './ShardedIndexer'
+} from './ShardedIndexer.js'
 
 export type {
   ShardedSearchOptions,
   SearchStats,
-} from './ShardedSearcher'
+} from './ShardedSearcher.js'
