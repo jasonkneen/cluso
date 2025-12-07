@@ -15,11 +15,14 @@ pnpm add @ai-cluso/mgrep-local
 ### Index a directory
 
 ```bash
-# Index current directory
+# Index current directory (single database mode)
 mgrep-local index
 
-# Index a specific path
-mgrep-local index /path/to/project
+# Index with 8 shards (parallel mode - faster for large codebases)
+mgrep-local index --shards 8
+
+# Using environment variable
+MGREP_SHARDS=8 mgrep-local index
 
 # Index with verbose output
 mgrep-local index -v
@@ -38,10 +41,25 @@ mgrep-local watch /path/to/project
 mgrep-local watch . -v
 ```
 
+### Search the index
+
+```bash
+mgrep-local search "authentication middleware"
+```
+
 ### Check index status
 
 ```bash
 mgrep-local status
+
+# Check sharded index status
+mgrep-local status --shards 8
+```
+
+### Benchmark single vs sharded
+
+```bash
+mgrep-local benchmark .
 ```
 
 ### Start MCP server (for Claude Code)
@@ -136,6 +154,35 @@ const results = await service.search('find user validation')
 - **Watch mode**: Automatically index file changes
 - **Fast indexing**: Incremental updates, only re-indexes changed files
 - **Code-aware chunking**: Understands code structure for better results
+- **Sharded mode**: Parallel indexing and progressive search for large codebases
+
+## Sharded Mode
+
+For large codebases, sharded mode distributes files across multiple databases:
+
+```
+                    ┌─────────────────────┐
+                    │   Meta-Index (L0)   │
+                    │   Shard routing     │
+                    └──────────┬──────────┘
+                               │
+        ┌──────────┬───────────┼───────────┬──────────┐
+        ▼          ▼           ▼           ▼          ▼
+    ┌───────┐  ┌───────┐  ┌───────┐  ┌───────┐  ┌───────┐
+    │Shard 0│  │Shard 1│  │Shard 2│  │  ...  │  │Shard N│
+    └───────┘  └───────┘  └───────┘  └───────┘  └───────┘
+```
+
+**Benefits:**
+- Parallel indexing across shards
+- Progressive search ("image coming into focus")
+- Only relevant shards are queried
+- Better memory efficiency for large codebases
+
+**When to use sharded mode:**
+- Codebases with 1000+ files
+- When indexing takes too long
+- Run `mgrep-local benchmark` to compare
 
 ## Indexed File Types
 
