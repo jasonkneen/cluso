@@ -217,7 +217,7 @@ export class MgrepMcpServer {
 
     const results = await this.searcher!.hybridSearch(input.query, {
       limit: input.limit ?? 10,
-      threshold: input.threshold ?? 0.3,
+      threshold: input.threshold ?? 0.0,
       returnContext: true,
     })
 

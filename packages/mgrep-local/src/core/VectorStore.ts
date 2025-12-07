@@ -169,7 +169,7 @@ export class VectorStore implements IVectorStore {
   async search(
     embedding: number[],
     limit: number = 10,
-    threshold: number = 0.3
+    threshold: number = 0.0
   ): Promise<SearchResult[]> {
     this.ensureInitialized()
 

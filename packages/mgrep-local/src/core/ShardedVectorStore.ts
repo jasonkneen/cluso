@@ -122,6 +122,24 @@ export class ShardedVectorStore {
   }
 
   /**
+   * Get paths to all shard databases for worker threads
+   */
+  getShardPaths(): Map<number, string> {
+    const paths = new Map<number, string>()
+    for (let i = 0; i < this.shardCount; i++) {
+      paths.set(i, join(this.basePath, `shard-${i}`))
+    }
+    return paths
+  }
+
+  /**
+   * Get number of shards
+   */
+  getShardCount(): number {
+    return this.shardCount
+  }
+
+  /**
    * Get a specific shard's VectorStore
    */
   getShard(shardId: number): VectorStore {
@@ -177,7 +195,7 @@ export class ShardedVectorStore {
   async searchProgressive(
     embedding: number[],
     limit: number = 10,
-    threshold: number = 0.3,
+    threshold: number = 0.0,
     onProgress?: ProgressiveSearchCallback
   ): Promise<ShardedSearchResult[]> {
     this.ensureInitialized()
@@ -224,7 +242,7 @@ export class ShardedVectorStore {
   async search(
     embedding: number[],
     limit: number = 10,
-    threshold: number = 0.3
+    threshold: number = 0.0
   ): Promise<SearchResult[]> {
     return this.searchProgressive(embedding, limit, threshold)
   }
@@ -235,7 +253,7 @@ export class ShardedVectorStore {
   async searchParallel(
     embedding: number[],
     limit: number = 10,
-    threshold: number = 0.3
+    threshold: number = 0.0
   ): Promise<ShardedSearchResult[]> {
     this.ensureInitialized()
 

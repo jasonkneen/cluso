@@ -7,32 +7,43 @@
  * - Progress tracking per shard
  */
 
-import { Worker, isMainThread, parentPort, workerData } from 'worker_threads'
 import { cpus } from 'os'
 import { createHash } from 'crypto'
-import { join } from 'path'
 
 import { ShardedVectorStore } from './ShardedVectorStore.js'
 import { Embedder } from './Embedder.js'
 import { Chunker } from './Chunker.js'
+import { runParallelIndex, type IndexProgress as WorkerProgress } from './workers/pool.js'
 import type {
   IndexProgress,
   IndexProgressCallback,
   VectorInsertOptions,
   IndexStats,
-  EmbedderOptions,
+  Embedder as IEmbedder,
 } from './types.js'
+
+/**
+ * Embedder configuration for workers
+ */
+export interface EmbedderConfig {
+  backend?: 'auto' | 'llamacpp' | 'mlx' | 'cpu'
+  modelName?: string
+  cacheDir?: string
+  verbose?: boolean
+}
 
 /**
  * Options for ShardedIndexer
  */
 export interface ShardedIndexerOptions {
   shardedStore: ShardedVectorStore
-  embedder: Embedder
+  embedder: IEmbedder
   chunker?: Chunker
   batchSize?: number
   workerCount?: number  // Number of parallel workers (default: CPU cores)
   progressCallback?: IndexProgressCallback
+  embedderConfig?: EmbedderConfig  // Config for worker embedders
+  parallel?: boolean  // Enable parallel processing (default: true)
 }
 
 /**
@@ -65,11 +76,13 @@ export interface ShardedIndexProgress extends IndexProgress {
 
 export class ShardedIndexer {
   private shardedStore: ShardedVectorStore
-  private embedder: Embedder
+  private embedder: IEmbedder
   private chunker: Chunker
   private batchSize: number
   private workerCount: number
   private progressCallback?: IndexProgressCallback
+  private embedderConfig?: EmbedderConfig
+  private parallel: boolean
 
   constructor(options: ShardedIndexerOptions) {
     this.shardedStore = options.shardedStore
@@ -78,6 +91,8 @@ export class ShardedIndexer {
     this.batchSize = options.batchSize ?? 32
     this.workerCount = options.workerCount ?? Math.max(1, cpus().length - 1)
     this.progressCallback = options.progressCallback
+    this.embedderConfig = options.embedderConfig
+    this.parallel = options.parallel ?? true
   }
 
   /**
@@ -216,21 +231,59 @@ export class ShardedIndexer {
    * Index files in parallel using worker threads
    *
    * This is the high-performance path for large codebases.
-   * Each worker handles a subset of shards.
+   * Each worker handles a subset of shards with its own embedder.
    */
   async indexFilesParallel(
     files: FileToIndex[]
   ): Promise<{ totalChunks: number; filesProcessed: number; durationMs: number }> {
     const startTime = Date.now()
 
-    // For now, use sequential indexing
-    // TODO: Implement actual worker thread pool
-    const result = await this.indexFiles(files)
+    // If parallel is disabled or no embedder config, fall back to sequential
+    if (!this.parallel || !this.embedderConfig) {
+      const result = await this.indexFiles(files)
+      return {
+        totalChunks: result.totalChunks,
+        filesProcessed: result.filesProcessed,
+        durationMs: Date.now() - startTime,
+      }
+    }
+
+    // Group files by shard
+    const filesByShardId = new Map<number, Array<{ filePath: string; content: string }>>()
+    for (const file of files) {
+      const shardId = this.shardedStore.getShardId(file.filePath)
+      const group = filesByShardId.get(shardId) ?? []
+      group.push({ filePath: file.filePath, content: file.content })
+      filesByShardId.set(shardId, group)
+    }
+
+    // Get shard DB paths
+    const shardDbPaths = this.shardedStore.getShardPaths()
+
+    // Run parallel indexing
+    const result = await runParallelIndex(
+      shardDbPaths,
+      filesByShardId,
+      this.embedderConfig,
+      { workerCount: this.workerCount, verbose: this.embedderConfig.verbose },
+      (progress) => {
+        this.reportProgress({
+          phase: 'chunking',
+          current: progress.chunks,
+          total: files.length,
+          currentFile: progress.file,
+          shardId: progress.shardId,
+        })
+      }
+    )
+
+    // Update centroids after indexing
+    await this.shardedStore.updateCentroids()
 
     return {
       totalChunks: result.totalChunks,
-      filesProcessed: result.filesProcessed,
-      durationMs: Date.now() - startTime,
+      filesProcessed: result.totalFiles,
+      durationMs: result.durationMs,
     }
   }
 

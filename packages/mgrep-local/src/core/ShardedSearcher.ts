@@ -45,7 +45,7 @@ export class ShardedSearcher {
    */
   async search(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
     const limit = options.limit ?? 10
-    const threshold = options.threshold ?? 0.3
+    const threshold = options.threshold ?? 0.0  // No threshold - let user filter
 
     // Generate query embedding
     const embedding = await this.embedder.embed(query)
@@ -62,7 +62,7 @@ export class ShardedSearcher {
     options: ShardedSearchOptions = {}
   ): Promise<SearchResult[]> {
     const limit = options.limit ?? 10
-    const threshold = options.threshold ?? 0.3
+    const threshold = options.threshold ?? 0.0  // No threshold - let user filter
 
     // Generate query embedding
     const embedding = await this.embedder.embed(query)
@@ -90,7 +90,7 @@ export class ShardedSearcher {
   ): Promise<{ results: SearchResult[]; stats: SearchStats }> {
     const startTime = Date.now()
     const limit = options.limit ?? 10
-    const threshold = options.threshold ?? 0.3
+    const threshold = options.threshold ?? 0.0  // No threshold - let user filter
 
     // Generate query embedding
     const embedding = await this.embedder.embed(query)

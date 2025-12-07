@@ -423,12 +423,22 @@ async function runIndexSharded(config: CliConfig): Promise<{ chunks: number; fil
 
   const chunker = new Chunker()
 
+  // Build embedder config for parallel workers
+  const embedderConfig = {
+    backend: config.gpu ? 'auto' as const : (config.mlx ? 'mlx' as const : 'cpu' as const),
+    cacheDir: config.modelCacheDir ?? DEFAULT_MODEL_CACHE,
+    verbose: config.verbose,
+  }
+
   // Track progress for sharded mode
   let lastProgress = 0
   const indexer = new ShardedIndexer({
     shardedStore,
     embedder,
     chunker,
+    embedderConfig,  // Enable parallel workers
+    parallel: true,
+    workerCount: Math.max(1, Math.min(shardCount, 4)),  // Limit workers to avoid memory issues
     progressCallback: (progress: ShardedIndexProgress) => {
       if (progress.phase === 'chunking' && progress.currentFile) {
         const shardLabel = progress.shardId !== undefined
