@@ -295,8 +295,8 @@ export async function checkGpuAvailable(): Promise<{ available: boolean; type: s
       type: typeof gpuType === 'string' ? gpuType : (gpuType ? 'gpu' : 'none'),
     }
   } catch (error) {
-    // Log error for debugging
-    console.error('[LlamaCppEmbedder] GPU check error:', error)
+    // ESM module errors are expected in CommonJS builds - don't log
+    // The factory will handle fallback silently
     return { available: false, type: 'none' }
   }
 }

@@ -67,9 +67,18 @@ export async function createEmbedder(
       const embedder = await createLlamaCppEmbedder(options, log)
       log('Using LlamaCpp GPU embedder')
       return embedder
+    } else {
+      log('No GPU available for LlamaCpp')
     }
   } catch (error) {
-    log(`LlamaCpp not available: ${error}`)
+    // LlamaCpp requires ESM - not available in CommonJS builds
+    // Just silently fall back to other backends
+    const msg = error instanceof Error ? error.message : String(error)
+    if (msg.includes('ERR_REQUIRE_ASYNC_MODULE')) {
+      log('LlamaCpp unavailable (ESM module, requires full ESM build)')
+    } else {
+      log(`LlamaCpp not available: ${msg.split('\n')[0]}`)
+    }
   }
 
   // 2. Try MLX (requires Python server)
