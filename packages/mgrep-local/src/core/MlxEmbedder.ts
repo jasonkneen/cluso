@@ -117,13 +117,34 @@ export class MlxEmbedder implements IEmbedder {
    * Generate embedding for a single text
    */
   async embed(text: string): Promise<number[]> {
-    const embeddings = await this.embedBatch([text])
-    return embeddings[0]
+    try {
+      const response = await fetch(`${this.serverUrl}/embed`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text }),
+        signal: AbortSignal.timeout(this.timeout),
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`MLX server error: ${response.status} - ${errorText}`)
+      }
+
+      const result = await response.json() as { embedding: number[] }
+      return result.embedding
+    } catch (error) {
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        throw new Error(`MLX embedding request timed out after ${this.timeout}ms`)
+      }
+      throw error
+    }
   }
 
   /**
    * Generate embeddings for multiple texts efficiently
-   * MLX server handles batching natively for maximum throughput
+   * Uses /embed_batch endpoint for native batch processing
    */
   async embedBatch(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) {
@@ -131,7 +152,7 @@ export class MlxEmbedder implements IEmbedder {
     }
 
     try {
-      const response = await fetch(`${this.serverUrl}/embed`, {
+      const response = await fetch(`${this.serverUrl}/embed_batch`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
