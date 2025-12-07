@@ -254,7 +254,8 @@ async function getEmbedder(config: CliConfig): Promise<Embedder> {
       return embedder as unknown as Embedder
     } else {
       log(`MLX server not available at ${config.mlxServer}`)
-      log('Start it with: pip install qwen3-embeddings-mlx && qwen3-embeddings serve')
+      log('Start it with: git clone https://github.com/jakedahn/qwen3-embeddings-mlx.git')
+      log('  cd qwen3-embeddings-mlx && pip install -r requirements.txt && python server.py')
       log('Falling back to CPU embeddings...')
     }
   }
@@ -833,11 +834,12 @@ Examples:
   mgrep-local benchmark .
 
 MLX GPU Setup (Apple Silicon):
-  pip install qwen3-embeddings-mlx
-  qwen3-embeddings serve --model 0.6B
+  git clone https://github.com/jakedahn/qwen3-embeddings-mlx.git
+  cd qwen3-embeddings-mlx && pip install -r requirements.txt
+  python server.py
 
   Performance: ~44K tokens/sec (vs ~1K on CPU)
-  First run downloads Qwen3-Embedding-0.6B-4bit-DWQ (~400MB)
+  First run downloads model (~900MB)
 
 For Claude Code integration, add to your .mcp.json:
   {

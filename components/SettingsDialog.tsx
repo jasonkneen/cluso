@@ -100,6 +100,7 @@ export interface LegacyConnection {
 export type Connection = MCPServerConnection | LegacyConnection
 
 export type FontSize = 'small' | 'medium' | 'large'
+export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error'
 
 export interface AppSettings {
   autoConnect: boolean
@@ -241,6 +242,13 @@ export function SettingsDialog({
   const [codexTestResult, setCodexTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [codexTestLoading, setCodexTestLoading] = useState(false)
 
+  // Updates
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>('idle')
+  const [updateInfo, setUpdateInfo] = useState<{ version?: string; releaseDate?: string } | null>(null)
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null)
+  const [updateError, setUpdateError] = useState<string | null>(null)
+  const [appVersion, setAppVersion] = useState<string>('')
+
   // MCP Discovery state
   interface DiscoveredServer {
     name: string
@@ -316,6 +324,61 @@ export function SettingsDialog({
       loadLspCacheInfo()
     }
   }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    if (!window.electronAPI?.updates) {
+      setAppVersion(appVersion || 'web')
+      return
+    }
+
+    window.electronAPI.updates.getVersion?.().then((result) => {
+      if (result?.version) {
+        setAppVersion(result.version)
+      }
+    }).catch(() => {})
+
+    const unsubscribe = window.electronAPI.updates.onEvent?.((event) => {
+      if (!event?.type) return
+      setUpdateError(null)
+      switch (event.type) {
+        case 'checking':
+          setUpdateStatus('checking')
+          setUpdateProgress(null)
+          break
+        case 'available':
+          setUpdateStatus('available')
+          setUpdateInfo(event.info || null)
+          setUpdateProgress(null)
+          break
+        case 'none':
+          setUpdateStatus('idle')
+          setUpdateInfo(null)
+          setUpdateProgress(null)
+          break
+        case 'progress':
+          setUpdateStatus('downloading')
+          setUpdateProgress(typeof event?.progress?.percent === 'number' ? event.progress.percent : null)
+          break
+        case 'ready':
+          setUpdateStatus('ready')
+          setUpdateInfo(event.info || updateInfo)
+          setUpdateProgress(null)
+          break
+        case 'error':
+          setUpdateStatus('error')
+          setUpdateError(event.message || 'Update error')
+          break
+        default:
+          break
+      }
+    })
+
+    return () => {
+      unsubscribe?.()
+    }
+  }, [appVersion, isOpen, updateInfo])
 
   // Discover MCP servers from Claude Desktop, project, etc.
   const discoverMcpServers = async () => {
@@ -429,6 +492,48 @@ export function SettingsDialog({
     } catch (err) {
       console.error('Failed to clear LSP cache:', err)
     }
+  }
+
+  const handleCheckForUpdates = async () => {
+    if (!window.electronAPI?.updates?.check) {
+      setUpdateError('Updates are available only in the desktop app')
+      setUpdateStatus('error')
+      return
+    }
+    setUpdateError(null)
+    setUpdateProgress(null)
+    setUpdateStatus('checking')
+    const result = await window.electronAPI.updates.check()
+    if (result?.success === false) {
+      setUpdateStatus('error')
+      setUpdateError(result.error || 'Failed to check for updates')
+    }
+  }
+
+  const handleDownloadUpdate = async () => {
+    if (!window.electronAPI?.updates?.download) {
+      setUpdateError('Updates are available only in the desktop app')
+      setUpdateStatus('error')
+      return
+    }
+    setUpdateError(null)
+    setUpdateStatus('downloading')
+    setUpdateProgress(null)
+    const result = await window.electronAPI.updates.download()
+    if (result?.success === false) {
+      setUpdateStatus('error')
+      setUpdateError(result.error || 'Failed to download update')
+    }
+  }
+
+  const handleInstallUpdate = async () => {
+    if (!window.electronAPI?.updates?.install) {
+      setUpdateError('Updates are available only in the desktop app')
+      setUpdateStatus('error')
+      return
+    }
+    setUpdateError(null)
+    await window.electronAPI.updates.install()
   }
 
   // Toggle server enabled/disabled
@@ -802,6 +907,98 @@ export function SettingsDialog({
                   />
                 </button>
               </label>
+            </div>
+
+            <div>
+              <h3 className={`text-sm font-medium mb-3 ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                Updates
+              </h3>
+              <div className={`p-4 rounded-xl border ${
+                isDarkMode ? 'border-neutral-700 bg-neutral-800/50' : 'border-stone-200 bg-stone-50'
+              }`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                      Current version: {appVersion || 'unknown'}
+                    </p>
+                    <p className={`text-xs mt-1 ${isDarkMode ? 'text-neutral-500' : 'text-stone-500'}`}>
+                      {updateStatus === 'available' && (
+                        <>
+                          Update available{updateInfo?.version ? ` (${updateInfo.version})` : ''}
+                        </>
+                      )}
+                      {updateStatus === 'checking' && 'Checking for updates...'}
+                      {updateStatus === 'downloading' && 'Downloading update...'}
+                      {updateStatus === 'ready' && 'Update downloaded. Restart to install.'}
+                      {updateStatus === 'idle' && 'Manual checks only. No auto-downloads.'}
+                      {updateStatus === 'error' && (updateError || 'Update error')}
+                      {!window.electronAPI?.updates && 'Updates are only available in the desktop app.'}
+                    </p>
+                  </div>
+                  {updateStatus === 'downloading' && (
+                    <div className={`text-xs px-2 py-1 rounded ${isDarkMode ? 'bg-blue-500/20 text-blue-200' : 'bg-blue-50 text-blue-600'}`}>
+                      {`${Math.round(updateProgress || 0)}%`}
+                    </div>
+                  )}
+                  {updateStatus === 'available' && updateInfo?.version && (
+                    <div className={`text-xs px-2 py-1 rounded ${isDarkMode ? 'bg-emerald-500/20 text-emerald-200' : 'bg-emerald-50 text-emerald-700'}`}>
+                      {`v${updateInfo.version}`}
+                    </div>
+                  )}
+                  {updateStatus === 'ready' && (
+                    <div className={`text-xs px-2 py-1 rounded ${isDarkMode ? 'bg-emerald-500/20 text-emerald-200' : 'bg-emerald-50 text-emerald-700'}`}>
+                      Downloaded
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <button
+                    onClick={handleCheckForUpdates}
+                    disabled={updateStatus === 'checking' || updateStatus === 'downloading' || !window.electronAPI?.updates}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      updateStatus === 'checking' || updateStatus === 'downloading' || !window.electronAPI?.updates
+                        ? isDarkMode ? 'bg-neutral-700 text-neutral-500 cursor-not-allowed' : 'bg-stone-100 text-stone-400 cursor-not-allowed'
+                        : isDarkMode ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                    }`}
+                  >
+                    {updateStatus === 'checking' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                    Check for updates
+                  </button>
+                  <button
+                    onClick={handleDownloadUpdate}
+                    disabled={(updateStatus !== 'available' && updateStatus !== 'downloading') || !window.electronAPI?.updates}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      (updateStatus !== 'available' && updateStatus !== 'downloading') || !window.electronAPI?.updates
+                        ? isDarkMode ? 'bg-neutral-700 text-neutral-500 cursor-not-allowed' : 'bg-stone-100 text-stone-400 cursor-not-allowed'
+                        : isDarkMode ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+                    }`}
+                  >
+                    {updateStatus === 'downloading' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                    {updateStatus === 'downloading' && typeof updateProgress === 'number'
+                      ? `Downloading (${Math.round(updateProgress)}%)`
+                      : 'Download update'}
+                  </button>
+                  <button
+                    onClick={handleInstallUpdate}
+                    disabled={updateStatus !== 'ready' || !window.electronAPI?.updates}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      updateStatus !== 'ready' || !window.electronAPI?.updates
+                        ? isDarkMode ? 'bg-neutral-700 text-neutral-500 cursor-not-allowed' : 'bg-stone-100 text-stone-400 cursor-not-allowed'
+                        : isDarkMode ? 'bg-purple-500/10 text-purple-300 hover:bg-purple-500/20' : 'bg-purple-50 text-purple-600 hover:bg-purple-100'
+                    }`}
+                  >
+                    <HardDrive size={14} />
+                    Restart to install
+                  </button>
+                </div>
+
+                {updateError && (
+                  <p className={`text-xs mt-2 ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>
+                    {updateError}
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className={`border-t ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`} />

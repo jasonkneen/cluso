@@ -164,11 +164,14 @@ For maximum performance on Apple Silicon Macs, use MLX GPU acceleration:
 ### Setup
 
 ```bash
-# Install the MLX embedding server
-pip install qwen3-embeddings-mlx
+# Clone and install the MLX embedding server
+git clone https://github.com/jakedahn/qwen3-embeddings-mlx.git
+cd qwen3-embeddings-mlx
+pip install -r requirements.txt
 
-# Start the server (downloads ~400MB model on first run)
-qwen3-embeddings serve --model 0.6B
+# Start the server (downloads ~900MB model on first run)
+python server.py
+# Server runs at http://localhost:8000
 ```
 
 ### Usage

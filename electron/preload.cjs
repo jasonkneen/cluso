@@ -54,6 +54,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     testApi: () => ipcRenderer.invoke('codex:test-api'),
   },
 
+  // Updates
+  updates: {
+    check: () => ipcRenderer.invoke('updates:check'),
+    download: () => ipcRenderer.invoke('updates:download'),
+    install: () => ipcRenderer.invoke('updates:install'),
+    getVersion: () => ipcRenderer.invoke('updates:get-version'),
+    onEvent: (callback) => {
+      const handler = (_event, payload) => callback(payload)
+      ipcRenderer.on('updates:event', handler)
+      return () => ipcRenderer.removeListener('updates:event', handler)
+    }
+  },
+
   // API proxy to bypass CORS restrictions
   api: {
     proxy: (request) => ipcRenderer.invoke('api:proxy', request),

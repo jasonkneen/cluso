@@ -9,9 +9,11 @@
  * - MLX (Qwen3-0.6B): ~44K tokens/sec on M2 Max
  *
  * Usage:
- *   # Start the MLX server first:
- *   pip install qwen3-embeddings-mlx
- *   qwen3-embeddings serve --model 0.6B
+ *   # Clone and install the MLX server first:
+ *   git clone https://github.com/jakedahn/qwen3-embeddings-mlx.git
+ *   cd qwen3-embeddings-mlx
+ *   pip install -r requirements.txt
+ *   python server.py
  *
  *   # Then use this embedder:
  *   const embedder = new MlxEmbedder({ serverUrl: 'http://localhost:8000' })

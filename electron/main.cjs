@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron')
+const { autoUpdater } = require('electron-updater')
 const path = require('path')
 const { execSync, exec, spawnSync } = require('child_process')
 const fs = require('fs').promises
@@ -476,6 +477,72 @@ function registerWindowHandlers() {
   })
 
   console.log('[Window] IPC handlers registered')
+}
+
+// Auto-update handlers (electron-updater)
+function registerUpdateHandlers() {
+  ipcMain.handle('updates:get-version', async () => ({ success: true, version: app.getVersion() }))
+
+  if (isDev) {
+    console.log('[Updates] Skipping autoUpdater in development mode')
+    ipcMain.handle('updates:check', async () => ({ success: false, error: 'Updates are disabled in development mode' }))
+    ipcMain.handle('updates:download', async () => ({ success: false, error: 'Updates are disabled in development mode' }))
+    ipcMain.handle('updates:install', async () => ({ success: false, error: 'Updates are disabled in development mode' }))
+    return
+  }
+
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = false
+
+  const feedUrl = process.env.AICLUSO_UPDATE_FEED
+  if (feedUrl) {
+    try {
+      autoUpdater.setFeedURL({ url: feedUrl })
+      console.log('[Updates] Feed URL set from AICLUSO_UPDATE_FEED')
+    } catch (err) {
+      console.warn('[Updates] Failed to set feed URL:', err.message)
+    }
+  }
+
+  const sendUpdateEvent = (payload) => {
+    sendToAllWindows('updates:event', payload)
+  }
+
+  autoUpdater.on('checking-for-update', () => sendUpdateEvent({ type: 'checking' }))
+  autoUpdater.on('update-available', (info) => sendUpdateEvent({ type: 'available', info }))
+  autoUpdater.on('update-not-available', () => sendUpdateEvent({ type: 'none' }))
+  autoUpdater.on('download-progress', (progress) => sendUpdateEvent({ type: 'progress', progress }))
+  autoUpdater.on('update-downloaded', (info) => sendUpdateEvent({ type: 'ready', info }))
+  autoUpdater.on('error', (error) => sendUpdateEvent({ type: 'error', message: error?.message || 'Update error' }))
+
+  ipcMain.handle('updates:check', async () => {
+    try {
+      const result = await autoUpdater.checkForUpdates()
+      return { success: true, info: result?.updateInfo || null }
+    } catch (error) {
+      sendUpdateEvent({ type: 'error', message: error?.message || 'Failed to check for updates' })
+      return { success: false, error: error?.message || 'Failed to check for updates' }
+    }
+  })
+
+  ipcMain.handle('updates:download', async () => {
+    try {
+      await autoUpdater.downloadUpdate()
+      return { success: true }
+    } catch (error) {
+      sendUpdateEvent({ type: 'error', message: error?.message || 'Failed to download update' })
+      return { success: false, error: error?.message || 'Failed to download update' }
+    }
+  })
+
+  ipcMain.handle('updates:install', async () => {
+    try {
+      autoUpdater.quitAndInstall()
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error?.message || 'Failed to install update' }
+    }
+  })
 }
 
 // Register OAuth IPC handlers
@@ -3133,6 +3200,7 @@ app.whenReady().then(async () => {
   registerSelectorAgentHandlers()
   registerFastApplyHandlers()
   registerAgentSdkHandlers()
+  registerUpdateHandlers()
 
   // Register AI SDK handlers and initialize
   aiSdkWrapper.registerHandlers()

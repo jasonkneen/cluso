@@ -1,7 +1,7 @@
 {
   "name": "gemini-live-interface",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "main": "electron/main.cjs",
   "workspaces": [
@@ -44,6 +44,7 @@
     "chokidar": "^5.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "electron-updater": "^6.6.2",
     "lucide-react": "^0.555.0",
     "motion": "^12.23.24",
     "react": "^19.2.0",
@@ -77,6 +78,12 @@
     "files": [
       "dist/**/*",
       "electron/**/*"
+    ],
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://updates.ai-cluso.com"
+      }
     ],
     "mac": {
       "category": "public.app-category.productivity",
