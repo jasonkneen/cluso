@@ -239,7 +239,11 @@ export class ShardedIndexer {
     const startTime = Date.now()
 
     // If parallel is disabled or no embedder config, fall back to sequential
-    if (!this.parallel || !this.embedderConfig) {
+    // Also disable parallel for GPU mode (auto/llamacpp) as Metal can't handle
+    // multiple concurrent model loads - workers crash with trace trap
+    const isGpuMode = this.embedderConfig?.backend === 'auto' ||
+                      this.embedderConfig?.backend === 'llamacpp'
+    if (!this.parallel || !this.embedderConfig || isGpuMode) {
       const result = await this.indexFiles(files)
       return {
         totalChunks: result.totalChunks,

@@ -438,7 +438,9 @@ async function runIndexSharded(config: CliConfig): Promise<{ chunks: number; fil
     chunker,
     embedderConfig,  // Enable parallel workers
     parallel: true,
-    workerCount: Math.max(1, Math.min(shardCount, 4)),  // Limit workers to avoid memory issues
+    // GPU mode: limit to 2 workers to avoid Metal GPU contention (trace trap crashes)
+    // CPU mode: use up to 4 workers for CPU parallelism
+    workerCount: config.gpu ? Math.min(shardCount, 2) : Math.max(1, Math.min(shardCount, 4)),
     progressCallback: (progress: ShardedIndexProgress) => {
       if (progress.phase === 'chunking' && progress.currentFile) {
         const shardLabel = progress.shardId !== undefined
