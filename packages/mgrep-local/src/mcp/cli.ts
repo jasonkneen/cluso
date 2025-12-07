@@ -11,6 +11,8 @@
  *   mgrep-local benchmark [directory] - Compare single vs sharded performance
  *
  * Options:
+ *   --mlx                Use MLX GPU acceleration (requires qwen3-embeddings-mlx server)
+ *   --mlx-server <url>   MLX server URL (default: http://localhost:8000)
  *   --shards <n>         Number of shards (enables sharded mode)
  *   --db-path <path>     Path to the database directory
  *   --model-cache <path> Directory to cache embedding models
@@ -18,6 +20,8 @@
  *   --help, -h           Show this help message
  *
  * Environment:
+ *   MGREP_MLX            Use MLX (1 or true)
+ *   MGREP_MLX_SERVER     MLX server URL
  *   MGREP_SHARDS         Number of shards (same as --shards)
  *   MGREP_DB_PATH        Database path (same as --db-path)
  *   MGREP_VERBOSE        Enable verbose logging (1 or true)
@@ -29,6 +33,8 @@ import { homedir } from 'os'
 
 import { MgrepMcpServer } from './server'
 import { Embedder } from '../core/Embedder'
+import { createEmbedder } from '../core/embedder-factory'
+import { checkMlxServer } from '../core/MlxEmbedder'
 import { VectorStore } from '../core/VectorStore'
 import { Chunker } from '../core/Chunker'
 import { Indexer } from '../core/Indexer'
@@ -36,6 +42,7 @@ import { Searcher } from '../core/Searcher'
 import { ShardedVectorStore } from '../core/ShardedVectorStore'
 import { ShardedIndexer } from '../core/ShardedIndexer'
 import { ShardedSearcher } from '../core/ShardedSearcher'
+import type { MlxEmbedderOptions } from '../core/MlxEmbedder'
 
 // =============================================================================
 // Configuration
@@ -49,6 +56,8 @@ interface CliConfig {
   modelCacheDir?: string
   verbose: boolean
   shards?: number  // undefined = single mode, number = sharded mode
+  mlx: boolean  // Use MLX GPU acceleration
+  mlxServer: string  // MLX server URL
 }
 
 // Default paths
@@ -121,6 +130,8 @@ function parseArgs(): CliConfig {
   const envShards = process.env.MGREP_SHARDS
   const envDbPath = process.env.MGREP_DB_PATH
   const envVerbose = process.env.MGREP_VERBOSE
+  const envMlx = process.env.MGREP_MLX
+  const envMlxServer = process.env.MGREP_MLX_SERVER
 
   const config: CliConfig = {
     command: 'serve',
@@ -128,6 +139,8 @@ function parseArgs(): CliConfig {
     verbose: envVerbose === '1' || envVerbose === 'true',
     dbPath: envDbPath,
     shards: envShards ? parseInt(envShards, 10) : undefined,
+    mlx: envMlx === '1' || envMlx === 'true',
+    mlxServer: envMlxServer ?? 'http://localhost:8000',
   }
 
   let i = 0
@@ -171,6 +184,15 @@ function parseArgs(): CliConfig {
         }
         break
 
+      case '--mlx':
+        config.mlx = true
+        break
+
+      case '--mlx-server':
+        config.mlxServer = args[++i]
+        config.mlx = true  // Implicitly enable MLX when server is specified
+        break
+
       case '--shards':
         config.shards = parseInt(args[++i], 10)
         break
@@ -206,6 +228,44 @@ function parseArgs(): CliConfig {
   }
 
   return config
+}
+
+// =============================================================================
+// Embedder Helper
+// =============================================================================
+
+/**
+ * Create embedder based on config (MLX if requested and available, else CPU)
+ * Cast to Embedder for compatibility with Indexer/Searcher constructors
+ * (both Embedder and MlxEmbedder implement the same interface)
+ */
+async function getEmbedder(config: CliConfig): Promise<Embedder> {
+  if (config.mlx) {
+    log('MLX mode requested, checking server...')
+    const mlxAvailable = await checkMlxServer(config.mlxServer)
+
+    if (mlxAvailable) {
+      log(`MLX server found at ${config.mlxServer}`)
+      const embedder = await createEmbedder({
+        preferMlx: true,
+        mlxServerUrl: config.mlxServer,
+        verbose: config.verbose,
+      })
+      return embedder as unknown as Embedder
+    } else {
+      log(`MLX server not available at ${config.mlxServer}`)
+      log('Start it with: pip install qwen3-embeddings-mlx && qwen3-embeddings serve')
+      log('Falling back to CPU embeddings...')
+    }
+  }
+
+  // Use factory with preferMlx=false to ensure CPU mode
+  const embedder = await createEmbedder({
+    preferMlx: false,
+    cacheDir: config.modelCacheDir ?? DEFAULT_MODEL_CACHE,
+    verbose: config.verbose,
+  })
+  return embedder as unknown as Embedder
 }
 
 // =============================================================================
@@ -282,11 +342,7 @@ async function runIndexSingle(config: CliConfig): Promise<{ chunks: number; file
     return { chunks: 0, files: 0, durationMs: Date.now() - startTime }
   }
 
-  const embedder = new Embedder({
-    cacheDir: config.modelCacheDir ?? DEFAULT_MODEL_CACHE,
-    verbose: config.verbose,
-  })
-  await embedder.initialize()
+  const embedder = await getEmbedder(config)
 
   const vectorStore = new VectorStore({
     dbPath: config.dbPath ?? join(DEFAULT_DB_DIR, 'index.lance'),
@@ -337,11 +393,7 @@ async function runIndexSharded(config: CliConfig): Promise<{ chunks: number; fil
     return { chunks: 0, files: 0, durationMs: Date.now() - startTime }
   }
 
-  const embedder = new Embedder({
-    cacheDir: config.modelCacheDir ?? DEFAULT_MODEL_CACHE,
-    verbose: config.verbose,
-  })
-  await embedder.initialize()
+  const embedder = await getEmbedder(config)
 
   const shardedStore = new ShardedVectorStore({
     dbPath: config.dbPath ?? join(DEFAULT_DB_DIR, 'sharded'),
@@ -384,6 +436,7 @@ async function runIndex(config: CliConfig): Promise<void> {
   log('Starting indexer...')
   log(`Directory: ${config.directory}`)
   log(`Mode: ${config.shards ? `sharded (${config.shards} shards)` : 'single database'}`)
+  log(`Embeddings: ${config.mlx ? 'MLX GPU' : 'CPU (Xenova/transformers)'}`)
 
   const result = config.shards
     ? await runIndexSharded(config)
@@ -399,12 +452,9 @@ async function runWatch(config: CliConfig): Promise<void> {
   log('Starting watcher...')
   log(`Directory: ${config.directory}`)
   log(`Mode: ${config.shards ? `sharded (${config.shards} shards)` : 'single database'}`)
+  log(`Embeddings: ${config.mlx ? 'MLX GPU' : 'CPU (Xenova/transformers)'}`)
 
-  const embedder = new Embedder({
-    cacheDir: config.modelCacheDir ?? DEFAULT_MODEL_CACHE,
-    verbose: config.verbose,
-  })
-  await embedder.initialize()
+  const embedder = await getEmbedder(config)
 
   // Initialize store based on mode
   let indexer: Indexer | ShardedIndexer
@@ -510,11 +560,7 @@ async function runSearch(config: CliConfig): Promise<void> {
     process.exit(1)
   }
 
-  const embedder = new Embedder({
-    cacheDir: config.modelCacheDir ?? DEFAULT_MODEL_CACHE,
-    verbose: config.verbose,
-  })
-  await embedder.initialize()
+  const embedder = await getEmbedder(config)
 
   let results: any[]
 
@@ -588,11 +634,7 @@ async function runBenchmark(config: CliConfig): Promise<void> {
   log(`Files: ${singleIndexResult.files}, Chunks: ${singleIndexResult.chunks}`)
 
   // Search benchmark for single
-  const embedder = new Embedder({
-    cacheDir: config.modelCacheDir ?? DEFAULT_MODEL_CACHE,
-    verbose: false,
-  })
-  await embedder.initialize()
+  const embedder = await getEmbedder({ ...config, verbose: false })
 
   const vectorStore = new VectorStore({
     dbPath: config.dbPath ?? join(DEFAULT_DB_DIR, 'index.lance'),
@@ -744,6 +786,15 @@ Commands:
   benchmark [dir]  Compare single vs sharded performance
 
 Options:
+  --mlx                 Use MLX GPU acceleration (Apple Silicon)
+                        Requires: pip install qwen3-embeddings-mlx
+                        Then run: qwen3-embeddings serve --model 0.6B
+                        Can also use MGREP_MLX=1
+
+  --mlx-server <url>    MLX embedding server URL
+                        Default: http://localhost:8000
+                        Can also use MGREP_MLX_SERVER
+
   --shards <n>          Enable sharded mode with n shards (default: single DB)
                         Can also use MGREP_SHARDS environment variable
 
@@ -760,23 +811,33 @@ Options:
   --help, -h            Show this help message
 
 Examples:
-  # Index current directory (single mode)
+  # Index current directory (single mode, CPU)
   mgrep-local index
+
+  # Index with MLX GPU acceleration (44K tok/s on M2 Max)
+  mgrep-local index --mlx
 
   # Index with 8 shards (parallel mode)
   mgrep-local index --shards 8
 
-  # Use environment variable for shards
-  MGREP_SHARDS=8 mgrep-local index
+  # Index with MLX + shards for maximum performance
+  mgrep-local index --mlx --shards 8
 
-  # Watch with sharded mode
-  mgrep-local watch --shards 8 -v
+  # Watch with MLX mode
+  mgrep-local watch --mlx -v
 
   # Search the index
   mgrep-local search "authentication handler"
 
   # Benchmark single vs sharded
   mgrep-local benchmark .
+
+MLX GPU Setup (Apple Silicon):
+  pip install qwen3-embeddings-mlx
+  qwen3-embeddings serve --model 0.6B
+
+  Performance: ~44K tokens/sec (vs ~1K on CPU)
+  First run downloads Qwen3-Embedding-0.6B-4bit-DWQ (~400MB)
 
 For Claude Code integration, add to your .mcp.json:
   {

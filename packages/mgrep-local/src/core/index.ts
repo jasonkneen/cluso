@@ -12,6 +12,10 @@ export { Chunker } from './Chunker'
 export { Indexer } from './Indexer'
 export { Searcher } from './Searcher'
 
+// Classes - MLX GPU Acceleration
+export { MlxEmbedder, checkMlxServer } from './MlxEmbedder'
+export { createEmbedder, createEmbedderWithBackend } from './embedder-factory'
+
 // Classes - Sharded (multiple databases with meta-index)
 export { ShardedVectorStore } from './ShardedVectorStore'
 export { ShardedIndexer } from './ShardedIndexer'
@@ -40,6 +44,9 @@ export type {
 
   // Configuration types
   EmbedderOptions,
+  MlxEmbedderOptions,
+  MlxModelSize,
+  EmbedderFactoryOptions,
   ModelDownloadProgress,
   ModelInfo,
   VectorStoreOptions,

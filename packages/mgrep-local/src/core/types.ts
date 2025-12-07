@@ -139,6 +139,29 @@ export interface EmbedderOptions {
 }
 
 /**
+ * MLX model sizes available
+ */
+export type MlxModelSize = '0.6B' | '4B' | '8B'
+
+/**
+ * Options for MLX GPU-accelerated embedder
+ */
+export interface MlxEmbedderOptions extends EmbedderOptions {
+  serverUrl?: string  // default: http://localhost:8000
+  modelSize?: MlxModelSize  // default: '0.6B'
+  timeout?: number  // request timeout in ms (default: 30000)
+}
+
+/**
+ * Options for embedder factory (auto-selects best available)
+ */
+export interface EmbedderFactoryOptions extends EmbedderOptions {
+  preferMlx?: boolean  // default: true - use MLX if available
+  mlxServerUrl?: string  // default: http://localhost:8000
+  mlxModelSize?: MlxModelSize  // default: '0.6B'
+}
+
+/**
  * Progress during model download
  */
 export interface ModelDownloadProgress {

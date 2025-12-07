@@ -151,10 +151,50 @@ const results = await service.search('find user validation')
 
 - **Semantic search**: Find code by meaning, not just keywords
 - **Local-first**: All processing happens on your machine
+- **MLX GPU acceleration**: 44K tok/s on Apple Silicon (vs ~1K on CPU)
 - **Watch mode**: Automatically index file changes
 - **Fast indexing**: Incremental updates, only re-indexes changed files
 - **Code-aware chunking**: Understands code structure for better results
 - **Sharded mode**: Parallel indexing and progressive search for large codebases
+
+## MLX GPU Acceleration (Apple Silicon)
+
+For maximum performance on Apple Silicon Macs, use MLX GPU acceleration:
+
+### Setup
+
+```bash
+# Install the MLX embedding server
+pip install qwen3-embeddings-mlx
+
+# Start the server (downloads ~400MB model on first run)
+qwen3-embeddings serve --model 0.6B
+```
+
+### Usage
+
+```bash
+# Index with GPU acceleration
+mgrep-local index --mlx
+
+# Combine with sharded mode for maximum performance
+mgrep-local index --mlx --shards 8
+
+# Watch mode with MLX
+mgrep-local watch --mlx
+
+# Environment variable
+MGREP_MLX=1 mgrep-local index
+```
+
+### Performance Comparison
+
+| Mode | Speed | Model |
+|------|-------|-------|
+| CPU (default) | ~1K tok/s | all-MiniLM-L6-v2 (22M params) |
+| MLX GPU | ~44K tok/s | Qwen3-Embedding-0.6B (600M params) |
+
+MLX mode uses Qwen3-Embedding-0.6B-4bit-DWQ, which provides state-of-the-art code retrieval quality with 44x faster embeddings on M2 Max.
 
 ## Sharded Mode
 
