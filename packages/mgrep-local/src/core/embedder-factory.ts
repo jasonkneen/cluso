@@ -2,104 +2,156 @@
  * Embedder Factory - Auto-selects the best available embedding backend
  *
  * Priority order:
- * 1. MLX GPU (if server available and preferMlx=true)
- * 2. Xenova/transformers CPU (fallback)
+ * 1. LlamaCpp GPU (pure TypeScript, Metal on Apple Silicon)
+ * 2. MLX GPU (requires Python server)
+ * 3. Xenova/transformers CPU (fallback)
  *
  * Usage:
  *   const embedder = await createEmbedder({ verbose: true })
- *   // Automatically uses MLX if available, falls back to CPU
+ *   // Automatically uses best available backend
  */
 
 import { Embedder } from './Embedder'
 import { MlxEmbedder, checkMlxServer } from './MlxEmbedder'
+import { LlamaCppEmbedder, checkGpuAvailable, type EmbeddingModelName } from './LlamaCppEmbedder'
 import type { EmbedderFactoryOptions, Embedder as IEmbedder } from './types'
+
+export type EmbedderBackend = 'auto' | 'llamacpp' | 'mlx' | 'cpu'
+
+/**
+ * Extended factory options with GPU backend selection
+ */
+export interface GpuEmbedderOptions extends EmbedderFactoryOptions {
+  backend?: EmbedderBackend  // Which backend to use
+  llamaModel?: EmbeddingModelName  // LlamaCpp model name
+  gpuLayers?: number  // GPU layers for LlamaCpp
+}
 
 /**
  * Create the best available embedder
  *
  * @param options - Configuration options
- * @returns Initialized embedder (MLX if available, otherwise CPU)
+ * @returns Initialized embedder (LlamaCpp GPU > MLX GPU > CPU)
  */
 export async function createEmbedder(
-  options: EmbedderFactoryOptions = {}
+  options: GpuEmbedderOptions = {}
 ): Promise<IEmbedder> {
-  const preferMlx = options.preferMlx ?? true
-  const mlxServerUrl = options.mlxServerUrl ?? 'http://localhost:8000'
+  const backend = options.backend ?? 'auto'
   const verbose = options.verbose ?? false
 
-  if (preferMlx) {
-    if (verbose) {
-      console.log('[EmbedderFactory] Checking for MLX server...')
-    }
+  const log = (msg: string) => {
+    if (verbose) console.log('[EmbedderFactory]', msg)
+  }
 
+  // Explicit backend selection
+  if (backend === 'llamacpp') {
+    return createLlamaCppEmbedder(options, log)
+  }
+
+  if (backend === 'mlx') {
+    return createMlxEmbedder(options, log)
+  }
+
+  if (backend === 'cpu') {
+    return createCpuEmbedder(options, log)
+  }
+
+  // Auto mode: try backends in priority order
+  log('Auto-detecting best available backend...')
+
+  // 1. Try LlamaCpp GPU (pure TypeScript, no external dependencies)
+  try {
+    const gpu = await checkGpuAvailable()
+    if (gpu.available) {
+      log(`GPU available (${gpu.type}), trying LlamaCpp...`)
+      const embedder = await createLlamaCppEmbedder(options, log)
+      log('Using LlamaCpp GPU embedder')
+      return embedder
+    }
+  } catch (error) {
+    log(`LlamaCpp not available: ${error}`)
+  }
+
+  // 2. Try MLX (requires Python server)
+  const preferMlx = options.preferMlx ?? false  // MLX requires server, so not preferred by default
+  if (preferMlx) {
+    const mlxServerUrl = options.mlxServerUrl ?? 'http://localhost:8000'
     const mlxAvailable = await checkMlxServer(mlxServerUrl)
 
     if (mlxAvailable) {
-      if (verbose) {
-        console.log('[EmbedderFactory] MLX server found, using GPU acceleration')
-      }
-
-      const mlxEmbedder = new MlxEmbedder({
-        serverUrl: mlxServerUrl,
-        modelSize: options.mlxModelSize ?? '0.6B',
-        verbose: options.verbose,
-        onProgress: options.onProgress,
-      })
-
-      await mlxEmbedder.initialize()
-      return mlxEmbedder
+      log('MLX server found, using MLX GPU acceleration')
+      return createMlxEmbedder(options, log)
     } else {
-      if (verbose) {
-        console.log('[EmbedderFactory] MLX server not available, falling back to CPU')
-        console.log('[EmbedderFactory] To enable GPU: pip install qwen3-embeddings-mlx && qwen3-embeddings serve')
-      }
+      log('MLX server not available')
     }
   }
 
-  // Fallback to CPU embedder
-  if (verbose) {
-    console.log('[EmbedderFactory] Using CPU embedder (Xenova/transformers)')
-  }
+  // 3. Fallback to CPU
+  log('Using CPU embedder (Xenova/transformers)')
+  return createCpuEmbedder(options, log)
+}
 
-  const cpuEmbedder = new Embedder({
+async function createLlamaCppEmbedder(
+  options: GpuEmbedderOptions,
+  log: (msg: string) => void
+): Promise<IEmbedder> {
+  log('Creating LlamaCpp GPU embedder...')
+
+  const embedder = new LlamaCppEmbedder({
+    modelName: options.llamaModel,
+    cacheDir: options.cacheDir,
+    gpuLayers: options.gpuLayers,
+    verbose: options.verbose,
+    onProgress: options.onProgress,
+  })
+
+  await embedder.initialize()
+  return embedder
+}
+
+async function createMlxEmbedder(
+  options: GpuEmbedderOptions,
+  log: (msg: string) => void
+): Promise<IEmbedder> {
+  const mlxServerUrl = options.mlxServerUrl ?? 'http://localhost:8000'
+  log(`Creating MLX embedder (server: ${mlxServerUrl})...`)
+
+  const embedder = new MlxEmbedder({
+    serverUrl: mlxServerUrl,
+    modelSize: options.mlxModelSize ?? '0.6B',
+    verbose: options.verbose,
+    onProgress: options.onProgress,
+  })
+
+  await embedder.initialize()
+  return embedder
+}
+
+async function createCpuEmbedder(
+  options: GpuEmbedderOptions,
+  log: (msg: string) => void
+): Promise<IEmbedder> {
+  log('Creating CPU embedder (Xenova/transformers)...')
+
+  const embedder = new Embedder({
     modelName: options.modelName,
     cacheDir: options.cacheDir,
     verbose: options.verbose,
     onProgress: options.onProgress,
   })
 
-  await cpuEmbedder.initialize()
-  return cpuEmbedder
+  await embedder.initialize()
+  return embedder
 }
 
 /**
- * Create embedder with explicit backend choice
+ * Create embedder with explicit backend choice (legacy API)
  */
 export async function createEmbedderWithBackend(
-  backend: 'mlx' | 'cpu',
-  options: EmbedderFactoryOptions = {}
+  backend: 'llamacpp' | 'mlx' | 'cpu',
+  options: GpuEmbedderOptions = {}
 ): Promise<IEmbedder> {
-  if (backend === 'mlx') {
-    const mlxEmbedder = new MlxEmbedder({
-      serverUrl: options.mlxServerUrl ?? 'http://localhost:8000',
-      modelSize: options.mlxModelSize ?? '0.6B',
-      verbose: options.verbose,
-      onProgress: options.onProgress,
-    })
-
-    await mlxEmbedder.initialize()
-    return mlxEmbedder
-  }
-
-  const cpuEmbedder = new Embedder({
-    modelName: options.modelName,
-    cacheDir: options.cacheDir,
-    verbose: options.verbose,
-    onProgress: options.onProgress,
-  })
-
-  await cpuEmbedder.initialize()
-  return cpuEmbedder
+  return createEmbedder({ ...options, backend })
 }
 
 export type { EmbedderFactoryOptions }

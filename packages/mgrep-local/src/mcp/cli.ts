@@ -43,6 +43,7 @@ import { ShardedVectorStore } from '../core/ShardedVectorStore'
 import { ShardedIndexer } from '../core/ShardedIndexer'
 import { ShardedSearcher } from '../core/ShardedSearcher'
 import type { MlxEmbedderOptions } from '../core/MlxEmbedder'
+import type { ShardedIndexProgress } from '../core/ShardedIndexer'
 
 // =============================================================================
 // Configuration
@@ -56,7 +57,8 @@ interface CliConfig {
   modelCacheDir?: string
   verbose: boolean
   shards?: number  // undefined = single mode, number = sharded mode
-  mlx: boolean  // Use MLX GPU acceleration
+  gpu: boolean  // Use GPU acceleration (auto-detect best backend)
+  mlx: boolean  // Use MLX GPU acceleration (Python server)
   mlxServer: string  // MLX server URL
 }
 
@@ -130,6 +132,7 @@ function parseArgs(): CliConfig {
   const envShards = process.env.MGREP_SHARDS
   const envDbPath = process.env.MGREP_DB_PATH
   const envVerbose = process.env.MGREP_VERBOSE
+  const envGpu = process.env.MGREP_GPU
   const envMlx = process.env.MGREP_MLX
   const envMlxServer = process.env.MGREP_MLX_SERVER
 
@@ -139,6 +142,7 @@ function parseArgs(): CliConfig {
     verbose: envVerbose === '1' || envVerbose === 'true',
     dbPath: envDbPath,
     shards: envShards ? parseInt(envShards, 10) : undefined,
+    gpu: envGpu === '1' || envGpu === 'true',
     mlx: envMlx === '1' || envMlx === 'true',
     mlxServer: envMlxServer ?? 'http://localhost:8000',
   }
@@ -182,6 +186,10 @@ function parseArgs(): CliConfig {
         if (args[i + 1] && !args[i + 1].startsWith('-')) {
           config.directory = resolve(args[++i])
         }
+        break
+
+      case '--gpu':
+        config.gpu = true
         break
 
       case '--mlx':
@@ -235,11 +243,22 @@ function parseArgs(): CliConfig {
 // =============================================================================
 
 /**
- * Create embedder based on config (MLX if requested and available, else CPU)
- * Cast to Embedder for compatibility with Indexer/Searcher constructors
- * (both Embedder and MlxEmbedder implement the same interface)
+ * Create embedder based on config
+ * Priority: --gpu (auto) > --mlx (Python server) > CPU
  */
 async function getEmbedder(config: CliConfig): Promise<Embedder> {
+  // GPU mode: auto-detect best backend (LlamaCpp > MLX > CPU)
+  if (config.gpu) {
+    log('GPU mode requested, auto-detecting best backend...')
+    const embedder = await createEmbedder({
+      backend: 'auto',
+      cacheDir: config.modelCacheDir ?? DEFAULT_MODEL_CACHE,
+      verbose: config.verbose,
+    })
+    return embedder as unknown as Embedder
+  }
+
+  // MLX mode: use Python server
   if (config.mlx) {
     log('MLX mode requested, checking server...')
     const mlxAvailable = await checkMlxServer(config.mlxServer)
@@ -247,7 +266,7 @@ async function getEmbedder(config: CliConfig): Promise<Embedder> {
     if (mlxAvailable) {
       log(`MLX server found at ${config.mlxServer}`)
       const embedder = await createEmbedder({
-        preferMlx: true,
+        backend: 'mlx',
         mlxServerUrl: config.mlxServer,
         verbose: config.verbose,
       })
@@ -260,9 +279,9 @@ async function getEmbedder(config: CliConfig): Promise<Embedder> {
     }
   }
 
-  // Use factory with preferMlx=false to ensure CPU mode
+  // CPU mode
   const embedder = await createEmbedder({
-    preferMlx: false,
+    backend: 'cpu',
     cacheDir: config.modelCacheDir ?? DEFAULT_MODEL_CACHE,
     verbose: config.verbose,
   })
@@ -403,10 +422,24 @@ async function runIndexSharded(config: CliConfig): Promise<{ chunks: number; fil
   await shardedStore.initialize()
 
   const chunker = new Chunker()
+
+  // Track progress for sharded mode
+  let lastProgress = 0
   const indexer = new ShardedIndexer({
     shardedStore,
     embedder,
     chunker,
+    progressCallback: (progress: ShardedIndexProgress) => {
+      if (progress.phase === 'chunking' && progress.currentFile) {
+        const shardLabel = progress.shardId !== undefined
+          ? ` [shard ${progress.shardId}/${shardCount}]`
+          : ''
+        const pct = ((progress.current / progress.total) * 100).toFixed(1)
+        const shortFile = relative(config.directory, progress.currentFile)
+        process.stderr.write(`\r[mgrep]${shardLabel} Indexing: ${progress.current}/${progress.total} (${pct}%) ${shortFile.padEnd(50)}`)
+        lastProgress = progress.current
+      }
+    },
   })
 
   // Prepare files with content
@@ -418,6 +451,7 @@ async function runIndexSharded(config: CliConfig): Promise<{ chunks: number; fil
   log(`Indexing ${files.length} files across ${shardCount} shards...`)
 
   const result = await indexer.indexFilesParallel(filesToIndex)
+  process.stderr.write('\n')
 
   await embedder.dispose()
   await shardedStore.dispose()
@@ -437,7 +471,8 @@ async function runIndex(config: CliConfig): Promise<void> {
   log('Starting indexer...')
   log(`Directory: ${config.directory}`)
   log(`Mode: ${config.shards ? `sharded (${config.shards} shards)` : 'single database'}`)
-  log(`Embeddings: ${config.mlx ? 'MLX GPU' : 'CPU (Xenova/transformers)'}`)
+  const embeddingMode = config.gpu ? 'GPU (auto-detect)' : config.mlx ? 'MLX GPU' : 'CPU'
+  log(`Embeddings: ${embeddingMode}`)
 
   const result = config.shards
     ? await runIndexSharded(config)
@@ -453,7 +488,8 @@ async function runWatch(config: CliConfig): Promise<void> {
   log('Starting watcher...')
   log(`Directory: ${config.directory}`)
   log(`Mode: ${config.shards ? `sharded (${config.shards} shards)` : 'single database'}`)
-  log(`Embeddings: ${config.mlx ? 'MLX GPU' : 'CPU (Xenova/transformers)'}`)
+  const embeddingMode = config.gpu ? 'GPU (auto-detect)' : config.mlx ? 'MLX GPU' : 'CPU'
+  log(`Embeddings: ${embeddingMode}`)
 
   const embedder = await getEmbedder(config)
 
@@ -787,9 +823,14 @@ Commands:
   benchmark [dir]  Compare single vs sharded performance
 
 Options:
-  --mlx                 Use MLX GPU acceleration (Apple Silicon)
+  --gpu                 Use GPU acceleration (auto-detect best backend)
+                        On Apple Silicon: uses Metal via node-llama-cpp
+                        No external dependencies - pure TypeScript!
+                        Can also use MGREP_GPU=1
+
+  --mlx                 Use MLX GPU acceleration (requires Python server)
                         Requires: pip install qwen3-embeddings-mlx
-                        Then run: qwen3-embeddings serve --model 0.6B
+                        Then run: python server.py
                         Can also use MGREP_MLX=1
 
   --mlx-server <url>    MLX embedding server URL
@@ -812,20 +853,17 @@ Options:
   --help, -h            Show this help message
 
 Examples:
-  # Index current directory (single mode, CPU)
+  # Index with GPU (recommended - pure TypeScript, no setup needed!)
+  mgrep-local index --gpu
+
+  # Index with shards + GPU for maximum performance
+  mgrep-local index --gpu --shards 8
+
+  # Index current directory (CPU mode)
   mgrep-local index
 
-  # Index with MLX GPU acceleration (44K tok/s on M2 Max)
-  mgrep-local index --mlx
-
-  # Index with 8 shards (parallel mode)
-  mgrep-local index --shards 8
-
-  # Index with MLX + shards for maximum performance
-  mgrep-local index --mlx --shards 8
-
-  # Watch with MLX mode
-  mgrep-local watch --mlx -v
+  # Watch with GPU mode
+  mgrep-local watch --gpu -v
 
   # Search the index
   mgrep-local search "authentication handler"
@@ -833,13 +871,10 @@ Examples:
   # Benchmark single vs sharded
   mgrep-local benchmark .
 
-MLX GPU Setup (Apple Silicon):
-  git clone https://github.com/jakedahn/qwen3-embeddings-mlx.git
-  cd qwen3-embeddings-mlx && pip install -r requirements.txt
-  python server.py
-
-  Performance: ~44K tokens/sec (vs ~1K on CPU)
-  First run downloads model (~900MB)
+GPU Acceleration:
+  --gpu uses node-llama-cpp with Metal (Apple Silicon) or Vulkan (others)
+  First run downloads embedding model (~130MB for bge-small)
+  No Python or external servers required!
 
 For Claude Code integration, add to your .mcp.json:
   {

@@ -12,9 +12,10 @@ export { Chunker } from './Chunker'
 export { Indexer } from './Indexer'
 export { Searcher } from './Searcher'
 
-// Classes - MLX GPU Acceleration
+// Classes - GPU Acceleration
 export { MlxEmbedder, checkMlxServer } from './MlxEmbedder'
-export { createEmbedder, createEmbedderWithBackend } from './embedder-factory'
+export { LlamaCppEmbedder, checkGpuAvailable, listEmbeddingModels, EMBEDDING_MODELS } from './LlamaCppEmbedder'
+export { createEmbedder, createEmbedderWithBackend, type EmbedderBackend, type GpuEmbedderOptions } from './embedder-factory'
 
 // Classes - Sharded (multiple databases with meta-index)
 export { ShardedVectorStore } from './ShardedVectorStore'
@@ -58,6 +59,9 @@ export type {
   MgrepLocalServiceOptions,
   ServiceStatus,
 } from './types'
+
+// Re-export LlamaCpp types
+export type { LlamaCppEmbedderOptions, EmbeddingModelName } from './LlamaCppEmbedder'
 
 // Sharded types
 export type {
