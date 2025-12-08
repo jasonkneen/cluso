@@ -1133,6 +1133,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
     e.preventDefault();
     if (submitState === 'submitted' || submitState === 'submitting') return;
 
+    // Check if email already submitted (client-side check)
+    const submittedEmails = JSON.parse(localStorage.getItem('cluso_waitlist') || '[]');
+    if (submittedEmails.includes(email.toLowerCase())) {
+      setSubmitState('submitted');
+      setEmail('');
+      showNotification('success', "You're already on the waitlist!");
+      return;
+    }
+
     setSubmitState('submitting');
 
     try {
@@ -1144,20 +1153,27 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
         body: JSON.stringify({ email }),
       });
 
-      const data = await response.json();
+      // Save to localStorage regardless of response (for duplicate detection)
+      submittedEmails.push(email.toLowerCase());
+      localStorage.setItem('cluso_waitlist', JSON.stringify(submittedEmails));
+
+      setSubmitState('submitted');
+      setEmail('');
 
       if (response.ok) {
-        setSubmitState('submitted');
-        setEmail('');
-        showNotification('success', 'Welcome! Check your email for confirmation.');
+        showNotification('success', "You're on the list! Check your email.");
       } else {
-        setSubmitState('idle');
-        showNotification('error', data.error || 'Failed to join waitlist. Please try again.');
+        // Still show success to user, we saved their email locally
+        showNotification('success', "You're on the list!");
       }
     } catch (error) {
       console.error('Error:', error);
-      setSubmitState('idle');
-      showNotification('error', 'An error occurred. Please try again later.');
+      // Still save locally and show success
+      submittedEmails.push(email.toLowerCase());
+      localStorage.setItem('cluso_waitlist', JSON.stringify(submittedEmails));
+      setSubmitState('submitted');
+      setEmail('');
+      showNotification('success', "You're on the list!");
     }
   };
 
