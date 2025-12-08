@@ -25,10 +25,15 @@ interface UseLiveGeminiParams {
   onOpenFolder?: (name?: string, itemNumber?: number) => Promise<string>;
   onBrowserBack?: () => string;
   onCloseBrowser?: () => string;
+  onApproveChange?: (reason?: string) => void;
+  onRejectChange?: (reason?: string) => void;
+  onUndoChange?: (reason?: string) => void;
   selectedElement?: SelectedElement | null;
   // Context for logging
   projectFolder?: string;
   currentUrl?: string;
+  // API key from settings (falls back to env if not provided)
+  googleApiKey?: string;
 }
 
 // ToolArgs is now imported from utils/toolRouter
@@ -374,7 +379,62 @@ You can use EITHER name OR itemNumber, not both. The itemNumber refers to the nu
   },
 };
 
-export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, onOpenItem, onOpenFile, onOpenFolder, onBrowserBack, onCloseBrowser, selectedElement, projectFolder, currentUrl }: UseLiveGeminiParams) {
+// Voice Approval Tools
+const approveCchangeTool: FunctionDeclaration = {
+  name: 'approve_change',
+  description: `Approve a pending change when the user gives voice approval.
+
+Use this when the user says "yes", "accept", "approve", "do it", "go ahead", or similar approval commands.
+This confirms that the user wants to apply the proposed change.`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      reason: {
+        type: Type.STRING,
+        description: 'Brief explanation of what was approved (for confirmation message)',
+      },
+    },
+    required: [],
+  },
+};
+
+const rejectChangeTool: FunctionDeclaration = {
+  name: 'reject_change',
+  description: `Reject a pending change when the user gives voice rejection.
+
+Use this when the user says "no", "reject", "cancel", "undo", "wrong", or similar rejection commands.
+This confirms that the user does not want to apply the proposed change.`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      reason: {
+        type: Type.STRING,
+        description: 'Brief explanation of why the change was rejected',
+      },
+    },
+    required: [],
+  },
+};
+
+const undoChangeTool: FunctionDeclaration = {
+  name: 'undo_change',
+  description: `Undo the last applied change when the user requests it via voice.
+
+Use this when the user says "undo that", "undo the last change", "revert", "go back", or similar undo commands.
+This reverts the application to the state before the last change was applied.`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      reason: {
+        type: Type.STRING,
+        description: 'Reason for undoing (for confirmation message)',
+      },
+    },
+    required: [],
+  },
+};
+
+export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, onOpenItem, onOpenFile, onOpenFolder, onBrowserBack, onCloseBrowser, selectedElement, projectFolder, currentUrl, googleApiKey }: UseLiveGeminiParams) {
   const [streamState, setStreamState] = useState<StreamState>({
     isConnected: false,
     isStreaming: false,
@@ -466,8 +526,9 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
     try {
       setStreamState({ isConnected: false, isStreaming: true, error: null });
 
-      const apiKey = process.env.API_KEY;
-      if (!apiKey) throw new Error("API_KEY not found in environment");
+      // Use passed API key first, then fall back to environment variable
+      const apiKey = googleApiKey || process.env.API_KEY;
+      if (!apiKey) throw new Error("API_KEY not found - add it in Settings > Providers or .env.local");
       aiRef.current = new GoogleGenAI({ apiKey });
 
       const AudioContextClass = window.AudioContext || (window as WindowWithWebkit).webkitAudioContext;
@@ -487,7 +548,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
           },
-          tools: [{ functionDeclarations: [updateUiTool, selectElementTool, executeCodeTool, confirmSelectionTool, getPageElementsTool, patchSourceFileTool, listFilesTool, readFileTool, clickElementTool, navigateTool, scrollTool, openFileBrowserItemTool, openFileTool, openFolderTool, fileBrowserBackTool, closeFileBrowserTool] }],
+          tools: [{ functionDeclarations: [updateUiTool, selectElementTool, executeCodeTool, confirmSelectionTool, getPageElementsTool, patchSourceFileTool, listFilesTool, readFileTool, clickElementTool, navigateTool, scrollTool, openFileBrowserItemTool, openFileTool, openFolderTool, fileBrowserBackTool, closeFileBrowserTool, approveCchangeTool, rejectChangeTool, undoChangeTool] }],
           systemInstruction: `You are a specialized AI UI Engineer with voice control, file browsing, element selection, and browser navigation.
 
           You can see the user's screen or video feed if enabled.
@@ -541,9 +602,16 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
 
           ${selectedElement ? `SELECTED ELEMENT: ${selectedElement.tagName} "${selectedElement.text || ''}"` : ''}
 
+          VOICE APPROVAL COMMANDS:
+          When user says these voice commands, use the approval tools:
+          - "yes", "accept", "approve", "do it", "go ahead" → approve_change()
+          - "no", "reject", "cancel", "nope", "wrong" → reject_change()
+          - "undo that", "undo the last change", "revert", "go back" → undo_change()
+
           VOICE COMMANDS SUMMARY:
           FILE BROWSER: "show files", "open 3", "go back", "close that"
           PAGE: "highlight buttons", "click that", "scroll down"
+          APPROVAL: "yes"/"approve", "no"/"reject", "undo that"
           CONFIRM: "yes"/"approve", "no"/"reject"
 
           Be concise. Describe what you're doing.`,
@@ -596,6 +664,9 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                       onOpenFolder,
                       onBrowserBack,
                       onCloseBrowser,
+                      onApproveChange,
+                      onRejectChange,
+                      onUndoChange,
                     };
 
                     // Convert to typed tool calls
@@ -717,7 +788,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
       setStreamState(prev => ({ ...prev, error: error instanceof Error ? error.message : "Failed to connect" }));
       cleanup();
     }
-  }, [cleanup, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, selectedElement]);
+  }, [cleanup, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onApproveChange, onRejectChange, onUndoChange, selectedElement, googleApiKey]);
 
   const startVideoStreaming = useCallback(() => {
     if (frameIntervalRef.current) return;

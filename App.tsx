@@ -30,6 +30,7 @@ import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler
 import { getElectronAPI } from './hooks/useElectronAPI';
 import type { MCPServerConfig } from './types/mcp';
 import { GoogleGenAI } from '@google/genai'; // Keep for voice streaming
+import { playApprovalSound, playRejectionSound, playUndoSound } from './utils/audio';
 import {
   ChevronLeft,
   ChevronRight,
@@ -1648,6 +1649,8 @@ export default function App() {
       content: 'Changes confirmed.',
       timestamp: new Date()
     }]);
+    // Play approval sound for voice confirmation feedback
+    playApprovalSound().catch(err => console.error('[Audio] Approval sound error:', err));
   }, []);
 
   // Reject pending code change - undo and clear
@@ -1696,7 +1699,35 @@ export default function App() {
     }
 
     setPendingChange(null);
+    // Play rejection sound for voice confirmation feedback
+    playRejectionSound().catch(err => console.error('[Audio] Rejection sound error:', err));
   }, [pendingChange, activeTabId]);
+
+  // Voice approval handlers that work with the existing pendingChange system
+  const handleVoiceApprove = useCallback((reason?: string) => {
+    console.log('[Voice] User said approve:', reason);
+    // Delegate to existing approve handler which handles the DOM/code execution
+    handleApproveChange();
+  }, []);
+
+  const handleVoiceReject = useCallback((reason?: string) => {
+    console.log('[Voice] User said reject:', reason);
+    // Delegate to existing reject handler which undoes changes
+    handleRejectChange();
+  }, []);
+
+  const handleVoiceUndo = useCallback((reason?: string) => {
+    console.log('[Voice] User said undo:', reason);
+    // For undo via voice, just trigger the reject handler (same effect)
+    // This reverts to the last pending change state
+    if (pendingChange) {
+      handleRejectChange();
+    } else {
+      // If no pending change, could implement undo history here
+      playUndoSound().catch(err => console.error('[Audio] Undo sound error:', err));
+      console.log('[Voice] No pending change to undo');
+    }
+  }, [pendingChange]);
 
   // Browser navigation functions - update active tab's URL
   const navigateTo = useCallback((url: string) => {
@@ -2656,7 +2687,12 @@ export default function App() {
     onOpenFolder: openFolder,
     onBrowserBack: fileBrowserBack,
     onCloseBrowser: closeFileBrowser,
-    selectedElement: selectedElement
+    onApproveChange: handleVoiceApprove,
+    onRejectChange: handleVoiceReject,
+    onUndoChange: handleVoiceUndo,
+    selectedElement: selectedElement,
+    // Pass Google API key from settings
+    googleApiKey: appSettings.providers.find(p => p.id === 'google')?.apiKey,
   });
 
   // Load available prompts and directory files on mount

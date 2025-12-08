@@ -62,3 +62,128 @@ export async function pcmToAudioBuffer(
   }
   return buffer;
 }
+
+// Play a simple tone for audio feedback (approval/rejection/undo sounds)
+export async function playTone(
+  frequency: number = 440,
+  duration: number = 100,
+  volume: number = 0.3,
+  type: 'sine' | 'square' | 'triangle' = 'sine'
+): Promise<void> {
+  try {
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+
+    oscillator.type = type;
+    oscillator.frequency.value = frequency;
+    gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration / 1000);
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + duration / 1000);
+
+    await new Promise(resolve => setTimeout(resolve, duration));
+  } catch (err) {
+    console.error('[Audio] Failed to play tone:', err);
+  }
+}
+
+// Play a confirmation beep (ascending two-tone)
+export async function playApprovalSound(): Promise<void> {
+  try {
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const now = audioContext.currentTime;
+
+    // First tone: 600 Hz for 100ms
+    const osc1 = audioContext.createOscillator();
+    const gain1 = audioContext.createGain();
+    osc1.frequency.value = 600;
+    gain1.gain.setValueAtTime(0.25, now);
+    gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+    osc1.connect(gain1);
+    gain1.connect(audioContext.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.1);
+
+    // Second tone: 800 Hz for 100ms, delayed
+    const osc2 = audioContext.createOscillator();
+    const gain2 = audioContext.createGain();
+    osc2.frequency.value = 800;
+    gain2.gain.setValueAtTime(0.25, now + 0.05);
+    gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+    osc2.connect(gain2);
+    gain2.connect(audioContext.destination);
+    osc2.start(now + 0.05);
+    osc2.stop(now + 0.15);
+
+    await new Promise(resolve => setTimeout(resolve, 150));
+  } catch (err) {
+    console.error('[Audio] Failed to play approval sound:', err);
+  }
+}
+
+// Play a rejection beep (descending two-tone)
+export async function playRejectionSound(): Promise<void> {
+  try {
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const now = audioContext.currentTime;
+
+    // First tone: 800 Hz for 100ms
+    const osc1 = audioContext.createOscillator();
+    const gain1 = audioContext.createGain();
+    osc1.frequency.value = 800;
+    gain1.gain.setValueAtTime(0.25, now);
+    gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+    osc1.connect(gain1);
+    gain1.connect(audioContext.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.1);
+
+    // Second tone: 500 Hz for 100ms, delayed
+    const osc2 = audioContext.createOscillator();
+    const gain2 = audioContext.createGain();
+    osc2.frequency.value = 500;
+    gain2.gain.setValueAtTime(0.25, now + 0.05);
+    gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+    osc2.connect(gain2);
+    gain2.connect(audioContext.destination);
+    osc2.start(now + 0.05);
+    osc2.stop(now + 0.15);
+
+    await new Promise(resolve => setTimeout(resolve, 150));
+  } catch (err) {
+    console.error('[Audio] Failed to play rejection sound:', err);
+  }
+}
+
+// Play an undo beep (swirling three-tone)
+export async function playUndoSound(): Promise<void> {
+  try {
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const now = audioContext.currentTime;
+
+    // Three descending tones
+    const frequencies = [700, 600, 500];
+    const startTimes = [0, 0.05, 0.1];
+
+    frequencies.forEach((freq, idx) => {
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.2, now + startTimes[idx]);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + startTimes[idx] + 0.08);
+      osc.connect(gain);
+      gain.connect(audioContext.destination);
+      osc.start(now + startTimes[idx]);
+      osc.stop(now + startTimes[idx] + 0.08);
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 180));
+  } catch (err) {
+    console.error('[Audio] Failed to play undo sound:', err);
+  }
+}
