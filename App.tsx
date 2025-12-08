@@ -98,6 +98,8 @@ import {
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
 import { generateSourcePatch, SourcePatch } from './utils/generateSourcePatch';
+import { useErrorPrefetch } from './hooks/useErrorPrefetch';
+import { ErrorSolutionPanel } from './components/ErrorSolutionPanel';
 
 // --- Helper Functions ---
 
@@ -331,6 +333,23 @@ export default function App() {
 
   // Get current active tab
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+
+  // Error prefetch - monitors console for errors and provides solutions
+  const [errorPanelVisible, setErrorPanelVisible] = useState(false);
+  const { errors, isSearching, clearErrors, removeError, searchForSolution } = useErrorPrefetch({
+    onErrorDetected: (error) => {
+      console.log('[App] Error detected:', error.category, '-', error.message.substring(0, 100));
+      // Auto-show panel on critical errors
+      if (error.isCritical) {
+        setErrorPanelVisible(true);
+      }
+    },
+    onSolutionFound: (error) => {
+      console.log('[App] Solution found for:', error.category);
+    },
+    enableAutoSearch: true,
+    debounceMs: 1000,
+  });
 
   // Tab management functions
   const handleNewTab = useCallback((type: 'browser' | 'kanban' | 'todos' | 'notes' = 'browser') => {
@@ -8855,6 +8874,31 @@ If you're not sure what the user wants, ask for clarification.
             setShowMgrepOnboarding(false)
           }}
         />
+      )}
+
+      {/* Error Solution Panel - shows detected errors with auto-prefetched solutions */}
+      <ErrorSolutionPanel
+        errors={errors}
+        isVisible={errorPanelVisible}
+        onToggle={() => setErrorPanelVisible(!errorPanelVisible)}
+        onRemoveError={removeError}
+        onSearchForSolution={searchForSolution}
+        onClearAll={clearErrors}
+      />
+
+      {/* Error Badge in Tab Bar - quick access to error count */}
+      {errors.length > 0 && (
+        <button
+          className="fixed top-12 right-6 z-40 px-3 py-1.5 rounded-full text-xs font-semibold transition-all hover:scale-105"
+          onClick={() => setErrorPanelVisible(!errorPanelVisible)}
+          style={{
+            backgroundColor: errors.some(e => e.isCritical) ? '#ef4444' : '#f59e0b',
+            color: 'white'
+          }}
+          title={`${errors.length} error${errors.length !== 1 ? 's' : ''} detected`}
+        >
+          {errors.length > 0 && errors.some(e => e.solution) && '✓'} {errors.length}
+        </button>
       )}
 
       </div>
