@@ -9,74 +9,60 @@ import { useCallback, useRef, useState } from 'react'
 
 // Element registry - maps semantic names to actual selectors
 const ELEMENT_REGISTRY: Record<string, { selector: string; description: string; action?: string }> = {
-  // Main controls
+  // Main controls (ControlTray)
   'connect-button': {
-    selector: '[data-control="connect"]',
-    description: 'Connect/disconnect voice streaming',
+    selector: '[data-control-id="connect-button"]',
+    description: 'Start voice streaming with AI',
+    action: 'click'
+  },
+  'disconnect-button': {
+    selector: '[data-control-id="disconnect-button"]',
+    description: 'Stop voice streaming',
     action: 'click'
   },
   'video-button': {
-    selector: '[data-control="video"]',
+    selector: '[data-control-id="video-button"]',
     description: 'Toggle video/camera feed',
     action: 'click'
   },
-  'screen-share-button': {
-    selector: '[data-control="screen"]',
+  'screen-button': {
+    selector: '[data-control-id="screen-button"]',
     description: 'Toggle screen sharing',
     action: 'click'
   },
-  'settings-button': {
-    selector: '[data-control="settings"]',
-    description: 'Open settings dialog',
-    action: 'click'
-  },
 
-  // Inspector tools
+  // Inspector tools (App toolbar)
   'inspector-button': {
-    selector: '[data-tool="inspector"]',
+    selector: '[data-control-id="inspector-button"]',
     description: 'Toggle element inspector mode - select elements on page',
     action: 'click'
   },
-  'screenshot-button': {
-    selector: '[data-tool="screenshot"]',
-    description: 'Take screenshot of selected area',
+  'move-button': {
+    selector: '[data-control-id="move-button"]',
+    description: 'Toggle move/resize mode for elements',
+    action: 'click'
+  },
+  'devtools-button': {
+    selector: '[data-control-id="devtools-button"]',
+    description: 'Open browser DevTools for the webview',
     action: 'click'
   },
 
   // Chat area
   'chat-input': {
-    selector: '[data-input="chat"]',
-    description: 'Main chat input field',
+    selector: '[data-control-id="chat-input"]',
+    description: 'Main chat input field - type messages here',
     action: 'focus'
   },
   'send-button': {
-    selector: '[data-action="send"]',
-    description: 'Send chat message',
-    action: 'click'
-  },
-
-  // Model selector
-  'model-selector': {
-    selector: '[data-control="model-select"]',
-    description: 'Dropdown to select AI model',
-    action: 'click'
-  },
-
-  // Tab controls
-  'browser-tab': {
-    selector: '[data-tab="browser"]',
-    description: 'Browser/preview tab',
-    action: 'click'
-  },
-  'code-tab': {
-    selector: '[data-tab="code"]',
-    description: 'Code editor tab',
+    selector: '[data-control-id="send-button"]',
+    description: 'Send chat message to AI',
     action: 'click'
   },
 
   // URL bar
   'url-bar': {
-    selector: '[data-input="url"]',
+    selector: '[data-control-id="url-bar"]',
     description: 'URL input for navigation',
     action: 'focus'
   },
