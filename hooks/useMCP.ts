@@ -501,14 +501,20 @@ export function useMCP(options: UseMCPOptions = {}): UseMCPReturn {
     }
 
     try {
-      const tools = allTools.filter(t => t.serverId === allTools[0]?.serverId)
+      // Compute allTools here to avoid temporal dead zone
+      const relevantTools = Object.entries(servers).flatMap(([serverId, server]) =>
+        server.status === 'connected'
+          ? server.tools.map(tool => ({ ...tool, serverId }))
+          : []
+      )
+      const tools = relevantTools.filter(t => t.serverId === relevantTools[0]?.serverId)
       const scored = await window.electronAPI.mcp.scoreToolRelevance(tools, context)
       return scored.sort((a, b) => b.relevanceScore - a.relevanceScore).slice(0, limit)
     } catch (err) {
       console.error('[useMCP] Failed to get relevant tools:', err)
       return []
     }
-  }, [allTools])
+  }, [servers])
 
   /**
    * Track tool usage for analytics

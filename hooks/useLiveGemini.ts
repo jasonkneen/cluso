@@ -434,7 +434,7 @@ This reverts the application to the state before the last change was applied.`,
   },
 };
 
-export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, onOpenItem, onOpenFile, onOpenFolder, onBrowserBack, onCloseBrowser, selectedElement, projectFolder, currentUrl, googleApiKey }: UseLiveGeminiParams) {
+export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, onOpenItem, onOpenFile, onOpenFolder, onBrowserBack, onCloseBrowser, onApproveChange, onRejectChange, onUndoChange, selectedElement, projectFolder, currentUrl, googleApiKey }: UseLiveGeminiParams) {
   const [streamState, setStreamState] = useState<StreamState>({
     isConnected: false,
     isStreaming: false,
