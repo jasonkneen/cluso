@@ -15,6 +15,7 @@ const backgroundValidator = require('./background-validator.cjs')
 const agentTodos = require('./agent-todos.cjs')
 const lsp = require('./lsp-bridge.cjs')
 const mgrep = require('./mgrep.cjs')
+const backupManager = require('./backup-manager.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -1152,7 +1153,74 @@ function registerGitHandlers() {
   ipcMain.handle('git:stashPop', async () => {
     return gitExecSafe(['stash', 'pop'])
   })
+}
 
+// ==========================================
+// Backup/Recovery IPC Handlers
+// ==========================================
+function registerBackupHandlers() {
+  ipcMain.handle('backup:create', async (_event, filePath, description) => {
+    try {
+      const result = await backupManager.createBackup(filePath, description)
+      return { success: true, ...result }
+    } catch (error) {
+      console.error('[Backup] Create backup error:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to create backup' }
+    }
+  })
+
+  ipcMain.handle('backup:restore', async (_event, filePath, backupId) => {
+    try {
+      const result = await backupManager.restoreBackup(filePath, backupId)
+      return { success: true, ...result }
+    } catch (error) {
+      console.error('[Backup] Restore backup error:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to restore backup' }
+    }
+  })
+
+  ipcMain.handle('backup:list', async (_event, filePath) => {
+    try {
+      const result = await backupManager.listBackups(filePath)
+      return { success: true, ...result }
+    } catch (error) {
+      console.error('[Backup] List backups error:', error)
+      return { success: false, backups: [], error: error instanceof Error ? error.message : 'Failed to list backups' }
+    }
+  })
+
+  ipcMain.handle('backup:get-content', async (_event, filePath, backupId) => {
+    try {
+      const result = await backupManager.getBackupContent(filePath, backupId)
+      return { success: true, ...result }
+    } catch (error) {
+      console.error('[Backup] Get backup content error:', error)
+      return { success: false, content: '', error: error instanceof Error ? error.message : 'Failed to get backup content' }
+    }
+  })
+
+  ipcMain.handle('backup:delete', async (_event, filePath, backupId) => {
+    try {
+      const result = await backupManager.deleteBackup(filePath, backupId)
+      return { success: true, ...result }
+    } catch (error) {
+      console.error('[Backup] Delete backup error:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to delete backup' }
+    }
+  })
+
+  ipcMain.handle('backup:cleanup', async () => {
+    try {
+      const result = await backupManager.cleanupAllBackups()
+      return { success: true, ...result }
+    } catch (error) {
+      console.error('[Backup] Cleanup error:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to cleanup backups' }
+    }
+  })
+}
+
+function registerGitFileHandlers() {
   // File operations handlers
   ipcMain.handle('files:readFile', async (event, filePath) => {
     try {
@@ -3193,6 +3261,8 @@ app.whenReady().then(async () => {
   registerHandlers()
   registerWindowHandlers()  // Multi-window support
   registerGitHandlers()
+  registerBackupHandlers()  // Backup/recovery system
+  registerGitFileHandlers()  // File operations
   registerOAuthHandlers()
   registerCodexHandlers()
   registerClaudeCodeHandlers()
