@@ -1175,15 +1175,15 @@ export function SettingsDialog({
             {/* OAuth Code Input (shown when awaiting code) */}
             {awaitingOAuthCode && (
               <div className={`p-4 rounded-xl border ${
-                isDarkMode ? 'border-purple-500/30 bg-purple-500/10' : 'border-purple-200 bg-purple-50'
+                isDarkMode ? 'border-blue-500/30 bg-blue-500/10' : 'border-blue-200 bg-blue-50'
               }`}>
                 <div className="flex items-center gap-2 mb-3">
-                  <Key size={16} className={isDarkMode ? 'text-purple-400' : 'text-purple-600'} />
-                  <span className={`text-sm font-medium ${isDarkMode ? 'text-purple-300' : 'text-purple-700'}`}>
+                  <Key size={16} className={isDarkMode ? 'text-blue-400' : 'text-blue-600'} />
+                  <span className={`text-sm font-medium ${isDarkMode ? 'text-blue-300' : 'text-blue-700'}`}>
                     Enter OAuth Code
                   </span>
                 </div>
-                <p className={`text-xs mb-3 ${isDarkMode ? 'text-purple-400' : 'text-purple-600'}`}>
+                <p className={`text-xs mb-3 ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
                   A browser window opened. After authorizing, copy the code and paste it here.
                 </p>
                 <div className="flex gap-2">
@@ -1351,14 +1351,14 @@ export function SettingsDialog({
 
                 <div className={`p-4 rounded-xl border ${
                   claudeCodeStatus.authenticated
-                    ? isDarkMode ? 'border-purple-500/30 bg-purple-500/10' : 'border-purple-200 bg-purple-50'
+                    ? isDarkMode ? 'border-blue-500/30 bg-blue-500/10' : 'border-blue-200 bg-blue-50'
                     : isDarkMode ? 'border-neutral-700 bg-neutral-800/50' : 'border-stone-200 bg-stone-50'
                 }`}>
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
                         claudeCodeStatus.authenticated
-                          ? 'bg-purple-500/20 text-purple-500'
+                          ? 'bg-blue-500/20 text-blue-500'
                           : isDarkMode ? 'bg-neutral-700 text-neutral-400' : 'bg-stone-200 text-stone-400'
                       }`}>
                         <Sparkles size={16} />
@@ -1374,8 +1374,8 @@ export function SettingsDialog({
                     </div>
                     {claudeCodeStatus.authenticated && (
                       <div className="flex items-center gap-2">
-                        <CheckCircle size={16} className="text-purple-500" />
-                        <span className={`text-xs ${isDarkMode ? 'text-purple-400' : 'text-purple-600'}`}>
+                        <CheckCircle size={16} className="text-blue-500" />
+                        <span className={`text-xs ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
                           Connected
                         </span>
                       </div>
@@ -1456,14 +1456,14 @@ export function SettingsDialog({
 
                 <div className={`p-4 rounded-xl border ${
                   codexStatus.authenticated
-                    ? isDarkMode ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-emerald-200 bg-emerald-50'
+                    ? isDarkMode ? 'border-blue-500/30 bg-blue-500/10' : 'border-blue-200 bg-blue-50'
                     : isDarkMode ? 'border-neutral-700 bg-neutral-800/50' : 'border-stone-200 bg-stone-50'
                 }`}>
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
                         codexStatus.authenticated
-                          ? 'bg-emerald-500/20 text-emerald-500'
+                          ? 'bg-blue-500/20 text-blue-500'
                           : isDarkMode ? 'bg-neutral-700 text-neutral-400' : 'bg-stone-200 text-stone-400'
                       }`}>
                         <Zap size={16} />
@@ -1479,8 +1479,8 @@ export function SettingsDialog({
                     </div>
                     {codexStatus.authenticated && (
                       <div className="flex items-center gap-2">
-                        <CheckCircle size={16} className="text-emerald-500" />
-                        <span className={`text-xs ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                        <CheckCircle size={16} className="text-blue-500" />
+                        <span className={`text-xs ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>
                           Connected
                         </span>
                       </div>
