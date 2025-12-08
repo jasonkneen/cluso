@@ -1263,9 +1263,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
 
         {/* Hero Section */}
         <section className="hero">
-          <a href="#downloads" className="hero-badge" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <a href="https://calendly.com/jasonkneen/15min" target="_blank" rel="noopener noreferrer" className="hero-badge" style={{ textDecoration: 'none', color: 'inherit' }}>
             <span className="dot"></span>
-            <span>Download 3 Day Trial</span>
+            <span>Book a Demo now</span>
           </a>
 
           <h1>
