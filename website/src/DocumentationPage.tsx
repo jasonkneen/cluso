@@ -576,43 +576,142 @@ export const DocumentationPage: React.FC<DocumentationPageProps> = ({ isDark: in
 
             <section className="docs-section" id="interface">
               <h3>Interface Overview</h3>
-              <p>The Cluso interface consists of several key components:</p>
+              <p>The Cluso interface is designed for efficient frontend development with both visual and voice-driven workflows:</p>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Main Components</strong></p>
               <ul>
-                <li><strong>Inspector Panel:</strong> Select and inspect UI elements</li>
-                <li><strong>AI Chat Window:</strong> Communicate with the AI assistant</li>
-                <li><strong>Preview Panel:</strong> Review changes before applying</li>
-                <li><strong>Code Editor:</strong> View and edit the generated code</li>
-                <li><strong>Settings:</strong> Configure application preferences</li>
+                <li><strong>Browser Webview:</strong> Embedded browser that loads your project or any website for inspection</li>
+                <li><strong>AI Chat Panel:</strong> Text-based chat for complex queries and code generation</li>
+                <li><strong>Voice Control:</strong> Microphone button for hands-free voice commands</li>
+                <li><strong>Inspector Tool:</strong> Click to select and highlight page elements</li>
+                <li><strong>File Browser:</strong> Navigate your project files with voice or clicks</li>
+              </ul>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Tab System</strong></p>
+              <ul>
+                <li><strong>Browser Tabs:</strong> Multiple browser windows for different pages/sites</li>
+                <li><strong>Kanban Board:</strong> Track tasks and project progress</li>
+                <li><strong>Todo List:</strong> Quick task management</li>
+                <li><strong>Notes:</strong> Scratch pad for ideas and snippets</li>
+              </ul>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Control Bar</strong></p>
+              <ul>
+                <li><strong>Navigation:</strong> Back, forward, reload, URL bar</li>
+                <li><strong>Media Controls:</strong> Microphone, camera, screen share toggles</li>
+                <li><strong>Model Selector:</strong> Choose AI provider (Gemini, Claude, GPT)</li>
+                <li><strong>Settings:</strong> Configure API keys, theme, preferences</li>
+              </ul>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Responsive Views</strong></p>
+              <ul>
+                <li><strong>Desktop:</strong> Full browser view (default)</li>
+                <li><strong>Tablet:</strong> 768px width preview</li>
+                <li><strong>Mobile:</strong> 375px width preview</li>
               </ul>
             </section>
 
             <section className="docs-section" id="element-selection">
               <h3>Element Selection</h3>
-              <p>The element selection tool allows you to identify and target specific UI components:</p>
-              <div className="code-block">
-                Click Inspector → Point to element → View HTML/CSS details
-              </div>
-              <p>Once selected, you can:</p>
+              <p>Select elements visually or with voice commands to provide context for AI-powered editing:</p>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Selection Methods</strong></p>
               <ul>
-                <li>View the element's HTML structure</li>
-                <li>See applied CSS styles</li>
-                <li>Understand layout and positioning</li>
-                <li>Pass context to the AI assistant</li>
+                <li><strong>Click Inspector:</strong> Click the inspector icon, then click any element on the page</li>
+                <li><strong>Voice Command:</strong> Say "select the button" or "highlight the image"</li>
+                <li><strong>CSS Selector:</strong> AI can target elements using class names, IDs, or attributes</li>
               </ul>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Element Information</strong></p>
+              <p>When you select an element, Cluso captures:</p>
+              <ul>
+                <li><strong>HTML Tag:</strong> Element type (button, div, img, etc.)</li>
+                <li><strong>Classes & IDs:</strong> CSS identifiers for targeting</li>
+                <li><strong>Text Content:</strong> The element's visible text</li>
+                <li><strong>Computed Styles:</strong> All applied CSS properties</li>
+                <li><strong>Source Location:</strong> File path and line number (for local projects)</li>
+                <li><strong>Outer HTML:</strong> The element's full markup</li>
+              </ul>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Multiple Matches</strong></p>
+              <p>When your selector matches multiple elements:</p>
+              <ol>
+                <li>Cluso highlights all matching elements with numbered badges</li>
+                <li>You can say "the second one" or "number 3" to pick one</li>
+                <li>Or refine your selection with a more specific command</li>
+              </ol>
+
+              <div className="code-block">
+"Select the button" → 5 buttons found
+"The one that says Download" → Specific button selected
+              </div>
             </section>
 
             <section className="docs-section" id="voice-commands">
               <h3>Voice Commands</h3>
-              <p>Control Cluso hands-free using voice commands. Click the microphone icon and speak naturally:</p>
+              <p>Control Cluso hands-free using natural voice commands. Click the microphone icon to start speaking. Cluso uses Gemini's native audio model for real-time understanding.</p>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Element Selection & Inspection</strong></p>
               <ul>
-                <li>"Make this button bigger"</li>
-                <li>"Change the color to blue"</li>
-                <li>"Add a hover animation"</li>
-                <li>"Center this text"</li>
-                <li>"Apply a shadow effect"</li>
+                <li>"Highlight the buttons" - Select all buttons on the page</li>
+                <li>"Select the image" - Find and select images</li>
+                <li>"Show me the headings" - Highlight heading elements</li>
+                <li>"What elements are on this page?" - Discover available elements</li>
               </ul>
-              <div className="info-box">
-                <strong>ℹ️ Note:</strong> Voice commands require microphone access. Make sure to grant permissions when prompted.
+
+              <p style={{ marginTop: '1.5rem' }}><strong>File Browser</strong></p>
+              <ul>
+                <li>"Show me the files" / "List files" - Open file browser overlay</li>
+                <li>"Open number 3" / "Open three" - Open numbered item from list</li>
+                <li>"Open the src folder" / "Go into hooks" - Navigate to folder by name</li>
+                <li>"Open LandingPage.tsx" - Open specific file by name</li>
+                <li>"Go back" - Navigate back in file browser</li>
+                <li>"Close that" / "Clear" / "Dismiss" - Close the file browser</li>
+              </ul>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Page Navigation</strong></p>
+              <ul>
+                <li>"Click that" / "Click the download button" - Click elements</li>
+                <li>"Go back" / "Go forward" / "Reload" - Browser navigation</li>
+                <li>"Scroll down" / "Scroll to top" - Page scrolling</li>
+                <li>"Navigate to google.com" - Go to a URL</li>
+              </ul>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Confirmation & Selection</strong></p>
+              <ul>
+                <li>"Yes" / "Approve" / "Do it" / "Go ahead" - Confirm action</li>
+                <li>"No" / "Reject" / "Cancel" / "Wrong" - Cancel action</li>
+                <li>"The second one" / "Number 3" - Choose from multiple matches</li>
+              </ul>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>UI Editing</strong></p>
+              <ul>
+                <li>"Make it bigger" / "Increase the font size"</li>
+                <li>"Change the color to blue" / "Make it red"</li>
+                <li>"Add a shadow" / "Add some padding"</li>
+                <li>"Change the text to Download Now"</li>
+                <li>"Make it bold" / "Center this"</li>
+              </ul>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Code Operations</strong></p>
+              <ul>
+                <li>"Save the changes" - Write modifications to source file</li>
+                <li>"Read the file" - View source code</li>
+                <li>"Show me the code" - Display current element's code</li>
+              </ul>
+
+              <div className="info-box" style={{ marginTop: '1.5rem' }}>
+                <strong>💡 Tips:</strong>
+                <ul style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                  <li>Speak naturally - the AI understands context and intent</li>
+                  <li>You can combine commands: "Make it red and bigger"</li>
+                  <li>If multiple elements match, you'll be asked to confirm which one</li>
+                  <li>Enable camera/screen share for visual context awareness</li>
+                </ul>
+              </div>
+
+              <div className="info-box" style={{ marginTop: '1rem' }}>
+                <strong>ℹ️ Requirements:</strong> Voice commands require microphone access and a Google Gemini API key. Make sure to grant permissions when prompted.
               </div>
             </section>
 
@@ -624,24 +723,67 @@ export const DocumentationPage: React.FC<DocumentationPageProps> = ({ isDark: in
 
             <section className="docs-section" id="ai-editing">
               <h3>AI-Powered Editing</h3>
-              <p>Leverage artificial intelligence to generate and modify code intelligently:</p>
+              <p>Leverage artificial intelligence to generate and modify code intelligently. Cluso supports multiple AI providers for different use cases:</p>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Supported AI Providers</strong></p>
               <ul>
-                <li><strong>Context-Aware:</strong> AI understands your selected element and surrounding context</li>
-                <li><strong>Natural Language:</strong> Describe changes in plain English</li>
-                <li><strong>Smart Suggestions:</strong> Get suggestions based on best practices</li>
-                <li><strong>Multi-language:</strong> Works with HTML, CSS, JavaScript, and more</li>
+                <li><strong>Google Gemini:</strong> Voice interaction, fast UI updates, visual understanding</li>
+                <li><strong>Anthropic Claude:</strong> Complex code generation, reasoning, multi-step tasks</li>
+                <li><strong>OpenAI GPT:</strong> Code completion, general assistance</li>
               </ul>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Editing Capabilities</strong></p>
+              <ul>
+                <li><strong>Instant CSS Changes:</strong> Colors, fonts, spacing, shadows, animations</li>
+                <li><strong>Text Modifications:</strong> Change button labels, headings, content</li>
+                <li><strong>Layout Adjustments:</strong> Flexbox, grid, positioning, alignment</li>
+                <li><strong>Source File Patching:</strong> Save changes directly to your project files</li>
+              </ul>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>How It Works</strong></p>
+              <ol>
+                <li>Select an element using the inspector or voice command</li>
+                <li>Describe your desired change in natural language</li>
+                <li>AI analyzes the element's HTML, CSS, and context</li>
+                <li>Preview the change in real-time</li>
+                <li>Approve to save changes to your source files</li>
+              </ol>
+
+              <div className="info-box" style={{ marginTop: '1.5rem' }}>
+                <strong>🔑 Bring Your Own Keys:</strong> Cluso works with your own API keys. Your code stays on your machine, and you control the AI providers you use.
+              </div>
             </section>
 
             <section className="docs-section" id="live-preview">
               <h3>Live Preview</h3>
-              <p>See your changes instantly with live preview:</p>
+              <p>See your changes instantly in the embedded browser before committing them to your source files:</p>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Preview Features</strong></p>
               <ul>
-                <li>Real-time rendering of modifications</li>
-                <li>Side-by-side before/after comparison</li>
-                <li>Browser compatibility checking</li>
-                <li>Responsive design preview</li>
+                <li><strong>Instant Updates:</strong> CSS and text changes apply immediately to the page</li>
+                <li><strong>Non-Destructive:</strong> Preview changes before saving to source</li>
+                <li><strong>Hot Reload:</strong> Works with Vite, Next.js, and other dev servers</li>
+                <li><strong>Any Website:</strong> Inspect and modify any public website</li>
               </ul>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Responsive Testing</strong></p>
+              <ul>
+                <li>Switch between desktop, tablet, and mobile viewport sizes</li>
+                <li>Test responsive breakpoints without leaving Cluso</li>
+                <li>Inspect how elements behave at different widths</li>
+              </ul>
+
+              <p style={{ marginTop: '1.5rem' }}><strong>Workflow</strong></p>
+              <ol>
+                <li>Make a change via voice or chat</li>
+                <li>See the change applied instantly in the webview</li>
+                <li>Say "yes" to save, or "no" to discard and try again</li>
+                <li>Saved changes are written directly to your source files</li>
+              </ol>
+
+              <div className="info-box" style={{ marginTop: '1.5rem' }}>
+                <strong>💡 Pro Tip:</strong> Use "show me the files" to browse your project, then open a file to see its source code while previewing changes in the browser.
+              </div>
             </section>
 
             <section className="docs-section soon-section" id="code-export">

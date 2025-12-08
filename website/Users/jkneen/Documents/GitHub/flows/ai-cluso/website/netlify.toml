@@ -1,9 +1,0 @@
-[build]
-  command = "npm run build"
-  functions = "netlify/functions"
-  publish = "dist"
-
-[env]
-  [env.production]
-    [env.production.context.deploy-preview]
-      environment = { NODE_ENV = "production" }
