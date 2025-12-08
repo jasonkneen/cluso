@@ -58,12 +58,13 @@ const handler: Handler = async (event) => {
       };
     }
 
-    // Save to Google Sheets (fire and forget - don't block email sending)
-    saveToGoogleSheets(email);
+    // Save to Google Sheets
+    await saveToGoogleSheets(email);
 
-    // Send email using Resend
+    // Send email using Resend (use verified domain or Resend's test sender)
+    const fromAddress = process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev";
     const response = await resend.emails.send({
-      from: "noreply@cluso.dev",
+      from: fromAddress,
       to: email,
       subject: "Welcome to the Cluso Waitlist!",
       html: `
