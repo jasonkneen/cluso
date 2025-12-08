@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { X, Lightbulb } from 'lucide-react'
+import { Lightbulb, ChevronDown } from 'lucide-react'
 import { SteeringQuestion } from '../hooks/useSteeringQuestions'
 
 interface SteeringQuestionsProps {
@@ -8,6 +8,7 @@ interface SteeringQuestionsProps {
   onDismissQuestion: (questionId: string) => void
   isDarkMode?: boolean
   isVisible?: boolean
+  isEmptyChat?: boolean
 }
 
 export const SteeringQuestions: React.FC<SteeringQuestionsProps> = ({
@@ -16,6 +17,7 @@ export const SteeringQuestions: React.FC<SteeringQuestionsProps> = ({
   onDismissQuestion,
   isDarkMode = true,
   isVisible = true,
+  isEmptyChat = false,
 }) => {
   const [animatingOut, setAnimatingOut] = useState<Set<string>>(new Set())
   const [displayedQuestions, setDisplayedQuestions] = useState<SteeringQuestion[]>([])
@@ -37,70 +39,54 @@ export const SteeringQuestions: React.FC<SteeringQuestionsProps> = ({
   }
 
   const handleSelect = (question: SteeringQuestion) => {
-    setAnimatingOut(prev => new Set([...prev, question.id]))
-    setTimeout(() => {
-      onSelectQuestion(question.text)
-    }, 200)
+    onSelectQuestion(question.text)
+  }
+
+  const handleDismissAll = () => {
+    // Just hide - no annoying collapsed badge
+    setDisplayedQuestions([])
   }
 
   return (
     <div
-      className={`px-3 py-2 border-t transition-all duration-200 ${
+      className={`p-3 rounded-xl shadow-lg transition-all duration-300 ${
         isDarkMode
-          ? 'border-neutral-600 bg-neutral-800/50'
-          : 'border-stone-200 bg-stone-50/50'
+          ? 'bg-neutral-800/95 border border-neutral-700 backdrop-blur-sm'
+          : 'bg-white/95 border border-stone-200 backdrop-blur-sm'
       }`}
     >
-      <div className="flex items-center gap-2 mb-2">
-        <Lightbulb
-          size={14}
-          className={isDarkMode ? 'text-amber-400' : 'text-amber-600'}
-        />
-        <span
-          className={`text-xs font-medium ${
-            isDarkMode ? 'text-neutral-400' : 'text-stone-500'
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Lightbulb size={14} className={isDarkMode ? 'text-amber-400' : 'text-amber-600'} />
+          <span className={`text-xs font-medium ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+            Suggestions
+          </span>
+        </div>
+        <button
+          onClick={handleDismissAll}
+          className={`p-1 rounded-md transition-colors ${
+            isDarkMode ? 'hover:bg-neutral-700 text-neutral-500' : 'hover:bg-stone-100 text-stone-400'
           }`}
+          title="Collapse"
         >
-          Suggested questions
-        </span>
+          <ChevronDown size={14} />
+        </button>
       </div>
-
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         {displayedQuestions.map(question => (
-          <div
+          <button
             key={question.id}
-            className={`transition-all duration-200 overflow-hidden ${
-              animatingOut.has(question.id)
-                ? 'opacity-0 scale-95 w-0'
-                : 'opacity-100 scale-100'
+            onClick={() => handleSelect(question)}
+            className={`px-2.5 py-1 rounded-md text-xs transition-all duration-200 ${
+              animatingOut.has(question.id) ? 'opacity-0 scale-95' : 'opacity-100 scale-100'
+            } ${
+              isDarkMode
+                ? 'bg-neutral-700/80 text-neutral-300 hover:bg-neutral-600 hover:text-white'
+                : 'bg-stone-100 text-stone-600 hover:bg-stone-200 hover:text-stone-800'
             }`}
           >
-            <button
-              onClick={() => handleSelect(question)}
-              className={`group relative flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-200 whitespace-nowrap ${
-                isDarkMode
-                  ? 'bg-neutral-700 text-neutral-200 border border-neutral-600 hover:bg-neutral-600 hover:border-neutral-500'
-                  : 'bg-stone-100 text-stone-700 border border-stone-200 hover:bg-stone-200 hover:border-stone-300'
-              }`}
-              title={question.text}
-            >
-              <span className="truncate max-w-[180px]">{question.text}</span>
-
-              {/* Dismiss button (appears on hover) */}
-              <button
-                onClick={e => {
-                  e.stopPropagation()
-                  handleDismiss(question.id)
-                }}
-                className={`ml-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-0.5 rounded hover:bg-red-500/20 ${
-                  isDarkMode ? 'text-neutral-400 hover:text-red-400' : 'text-stone-400 hover:text-red-600'
-                }`}
-                title="Dismiss this question"
-              >
-                <X size={12} />
-              </button>
-            </button>
-          </div>
+            {question.text}
+          </button>
         ))}
       </div>
     </div>

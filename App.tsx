@@ -18,7 +18,8 @@ import { Tool, ToolContent, ToolHeader, ToolOutput } from '@/components/ai-eleme
 import { MessageResponse } from '@/components/ai-elements/message';
 import { useAIChat, getProviderForModel, ProviderConfig, MCPToolDefinition, toCoreMessages } from './hooks/useAIChat';
 import type { CoreMessage } from './hooks/useAIChat';
-import { useCodingAgent, CodingContext, FileModificationEvent } from './hooks/useCodingAgent';
+import { useCodingAgent, CodingContext, FileModificationEvent, ClarifyingQuestionData } from './hooks/useCodingAgent';
+import { ClarifyingQuestion } from './components/ClarifyingQuestion';
 import { useMCP } from './hooks/useMCP';
 import { useSelectorAgent } from './hooks/useSelectorAgent';
 import { useToolTracker } from './hooks/useToolTracker';
@@ -738,6 +739,9 @@ export default function App() {
   const selectedElementRef = useRef<SelectedElement | null>(null);
   useEffect(() => { selectedElementRef.current = selectedElement; }, [selectedElement]);
 
+  // Steering Questions - must be before the useEffect that uses refreshQuestions
+  const { questions, dismissQuestion, selectQuestion, refreshQuestions } = useSteeringQuestions();
+
   // Update steering questions based on context
   useEffect(() => {
     refreshQuestions({
@@ -825,9 +829,6 @@ export default function App() {
   // Git State
   const git = useGit();
   const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
-
-  // Steering Questions State
-  const { questions, dismissQuestion, selectQuestion, refreshQuestions } = useSteeringQuestions();
 
   // Tool Execution Tracking
   const toolTracker = useToolTracker();
@@ -1222,6 +1223,36 @@ export default function App() {
     }))
   }, [mcpTools])
 
+  // Clarifying Questions State
+  const [pendingClarifyingQuestion, setPendingClarifyingQuestion] = useState<ClarifyingQuestionData | null>(null)
+  const clarifyingQuestionResolverRef = useRef<((response: string | string[]) => void) | null>(null)
+
+  // Handler for clarifying questions from AI
+  const handleAskClarifyingQuestion = useCallback((question: ClarifyingQuestionData): Promise<string | string[]> => {
+    return new Promise((resolve) => {
+      clarifyingQuestionResolverRef.current = resolve
+      setPendingClarifyingQuestion(question)
+    })
+  }, [])
+
+  // Handle clarifying question submission
+  const handleClarifyingQuestionSubmit = useCallback((questionId: string, response: string | string[]) => {
+    if (clarifyingQuestionResolverRef.current) {
+      clarifyingQuestionResolverRef.current(response)
+      clarifyingQuestionResolverRef.current = null
+    }
+    setPendingClarifyingQuestion(null)
+  }, [])
+
+  // Handle clarifying question skip
+  const handleClarifyingQuestionSkip = useCallback((questionId: string) => {
+    if (clarifyingQuestionResolverRef.current) {
+      clarifyingQuestionResolverRef.current('skipped')
+      clarifyingQuestionResolverRef.current = null
+    }
+    setPendingClarifyingQuestion(null)
+  }, [])
+
   // Initialize Coding Agent hook with MCP tools
   const {
     context: codingContext,
@@ -1238,6 +1269,7 @@ export default function App() {
       // Delegate to ref (allows late binding after addEditedFile is defined)
       fileModificationHandlerRef.current(event);
     }, []),
+    onAskClarifyingQuestion: handleAskClarifyingQuestion,
   });
 
   // Stash Confirmation Dialog State
@@ -7254,6 +7286,21 @@ If you're not sure what the user wants, ask for clarification.
               ref={messagesContainerRef}
               className="absolute inset-0 overflow-y-auto p-4 space-y-4"
             >
+              {/* Steering Questions - at top of messages */}
+              {questions.length > 0 && (
+                <SteeringQuestions
+                  questions={questions}
+                  onSelectQuestion={(text) => {
+                    setInput(text)
+                    textareaRef.current?.focus()
+                  }}
+                  onDismissQuestion={dismissQuestion}
+                  isDarkMode={isDarkMode}
+                  isVisible={questions.length > 0}
+                  isEmptyChat={messages.length === 0}
+                />
+              )}
+
               {messages.length === 0 && (
                   <div className={`h-full flex items-center justify-center text-sm ${isDarkMode ? 'text-neutral-500' : 'text-stone-300'}`}>
                       Start a conversation...
@@ -7318,6 +7365,16 @@ If you're not sure what the user wants, ask for clarification.
                       </div>
                   </div>
               ))}
+
+              {/* Clarifying Question from AI */}
+              {pendingClarifyingQuestion && (
+                <ClarifyingQuestion
+                  data={pendingClarifyingQuestion}
+                  onSubmit={handleClarifyingQuestionSubmit}
+                  onSkip={handleClarifyingQuestionSkip}
+                  isDarkMode={isDarkMode}
+                />
+              )}
 
               {/* Streaming Message Display */}
               {isStreaming && streamingMessage && (
@@ -8216,18 +8273,6 @@ If you're not sure what the user wants, ask for clarification.
                           </div>
                       )}
                   </div>
-
-                  {/* Steering Questions - suggests contextual questions to guide users */}
-                  <SteeringQuestions
-                    questions={questions}
-                    onSelectQuestion={(text) => {
-                      setInput(text)
-                      textareaRef.current?.focus()
-                    }}
-                    onDismissQuestion={dismissQuestion}
-                    isDarkMode={isDarkMode}
-                    isVisible={questions.length > 0 && messages.length < 5}
-                  />
 
                   {/* Input Toolbar */}
                   <div className={`flex items-center justify-between px-2 py-1.5 border-t ${isDarkMode ? 'border-neutral-600' : 'border-stone-100'}`}>

@@ -67,6 +67,7 @@ Your tools:
 - semantic_search(query): AI-powered search - **USE THIS FOR ALL CODE SEARCHES**
 - search_in_files(pattern, path): Grep (only for exact regex like "TODO:|FIXME:")
 - find_files(pattern, path): Glob (only for filenames like "*.config.js")
+- ask_clarifying_question(question, type, options?): Ask user for clarification with structured input
 
 ${context.projectPath ? `Project: ${context.projectPath}` : ''}
 
@@ -111,6 +112,7 @@ Your tools:
 - semantic_search(query): **DEFAULT SEARCH TOOL** - Finds code by meaning, intent, and context
 - search_in_files(pattern, path): Grep (only for exact regex like "TODO:|import.*")
 - find_files(pattern, path): Glob (only for filenames like "*.test.ts")
+- ask_clarifying_question(question, type, options?): Ask user for structured input when you need clarification
 
 ${context.projectPath ? `Project: ${context.projectPath}` : ''}
 ${context.mcpToolCount ? `MCP tools available: ${context.mcpToolCount}` : ''}
@@ -122,7 +124,20 @@ SEARCH STRATEGY:
   - Finding concepts: "state management", "API endpoints"
   - Finding ANYTHING: "Quick start", "navbar component", "config file"
 
-❌ ONLY use search_in_files/find_files when semantic_search says "Index is empty" or for exact regex`)
+❌ ONLY use search_in_files/find_files when semantic_search says "Index is empty" or for exact regex
+
+CLARIFYING QUESTIONS:
+Use ask_clarifying_question when you need user input BEFORE taking action:
+- Ambiguous requests: "Which authentication method: OAuth, JWT, or session-based?"
+- Multiple options: "Should I use React Query or SWR for data fetching?"
+- Confirmation: "This will delete 15 files. Proceed?"
+- Preferences: "What styling approach: Tailwind, CSS modules, or styled-components?"
+
+Types:
+- single-select: User picks ONE option (radio buttons)
+- multi-select: User picks MULTIPLE options (checkboxes)
+- text: Free text input for open-ended questions
+- confirm: Simple yes/no confirmation`)
 
   if (context.selectedElement) {
     parts.push(`
