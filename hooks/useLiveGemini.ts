@@ -745,36 +745,34 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
             }
           },
           onclose: () => {
-            debug("Connection Closed");
-            // Attempt reconnection with exponential backoff
-            if (reconnectAttemptRef.current < maxReconnectAttempts) {
-              const delay = baseReconnectDelay * Math.pow(2, reconnectAttemptRef.current);
-              debugLog.liveGemini.log(`Scheduling reconnect attempt ${reconnectAttemptRef.current + 1}/${maxReconnectAttempts} in ${delay}ms`);
-              reconnectAttemptRef.current++;
-              reconnectTimeoutRef.current = window.setTimeout(() => {
-                debugLog.liveGemini.log('Attempting reconnection...');
-                cleanup(); // Clean up before reconnecting
-                // The user will need to manually reconnect by clicking connect again
-                // We just log the attempt here - full auto-reconnect would require more state management
-              }, delay);
-            } else {
-              debugLog.liveGemini.log('Max reconnect attempts reached');
-              cleanup();
-            }
+            debug("Connection Closed - Auto-reconnecting");
+            // Keep stream open for instant DOM edits and follow-ups
+            // Auto-reconnect immediately to maintain persistent connection
+            debugLog.liveGemini.log('Stream closed, auto-reconnecting to maintain persistent connection...');
+
+            // Reconnect immediately without delay to keep stream open
+            reconnectAttemptRef.current = 0; // Reset counter on close since we auto-reconnect
+            connect().catch(err => {
+              debugLog.liveGemini.error('Auto-reconnect failed:', err);
+              setStreamState(prev => ({ ...prev, error: 'Auto-reconnect failed. Click connect to try again.' }));
+            });
           },
           onerror: (err) => {
             debugLog.liveGemini.error("Connection Error", err);
-            setStreamState(prev => ({ ...prev, error: "Connection error occurred. Will attempt reconnection." }));
-            // Attempt reconnection on error as well
+            // Use exponential backoff for errors (but immediate reconnect for normal close)
             if (reconnectAttemptRef.current < maxReconnectAttempts) {
               const delay = baseReconnectDelay * Math.pow(2, reconnectAttemptRef.current);
-              debugLog.liveGemini.log(`Scheduling reconnect after error, attempt ${reconnectAttemptRef.current + 1}/${maxReconnectAttempts} in ${delay}ms`);
+              debugLog.liveGemini.log(`Error reconnect attempt ${reconnectAttemptRef.current + 1}/${maxReconnectAttempts} in ${delay}ms`);
               reconnectAttemptRef.current++;
               reconnectTimeoutRef.current = window.setTimeout(() => {
-                cleanup();
+                debugLog.liveGemini.log('Attempting reconnect after error...');
+                connect().catch(err => {
+                  debugLog.liveGemini.error('Error reconnect failed:', err);
+                });
               }, delay);
             } else {
               debugLog.liveGemini.log('Max reconnect attempts reached after error');
+              setStreamState(prev => ({ ...prev, error: 'Connection failed. Please try again.' }));
               cleanup();
             }
           }
