@@ -22,6 +22,8 @@ import { useCodingAgent, CodingContext, FileModificationEvent } from './hooks/us
 import { useMCP } from './hooks/useMCP';
 import { useSelectorAgent } from './hooks/useSelectorAgent';
 import { useToolTracker } from './hooks/useToolTracker';
+import { useSteeringQuestions } from './hooks/useSteeringQuestions';
+import { SteeringQuestions } from './components/SteeringQuestions';
 import { generateTurnId } from './utils/turnUtils';
 import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler';
 import { getElectronAPI } from './hooks/useElectronAPI';
@@ -736,6 +738,15 @@ export default function App() {
   const selectedElementRef = useRef<SelectedElement | null>(null);
   useEffect(() => { selectedElementRef.current = selectedElement; }, [selectedElement]);
 
+  // Update steering questions based on context
+  useEffect(() => {
+    refreshQuestions({
+      messages,
+      selectedElement,
+      currentTab: 'chat', // Could expand this to support other tab types
+    });
+  }, [messages, selectedElement, refreshQuestions]);
+
   // Ref to hold file modification handler (allows late binding after addEditedFile is defined)
   const fileModificationHandlerRef = useRef<(event: FileModificationEvent) => void>(() => {});
   const [hoveredElement, setHoveredElement] = useState<{ element: SelectedElement; rect: { top: number; left: number; width: number; height: number } } | null>(null);
@@ -814,6 +825,9 @@ export default function App() {
   // Git State
   const git = useGit();
   const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
+
+  // Steering Questions State
+  const { questions, dismissQuestion, selectQuestion, refreshQuestions } = useSteeringQuestions();
 
   // Tool Execution Tracking
   const toolTracker = useToolTracker();
@@ -8202,6 +8216,18 @@ If you're not sure what the user wants, ask for clarification.
                           </div>
                       )}
                   </div>
+
+                  {/* Steering Questions - suggests contextual questions to guide users */}
+                  <SteeringQuestions
+                    questions={questions}
+                    onSelectQuestion={(text) => {
+                      setInput(text)
+                      textareaRef.current?.focus()
+                    }}
+                    onDismissQuestion={dismissQuestion}
+                    isDarkMode={isDarkMode}
+                    isVisible={questions.length > 0 && messages.length < 5}
+                  />
 
                   {/* Input Toolbar */}
                   <div className={`flex items-center justify-between px-2 py-1.5 border-t ${isDarkMode ? 'border-neutral-600' : 'border-stone-100'}`}>
