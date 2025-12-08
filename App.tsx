@@ -108,6 +108,8 @@ import {
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
 import { generateSourcePatch, SourcePatch } from './utils/generateSourcePatch';
+import { useErrorPrefetch } from './hooks/useErrorPrefetch';
+import { ErrorSolutionPanel } from './components/ErrorSolutionPanel';
 
 // --- Helper Functions ---
 
@@ -341,6 +343,23 @@ export default function App() {
 
   // Get current active tab
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+
+  // Error prefetch - monitors console for errors and provides solutions
+  const [errorPanelVisible, setErrorPanelVisible] = useState(false);
+  const { errors, isSearching, clearErrors, removeError, searchForSolution } = useErrorPrefetch({
+    onErrorDetected: (error) => {
+      console.log('[App] Error detected:', error.category, '-', error.message.substring(0, 100));
+      // Auto-show panel on critical errors
+      if (error.isCritical) {
+        setErrorPanelVisible(true);
+      }
+    },
+    onSolutionFound: (error) => {
+      console.log('[App] Solution found for:', error.category);
+    },
+    enableAutoSearch: true,
+    debounceMs: 1000,
+  });
 
   // Tab management functions
   const handleNewTab = useCallback((type: 'browser' | 'kanban' | 'todos' | 'notes' = 'browser') => {
@@ -855,7 +874,7 @@ export default function App() {
   }
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isSearching, setIsSearching] = useState(false);
+  const [isFileSearching, setIsFileSearching] = useState(false);
   const [showSearchPopover, setShowSearchPopover] = useState(false);
   const [attachedSearchResults, setAttachedSearchResults] = useState<SearchResult[] | null>(null); // Chip state
 
@@ -3804,7 +3823,7 @@ export default function App() {
       return;
     }
 
-    setIsSearching(true);
+    setIsFileSearching(true);
     setSearchQuery(query);
     setShowSearchPopover(true);
     setSearchResults(null);
@@ -3813,9 +3832,9 @@ export default function App() {
       // Format query for error searching
       const searchQuery = `${query.slice(0, 500)} solution fix`;
       console.log('[Search] Searching for:', searchQuery);
-      
+
       const result = await window.electronAPI.aiSdk.webSearch(searchQuery, 5);
-      
+
       if (result.success && result.results) {
         setSearchResults(result.results);
         console.log('[Search] Found', result.results.length, 'results');
@@ -3827,7 +3846,7 @@ export default function App() {
       console.error('[Search] Error:', error);
       setSearchResults([]);
     } finally {
-      setIsSearching(false);
+      setIsFileSearching(false);
     }
   }, []);
 
@@ -7179,7 +7198,7 @@ If you're not sure what the user wants, ask for clarification.
                 <div className="flex items-center gap-2">
                   <Globe size={14} className={isDarkMode ? 'text-blue-400' : 'text-blue-500'} />
                   <span className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`}>
-                    {isSearching ? 'Searching...' : `${searchResults?.length || 0} Results`}
+                    {isFileSearching ? 'Searching...' : `${searchResults?.length || 0} Results`}
                   </span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -7208,7 +7227,7 @@ If you're not sure what the user wants, ask for clarification.
               
               {/* Results */}
               <div className="overflow-y-auto" style={{ maxHeight: '240px' }}>
-                {isSearching ? (
+                {isFileSearching ? (
                   <div className={`flex items-center justify-center py-8 ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
                     <Loader2 size={20} className="animate-spin mr-2" />
                     <span className="text-sm">Searching the web...</span>
@@ -9086,6 +9105,31 @@ If you're not sure what the user wants, ask for clarification.
         totalPatches={pendingPatches.length}
         currentPatchIndex={currentPatchIndex}
       />
+
+      {/* Error Solution Panel - shows detected errors with auto-prefetched solutions */}
+      <ErrorSolutionPanel
+        errors={errors}
+        isVisible={errorPanelVisible}
+        onToggle={() => setErrorPanelVisible(!errorPanelVisible)}
+        onRemoveError={removeError}
+        onSearchForSolution={searchForSolution}
+        onClearAll={clearErrors}
+      />
+
+      {/* Error Badge in Tab Bar - quick access to error count */}
+      {errors.length > 0 && (
+        <button
+          className="fixed top-12 right-6 z-40 px-3 py-1.5 rounded-full text-xs font-semibold transition-all hover:scale-105"
+          onClick={() => setErrorPanelVisible(!errorPanelVisible)}
+          style={{
+            backgroundColor: errors.some(e => e.isCritical) ? '#ef4444' : '#f59e0b',
+            color: 'white'
+          }}
+          title={`${errors.length} error${errors.length !== 1 ? 's' : ''} detected`}
+        >
+          {errors.length > 0 && errors.some(e => e.solution) && '✓'} {errors.length}
+        </button>
+      )}
 
       </div>
     </div>
