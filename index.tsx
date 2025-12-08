@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { ThemeProvider } from './hooks/useTheme';
+import { ControlRegistryProvider } from './components/ui/controllable';
 import { initSourceLocationTracking } from './utils/source-location';
 
 // Initialize source location tracking for inspector
@@ -43,7 +44,9 @@ const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <ThemeProvider>
-      <App />
+      <ControlRegistryProvider>
+        <App />
+      </ControlRegistryProvider>
     </ThemeProvider>
   </React.StrictMode>
 );
