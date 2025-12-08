@@ -852,7 +852,7 @@ export default function App() {
   }
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isSearching, setIsSearching] = useState(false);
+  const [isFileSearching, setIsFileSearching] = useState(false);
   const [showSearchPopover, setShowSearchPopover] = useState(false);
   const [attachedSearchResults, setAttachedSearchResults] = useState<SearchResult[] | null>(null); // Chip state
 
@@ -3704,7 +3704,7 @@ export default function App() {
       return;
     }
 
-    setIsSearching(true);
+    setIsFileSearching(true);
     setSearchQuery(query);
     setShowSearchPopover(true);
     setSearchResults(null);
@@ -3713,9 +3713,9 @@ export default function App() {
       // Format query for error searching
       const searchQuery = `${query.slice(0, 500)} solution fix`;
       console.log('[Search] Searching for:', searchQuery);
-      
+
       const result = await window.electronAPI.aiSdk.webSearch(searchQuery, 5);
-      
+
       if (result.success && result.results) {
         setSearchResults(result.results);
         console.log('[Search] Found', result.results.length, 'results');
@@ -3727,7 +3727,7 @@ export default function App() {
       console.error('[Search] Error:', error);
       setSearchResults([]);
     } finally {
-      setIsSearching(false);
+      setIsFileSearching(false);
     }
   }, []);
 
@@ -7028,7 +7028,7 @@ If you're not sure what the user wants, ask for clarification.
                 <div className="flex items-center gap-2">
                   <Globe size={14} className={isDarkMode ? 'text-blue-400' : 'text-blue-500'} />
                   <span className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`}>
-                    {isSearching ? 'Searching...' : `${searchResults?.length || 0} Results`}
+                    {isFileSearching ? 'Searching...' : `${searchResults?.length || 0} Results`}
                   </span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -7057,7 +7057,7 @@ If you're not sure what the user wants, ask for clarification.
               
               {/* Results */}
               <div className="overflow-y-auto" style={{ maxHeight: '240px' }}>
-                {isSearching ? (
+                {isFileSearching ? (
                   <div className={`flex items-center justify-center py-8 ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
                     <Loader2 size={20} className="animate-spin mr-2" />
                     <span className="text-sm">Searching the web...</span>
