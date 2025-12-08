@@ -340,23 +340,23 @@ const styles = `
   }
 
   .btn-primary {
-    background: #ffffff;
-    color: #0a0a0a;
+    background: #3b82f6;
+    color: #ffffff;
   }
 
   .btn-primary:hover:not(:disabled) {
-    background: #e5e5e5;
-    color: #0a0a0a;
+    background: #2563eb;
+    color: #ffffff;
     transform: translateY(-1px);
   }
 
   .landing-page.light .btn-primary {
-    background: #0a0a0a;
+    background: #3b82f6;
     color: #ffffff;
   }
 
   .landing-page.light .btn-primary:hover:not(:disabled) {
-    background: #1a1a1a;
+    background: #2563eb;
     color: #ffffff;
   }
 
