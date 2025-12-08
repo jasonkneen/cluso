@@ -27,6 +27,7 @@ import { AutocompletePopup } from './components/AutocompletePopup';
 import { useMCP } from './hooks/useMCP';
 import { useSelectorAgent } from './hooks/useSelectorAgent';
 import { useToolTracker } from './hooks/useToolTracker';
+import { useClusoAgent, AVAILABLE_DEMOS } from './hooks/useClusoAgent';
 import { useSteeringQuestions } from './hooks/useSteeringQuestions';
 import { SteeringQuestions } from './components/SteeringQuestions';
 import { generateTurnId } from './utils/turnUtils';
@@ -104,6 +105,7 @@ import {
   Wrench,
   MessageSquare,
   Hammer,
+  Bot,
 } from 'lucide-react';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
@@ -866,6 +868,11 @@ export default function App() {
 
   // Tool Execution Tracking
   const toolTracker = useToolTracker();
+
+  // Cluso Agent - AI control of UI elements
+  const clusoAgent = useClusoAgent();
+  const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false);
+
   const [commitMessage, setCommitMessage] = useState('');
   const [newBranchName, setNewBranchName] = useState('');
   const [isCreatingBranch, setIsCreatingBranch] = useState(false);
@@ -6802,6 +6809,17 @@ If you're not sure what the user wants, ask for clarification.
             <Code2 size={16} />
           </button>
 
+          {/* Cluso Agent Toggle */}
+          <button
+            onClick={() => setIsAgentPanelOpen(!isAgentPanelOpen)}
+            data-control-id="agent-button"
+            data-control-type="button"
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isAgentPanelOpen ? 'bg-purple-100 text-purple-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500')}`}
+            title="Cluso Agent Demos"
+          >
+            <Bot size={16} />
+          </button>
+
           {/* Console Toggle */}
           <button
             onClick={() => setIsConsolePanelOpen(!isConsolePanelOpen)}
@@ -7232,6 +7250,100 @@ If you're not sure what the user wants, ask for clarification.
           {/* Resize overlay - captures mouse events during console resize */}
           {isConsoleResizing && (
             <div className="fixed inset-0 z-50 cursor-ns-resize" />
+          )}
+
+          {/* Cluso Agent Demo Panel */}
+          {isAgentPanelOpen && (
+            <div className={`absolute bottom-4 right-4 w-80 rounded-xl shadow-2xl border z-50 ${isDarkMode ? 'bg-neutral-800 border-neutral-700' : 'bg-white border-stone-200'}`}>
+              <div className={`flex items-center justify-between px-4 py-3 border-b ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
+                <div className="flex items-center gap-2">
+                  <Bot size={18} className="text-purple-500" />
+                  <span className={`font-medium ${isDarkMode ? 'text-white' : 'text-stone-800'}`}>Cluso Agent</span>
+                  {clusoAgent.isProcessing && (
+                    <div className="w-3 h-3 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                  )}
+                </div>
+                <button
+                  onClick={() => setIsAgentPanelOpen(false)}
+                  className={`w-6 h-6 rounded flex items-center justify-center ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              <div className="p-4 space-y-3">
+                {/* Status */}
+                <div className={`text-xs ${clusoAgent.isReady ? 'text-green-500' : 'text-orange-500'}`}>
+                  {clusoAgent.isReady ? '● Connected to local model' : '○ Connecting...'}
+                </div>
+
+                {/* Demo buttons */}
+                <div className="grid grid-cols-2 gap-2">
+                  {AVAILABLE_DEMOS.map((demo) => (
+                    <button
+                      key={demo}
+                      onClick={() => clusoAgent.runDemo(demo)}
+                      disabled={clusoAgent.isProcessing || !clusoAgent.isReady}
+                      className={`px-3 py-2 text-sm rounded-lg transition-colors capitalize ${
+                        clusoAgent.isProcessing
+                          ? 'opacity-50 cursor-not-allowed'
+                          : isDarkMode
+                            ? 'bg-neutral-700 hover:bg-neutral-600 text-neutral-200'
+                            : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
+                      }`}
+                    >
+                      {demo.replace('-', ' ')}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Custom input */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Ask agent to do something..."
+                    className={`flex-1 px-3 py-2 text-sm rounded-lg border ${
+                      isDarkMode
+                        ? 'bg-neutral-700 border-neutral-600 text-white placeholder-neutral-400'
+                        : 'bg-stone-50 border-stone-200 text-stone-800 placeholder-stone-400'
+                    }`}
+                    onKeyDown={async (e) => {
+                      if (e.key === 'Enter' && !clusoAgent.isProcessing) {
+                        const input = e.currentTarget;
+                        const message = input.value.trim();
+                        if (message) {
+                          input.value = '';
+                          await clusoAgent.chat(message);
+                        }
+                      }
+                    }}
+                  />
+                </div>
+
+                {/* Last response */}
+                {clusoAgent.lastResponse && (
+                  <div className={`text-xs p-2 rounded ${isDarkMode ? 'bg-neutral-700 text-neutral-300' : 'bg-stone-50 text-stone-600'}`}>
+                    {clusoAgent.lastResponse.substring(0, 150)}
+                    {clusoAgent.lastResponse.length > 150 && '...'}
+                  </div>
+                )}
+
+                {/* Error */}
+                {clusoAgent.error && (
+                  <div className="text-xs p-2 rounded bg-red-500/10 text-red-500">
+                    {clusoAgent.error}
+                  </div>
+                )}
+
+                {/* Reset button */}
+                <button
+                  onClick={() => clusoAgent.reset()}
+                  className={`w-full px-3 py-1.5 text-xs rounded ${isDarkMode ? 'text-neutral-400 hover:bg-neutral-700' : 'text-stone-500 hover:bg-stone-100'}`}
+                >
+                  Reset conversation
+                </button>
+              </div>
+            </div>
           )}
 
           {/* Console Panel */}

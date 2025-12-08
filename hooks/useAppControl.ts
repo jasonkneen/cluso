@@ -47,6 +47,11 @@ const ELEMENT_REGISTRY: Record<string, { selector: string; description: string; 
     description: 'Open browser DevTools for the webview',
     action: 'click'
   },
+  'agent-button': {
+    selector: '[data-control-id="agent-button"]',
+    description: 'Toggle the Cluso Agent demo panel',
+    action: 'click'
+  },
 
   // Chat area
   'chat-input': {
