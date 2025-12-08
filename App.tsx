@@ -27,6 +27,8 @@ import { useSteeringQuestions } from './hooks/useSteeringQuestions';
 import { SteeringQuestions } from './components/SteeringQuestions';
 import { generateTurnId } from './utils/turnUtils';
 import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler';
+import { PatchApprovalDialog } from './components/PatchApprovalDialog';
+import { SourcePatch } from './utils/generateSourcePatch';
 import { getElectronAPI } from './hooks/useElectronAPI';
 import type { MCPServerConfig } from './types/mcp';
 import { GoogleGenAI } from '@google/genai'; // Keep for voice streaming
@@ -896,6 +898,11 @@ export default function App() {
 
   // Mgrep Onboarding State
   const [showMgrepOnboarding, setShowMgrepOnboarding] = useState(false);
+
+  // Patch Approval State
+  const [pendingPatches, setPendingPatches] = useState<SourcePatch[]>([]);
+  const [currentPatchIndex, setCurrentPatchIndex] = useState(0);
+  const [isApprovalDialogOpen, setIsApprovalDialogOpen] = useState(false);
 
   // App Settings State - with localStorage persistence
   const [appSettings, setAppSettings] = useState<AppSettings>(() => {
@@ -6249,6 +6256,48 @@ If you're not sure what the user wants, ask for clarification.
     // URL input is synced via useEffect when tab.url changes
   }, [updateCurrentTab]);
 
+  // Patch Approval Handlers
+  const handleApprovePatch = useCallback((patch: SourcePatch) => {
+    console.log('[PatchApproval] Approved patch:', patch.filePath);
+    // Move to next patch
+    const nextIndex = currentPatchIndex + 1;
+    if (nextIndex < pendingPatches.length) {
+      setCurrentPatchIndex(nextIndex);
+    } else {
+      // All patches approved
+      setPendingPatches([]);
+      setCurrentPatchIndex(0);
+      setIsApprovalDialogOpen(false);
+    }
+  }, [currentPatchIndex, pendingPatches.length]);
+
+  const handleRejectPatch = useCallback((patch: SourcePatch) => {
+    console.log('[PatchApproval] Rejected patch:', patch.filePath);
+    // Remove rejected patch and move to next
+    const updatedPatches = pendingPatches.filter((_, i) => i !== currentPatchIndex);
+    setPendingPatches(updatedPatches);
+    if (updatedPatches.length > 0) {
+      setCurrentPatchIndex(Math.min(currentPatchIndex, updatedPatches.length - 1));
+    } else {
+      setCurrentPatchIndex(0);
+      setIsApprovalDialogOpen(false);
+    }
+  }, [currentPatchIndex, pendingPatches]);
+
+  const handleEditPatch = useCallback((patch: SourcePatch) => {
+    console.log('[PatchApproval] Edit requested for patch:', patch.filePath);
+    // TODO: Open editor with patch content
+    // For now, just close the dialog
+    setIsApprovalDialogOpen(false);
+  }, []);
+
+  // Function to show patch approval dialog with patches
+  const showPatchApprovalDialog = useCallback((patches: SourcePatch[]) => {
+    setPendingPatches(patches);
+    setCurrentPatchIndex(0);
+    setIsApprovalDialogOpen(true);
+  }, []);
+
   // Check if current tab is "new tab" (no URL)
   const isNewTabPage = !activeTab.url;
 
@@ -8963,6 +9012,18 @@ If you're not sure what the user wants, ask for clarification.
           }}
         />
       )}
+
+      {/* Patch Approval Dialog */}
+      <PatchApprovalDialog
+        patch={pendingPatches[currentPatchIndex] || null}
+        onApprove={handleApprovePatch}
+        onReject={handleRejectPatch}
+        onEdit={handleEditPatch}
+        projectPath={activeTab?.projectPath || 'default'}
+        isOpen={isApprovalDialogOpen}
+        totalPatches={pendingPatches.length}
+        currentPatchIndex={currentPatchIndex}
+      />
 
       </div>
     </div>

@@ -91,8 +91,24 @@ export interface SelectedElement {
   };
 }
 
+export interface PatchApprovalState {
+  pendingPatches: SourcePatch[];
+  currentPatchIndex: number;
+  isDialogOpen: boolean;
+}
+
+export interface SourcePatch {
+  filePath: string;
+  originalContent: string;
+  patchedContent: string;
+  lineNumber: number;
+  generatedBy?: 'fast-apply' | 'gemini' | 'fast-path';
+  durationMs?: number;
+}
+
 export interface AppState {
   html: string;
   messages: Message[];
   selectedElement: SelectedElement | null;
+  patchApproval?: PatchApprovalState;
 }
