@@ -2102,7 +2102,9 @@ export function SettingsDialog({
                                   ) as Connection[],
                                 })
                               }}
-                              placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/path/to/allowed"
+                              placeholder="claude
+mcp
+serve"
                               rows={3}
                               className={`w-full mt-1 px-3 py-2 rounded-lg text-sm font-mono ${
                                 isDarkMode
