@@ -56,10 +56,15 @@ interface CliConfig {
   dbPath?: string
   modelCacheDir?: string
   verbose: boolean
+  force: boolean  // Force reindexing even if files haven't changed
   shards?: number  // undefined = single mode, number = sharded mode
   gpu: boolean  // Use GPU acceleration (auto-detect best backend)
   mlx: boolean  // Use MLX GPU acceleration (Python server)
   mlxServer: string  // MLX server URL
+  // OpenAI options
+  openai: boolean  // Use OpenAI embeddings API
+  openaiModel: 'text-embedding-3-small' | 'text-embedding-3-large' | 'text-embedding-ada-002'
+  openaiConcurrency: number  // Parallel API calls
 }
 
 // Default paths
@@ -135,16 +140,23 @@ function parseArgs(): CliConfig {
   const envGpu = process.env.MGREP_GPU
   const envMlx = process.env.MGREP_MLX
   const envMlxServer = process.env.MGREP_MLX_SERVER
+  const envOpenai = process.env.MGREP_OPENAI
+  const envOpenaiModel = process.env.MGREP_OPENAI_MODEL as CliConfig['openaiModel'] | undefined
+  const envOpenaiConcurrency = process.env.MGREP_OPENAI_CONCURRENCY
 
   const config: CliConfig = {
     command: 'serve',
     directory: process.cwd(),
     verbose: envVerbose === '1' || envVerbose === 'true',
+    force: false,
     dbPath: envDbPath,
     shards: envShards ? parseInt(envShards, 10) : undefined,
     gpu: envGpu === '1' || envGpu === 'true',
     mlx: envMlx === '1' || envMlx === 'true',
     mlxServer: envMlxServer ?? 'http://localhost:8000',
+    openai: envOpenai === '1' || envOpenai === 'true',
+    openaiModel: envOpenaiModel ?? 'text-embedding-3-small',
+    openaiConcurrency: envOpenaiConcurrency ? parseInt(envOpenaiConcurrency, 10) : 4,
   }
 
   let i = 0
@@ -201,8 +213,27 @@ function parseArgs(): CliConfig {
         config.mlx = true  // Implicitly enable MLX when server is specified
         break
 
+      case '--openai':
+        config.openai = true
+        break
+
+      case '--openai-model':
+        config.openaiModel = args[++i] as CliConfig['openaiModel']
+        config.openai = true  // Implicitly enable OpenAI when model is specified
+        break
+
+      case '--openai-concurrency':
+        config.openaiConcurrency = parseInt(args[++i], 10)
+        config.openai = true  // Implicitly enable OpenAI when concurrency is specified
+        break
+
       case '--shards':
         config.shards = parseInt(args[++i], 10)
+        break
+
+      case '--force':
+      case '-f':
+        config.force = true
         break
 
       case '--db-path':
@@ -244,9 +275,26 @@ function parseArgs(): CliConfig {
 
 /**
  * Create embedder based on config
- * Priority: --gpu (auto) > --mlx (Python server) > CPU
+ * Priority: --openai > --gpu (auto) > --mlx (Python server) > CPU
  */
 async function getEmbedder(config: CliConfig): Promise<Embedder> {
+  // OpenAI mode: use OpenAI API (highest priority when enabled)
+  if (config.openai) {
+    if (!process.env.OPENAI_API_KEY) {
+      log('Error: OPENAI_API_KEY environment variable not set')
+      log('Set it with: export OPENAI_API_KEY=sk-...')
+      process.exit(1)
+    }
+    log(`OpenAI mode: ${config.openaiModel} (concurrency: ${config.openaiConcurrency})`)
+    const embedder = await createEmbedder({
+      backend: 'openai',
+      openaiModel: config.openaiModel,
+      openaiConcurrency: config.openaiConcurrency,
+      verbose: config.verbose,
+    })
+    return embedder as unknown as Embedder
+  }
+
   // GPU mode: auto-detect best backend (LlamaCpp > MLX > CPU)
   if (config.gpu) {
     log('GPU mode requested, auto-detecting best backend...')
@@ -369,6 +417,12 @@ async function runIndexSingle(config: CliConfig): Promise<{ chunks: number; file
   })
   await vectorStore.initialize()
 
+  // Force reindex: clear the database first
+  if (config.force) {
+    log('Force mode: clearing existing index...')
+    await vectorStore.clear()
+  }
+
   const chunker = new Chunker()
   const indexer = new Indexer({ embedder, vectorStore, chunker })
 
@@ -385,8 +439,10 @@ async function runIndexSingle(config: CliConfig): Promise<{ chunks: number; file
         chunks += fileChunks
       }
       logProgress(i + 1, files.length, file)
-    } catch {
-      // Skip errors
+    } catch (error) {
+      if (config.verbose) {
+        log(`Error indexing ${file}:`, error)
+      }
     }
   }
 
@@ -421,13 +477,40 @@ async function runIndexSharded(config: CliConfig): Promise<{ chunks: number; fil
   })
   await shardedStore.initialize()
 
+  // Force reindex: clear the database first
+  if (config.force) {
+    log('Force mode: clearing existing index...')
+    await shardedStore.clear()
+  }
+
   const chunker = new Chunker()
 
   // Build embedder config for parallel workers
+  // Determine backend type
+  const getBackend = () => {
+    if (config.openai) return 'openai' as const
+    if (config.gpu) return 'auto' as const
+    if (config.mlx) return 'mlx' as const
+    return 'cpu' as const
+  }
+
   const embedderConfig = {
-    backend: config.gpu ? 'auto' as const : (config.mlx ? 'mlx' as const : 'cpu' as const),
+    backend: getBackend(),
     cacheDir: config.modelCacheDir ?? DEFAULT_MODEL_CACHE,
     verbose: config.verbose,
+    // OpenAI-specific config
+    openaiModel: config.openaiModel,
+    openaiConcurrency: config.openaiConcurrency,
+  }
+
+  // Determine worker count based on backend
+  // OpenAI: Can use many workers since it's API-based (no local GPU contention)
+  // GPU (Metal): Limit to 2 workers to avoid trace trap crashes
+  // CPU/MLX: Use up to 4 workers
+  const getWorkerCount = () => {
+    if (config.openai) return Math.min(shardCount, 8)  // OpenAI can handle many parallel workers
+    if (config.gpu) return Math.min(shardCount, 2)  // Metal GPU limitation
+    return Math.max(1, Math.min(shardCount, 4))  // CPU/MLX default
   }
 
   // Track progress for sharded mode
@@ -438,9 +521,7 @@ async function runIndexSharded(config: CliConfig): Promise<{ chunks: number; fil
     chunker,
     embedderConfig,  // Enable parallel workers
     parallel: true,
-    // GPU mode: limit to 2 workers to avoid Metal GPU contention (trace trap crashes)
-    // CPU mode: use up to 4 workers for CPU parallelism
-    workerCount: config.gpu ? Math.min(shardCount, 2) : Math.max(1, Math.min(shardCount, 4)),
+    workerCount: getWorkerCount(),
     progressCallback: (progress: ShardedIndexProgress) => {
       if (progress.phase === 'chunking' && progress.currentFile) {
         const shardLabel = progress.shardId !== undefined
@@ -483,7 +564,9 @@ async function runIndex(config: CliConfig): Promise<void> {
   log('Starting indexer...')
   log(`Directory: ${config.directory}`)
   log(`Mode: ${config.shards ? `sharded (${config.shards} shards)` : 'single database'}`)
-  const embeddingMode = config.gpu ? 'GPU (auto-detect)' : config.mlx ? 'MLX GPU' : 'CPU'
+  const embeddingMode = config.openai
+    ? `OpenAI ${config.openaiModel} (concurrency: ${config.openaiConcurrency})`
+    : config.gpu ? 'GPU (auto-detect)' : config.mlx ? 'MLX GPU' : 'CPU'
   log(`Embeddings: ${embeddingMode}`)
 
   const result = config.shards
@@ -500,7 +583,9 @@ async function runWatch(config: CliConfig): Promise<void> {
   log('Starting watcher...')
   log(`Directory: ${config.directory}`)
   log(`Mode: ${config.shards ? `sharded (${config.shards} shards)` : 'single database'}`)
-  const embeddingMode = config.gpu ? 'GPU (auto-detect)' : config.mlx ? 'MLX GPU' : 'CPU'
+  const embeddingMode = config.openai
+    ? `OpenAI ${config.openaiModel} (concurrency: ${config.openaiConcurrency})`
+    : config.gpu ? 'GPU (auto-detect)' : config.mlx ? 'MLX GPU' : 'CPU'
   log(`Embeddings: ${embeddingMode}`)
 
   const embedder = await getEmbedder(config)
@@ -835,6 +920,20 @@ Commands:
   benchmark [dir]  Compare single vs sharded performance
 
 Options:
+  --openai              Use OpenAI embeddings API (requires OPENAI_API_KEY)
+                        Models: text-embedding-3-small (1536d), text-embedding-3-large (3072d)
+                        Great for high-quality embeddings with parallel API calls
+                        Can also use MGREP_OPENAI=1
+
+  --openai-model <name> OpenAI model to use
+                        Options: text-embedding-3-small, text-embedding-3-large
+                        Default: text-embedding-3-small
+                        Can also use MGREP_OPENAI_MODEL
+
+  --openai-concurrency <n>  Parallel API calls for OpenAI (default: 4)
+                        Higher = faster but may hit rate limits
+                        Can also use MGREP_OPENAI_CONCURRENCY
+
   --gpu                 Use GPU acceleration (auto-detect best backend)
                         On Apple Silicon: uses Metal via node-llama-cpp
                         No external dependencies - pure TypeScript!
@@ -850,7 +949,12 @@ Options:
                         Can also use MGREP_MLX_SERVER
 
   --shards <n>          Enable sharded mode with n shards (default: single DB)
+                        Enables parallel processing across shards
                         Can also use MGREP_SHARDS environment variable
+
+  --force, -f           Force reindexing even if files haven't changed
+                        Use when switching embedding backends (GPU → OpenAI)
+                        Clears existing index before reindexing
 
   --db-path <path>      Path to database directory
                         Default: ~/.cache/mgrep-local/vectors
@@ -865,7 +969,16 @@ Options:
   --help, -h            Show this help message
 
 Examples:
-  # Index with GPU (recommended - pure TypeScript, no setup needed!)
+  # Index with OpenAI (high quality, parallel API calls)
+  OPENAI_API_KEY=sk-... mgrep-local index --openai
+
+  # Index with OpenAI + shards for maximum parallelism
+  OPENAI_API_KEY=sk-... mgrep-local index --openai --shards 8 --openai-concurrency 8
+
+  # Use large model for better quality
+  mgrep-local index --openai --openai-model text-embedding-3-large
+
+  # Index with GPU (recommended for local - no API costs!)
   mgrep-local index --gpu
 
   # Index with shards + GPU for maximum performance
@@ -874,14 +987,20 @@ Examples:
   # Index current directory (CPU mode)
   mgrep-local index
 
-  # Watch with GPU mode
-  mgrep-local watch --gpu -v
+  # Watch with OpenAI mode
+  mgrep-local watch --openai -v
 
   # Search the index
   mgrep-local search "authentication handler"
 
   # Benchmark single vs sharded
   mgrep-local benchmark .
+
+OpenAI Embeddings:
+  Requires OPENAI_API_KEY environment variable
+  Supports parallel API calls for fast indexing
+  Costs: ~$0.02 per 1M tokens (text-embedding-3-small)
+  With --shards, each shard gets its own parallel worker
 
 GPU Acceleration:
   --gpu uses node-llama-cpp with Metal (Apple Silicon) or Vulkan (others)

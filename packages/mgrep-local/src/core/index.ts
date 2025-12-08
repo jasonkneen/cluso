@@ -17,6 +17,9 @@ export { MlxEmbedder, checkMlxServer } from './MlxEmbedder.js'
 export { LlamaCppEmbedder, checkGpuAvailable, listEmbeddingModels, EMBEDDING_MODELS } from './LlamaCppEmbedder.js'
 export { createEmbedder, createEmbedderWithBackend, type EmbedderBackend, type GpuEmbedderOptions } from './embedder-factory.js'
 
+// Classes - OpenAI API Embeddings
+export { OpenAIEmbedder, checkOpenAIAvailable, type OpenAIEmbeddingModel, type OpenAIEmbedderOptions } from './OpenAIEmbedder.js'
+
 // Classes - Sharded (multiple databases with meta-index)
 export { ShardedVectorStore } from './ShardedVectorStore.js'
 export { ShardedIndexer } from './ShardedIndexer.js'

@@ -17,10 +17,13 @@ interface WorkerData {
   shardDbPaths: Map<number, string>  // shardId -> db path
   files: Array<{ shardId: number; filePath: string; content: string }>
   embedderOptions: {
-    backend?: 'auto' | 'llamacpp' | 'mlx' | 'cpu'
+    backend?: 'auto' | 'llamacpp' | 'mlx' | 'cpu' | 'openai'
     modelName?: string
     cacheDir?: string
     verbose?: boolean
+    // OpenAI-specific options
+    openaiModel?: 'text-embedding-3-small' | 'text-embedding-3-large' | 'text-embedding-ada-002'
+    openaiConcurrency?: number
   }
   workerId: number
 }
@@ -43,6 +46,9 @@ async function runWorker() {
     modelName: data.embedderOptions.modelName,
     cacheDir: data.embedderOptions.cacheDir,
     verbose: false, // Don't spam logs from workers
+    // OpenAI-specific options
+    openaiModel: data.embedderOptions.openaiModel,
+    openaiConcurrency: data.embedderOptions.openaiConcurrency,
   })
 
   const chunker = new Chunker()

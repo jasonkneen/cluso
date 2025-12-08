@@ -26,10 +26,13 @@ import type {
  * Embedder configuration for workers
  */
 export interface EmbedderConfig {
-  backend?: 'auto' | 'llamacpp' | 'mlx' | 'cpu'
+  backend?: 'auto' | 'llamacpp' | 'mlx' | 'cpu' | 'openai'
   modelName?: string
   cacheDir?: string
   verbose?: boolean
+  // OpenAI-specific options
+  openaiModel?: 'text-embedding-3-small' | 'text-embedding-3-large' | 'text-embedding-ada-002'
+  openaiConcurrency?: number
 }
 
 /**
@@ -239,11 +242,15 @@ export class ShardedIndexer {
     const startTime = Date.now()
 
     // If parallel is disabled or no embedder config, fall back to sequential
-    // Also disable parallel for GPU mode (auto/llamacpp) as Metal can't handle
+    // Disable parallel for GPU mode (auto/llamacpp) as Metal can't handle
     // multiple concurrent model loads - workers crash with trace trap
-    const isGpuMode = this.embedderConfig?.backend === 'auto' ||
-                      this.embedderConfig?.backend === 'llamacpp'
-    if (!this.parallel || !this.embedderConfig || isGpuMode) {
+    // BUT allow parallel for OpenAI (API-based, no GPU contention) and other backends
+    const isLocalGpuMode = this.embedderConfig?.backend === 'auto' ||
+                           this.embedderConfig?.backend === 'llamacpp'
+    const isParallelSafe = this.embedderConfig?.backend === 'openai' ||
+                           this.embedderConfig?.backend === 'mlx' ||
+                           this.embedderConfig?.backend === 'cpu'
+    if (!this.parallel || !this.embedderConfig || (isLocalGpuMode && !isParallelSafe)) {
       const result = await this.indexFiles(files)
       return {
         totalChunks: result.totalChunks,

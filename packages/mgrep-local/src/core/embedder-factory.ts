@@ -2,9 +2,10 @@
  * Embedder Factory - Auto-selects the best available embedding backend
  *
  * Priority order:
- * 1. LlamaCpp GPU (pure TypeScript, Metal on Apple Silicon)
- * 2. MLX GPU (requires Python server)
- * 3. Xenova/transformers CPU (fallback)
+ * 1. OpenAI (if API key available and preferred)
+ * 2. LlamaCpp GPU (pure TypeScript, Metal on Apple Silicon)
+ * 3. MLX GPU (requires Python server)
+ * 4. Xenova/transformers CPU (fallback)
  *
  * Usage:
  *   const embedder = await createEmbedder({ verbose: true })
@@ -14,9 +15,10 @@
 import { Embedder } from './Embedder.js'
 import { MlxEmbedder, checkMlxServer } from './MlxEmbedder.js'
 import { LlamaCppEmbedder, checkGpuAvailable, type EmbeddingModelName } from './LlamaCppEmbedder.js'
+import { OpenAIEmbedder, checkOpenAIAvailable, type OpenAIEmbeddingModel } from './OpenAIEmbedder.js'
 import type { EmbedderFactoryOptions, Embedder as IEmbedder } from './types.js'
 
-export type EmbedderBackend = 'auto' | 'llamacpp' | 'mlx' | 'cpu'
+export type EmbedderBackend = 'auto' | 'llamacpp' | 'mlx' | 'cpu' | 'openai'
 
 /**
  * Extended factory options with GPU backend selection
@@ -25,13 +27,18 @@ export interface GpuEmbedderOptions extends EmbedderFactoryOptions {
   backend?: EmbedderBackend  // Which backend to use
   llamaModel?: EmbeddingModelName  // LlamaCpp model name
   gpuLayers?: number  // GPU layers for LlamaCpp
+  // OpenAI options
+  openaiApiKey?: string  // OpenAI API key (defaults to OPENAI_API_KEY env)
+  openaiModel?: OpenAIEmbeddingModel  // OpenAI model (default: text-embedding-3-small)
+  openaiConcurrency?: number  // Parallel API calls for OpenAI (default: 4)
+  openaiDimensions?: number  // Optional dimension reduction for text-embedding-3-*
 }
 
 /**
  * Create the best available embedder
  *
  * @param options - Configuration options
- * @returns Initialized embedder (LlamaCpp GPU > MLX GPU > CPU)
+ * @returns Initialized embedder (OpenAI > LlamaCpp GPU > MLX GPU > CPU)
  */
 export async function createEmbedder(
   options: GpuEmbedderOptions = {}
@@ -44,6 +51,10 @@ export async function createEmbedder(
   }
 
   // Explicit backend selection
+  if (backend === 'openai') {
+    return createOpenAIEmbedder(options, log)
+  }
+
   if (backend === 'llamacpp') {
     return createLlamaCppEmbedder(options, log)
   }
@@ -153,11 +164,31 @@ async function createCpuEmbedder(
   return embedder
 }
 
+async function createOpenAIEmbedder(
+  options: GpuEmbedderOptions,
+  log: (msg: string) => void
+): Promise<IEmbedder> {
+  const model = options.openaiModel ?? 'text-embedding-3-small'
+  log(`Creating OpenAI embedder (model: ${model})...`)
+
+  const embedder = new OpenAIEmbedder({
+    apiKey: options.openaiApiKey,
+    model,
+    concurrency: options.openaiConcurrency ?? 4,
+    dimensions: options.openaiDimensions,
+    verbose: options.verbose,
+    onProgress: options.onProgress,
+  })
+
+  await embedder.initialize()
+  return embedder
+}
+
 /**
  * Create embedder with explicit backend choice (legacy API)
  */
 export async function createEmbedderWithBackend(
-  backend: 'llamacpp' | 'mlx' | 'cpu',
+  backend: 'llamacpp' | 'mlx' | 'cpu' | 'openai',
   options: GpuEmbedderOptions = {}
 ): Promise<IEmbedder> {
   return createEmbedder({ ...options, backend })

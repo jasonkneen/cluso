@@ -153,6 +153,24 @@ export interface MlxEmbedderOptions extends EmbedderOptions {
 }
 
 /**
+ * OpenAI embedding models
+ */
+export type OpenAIEmbeddingModel = 'text-embedding-3-small' | 'text-embedding-3-large' | 'text-embedding-ada-002'
+
+/**
+ * Options for OpenAI embedder
+ */
+export interface OpenAIEmbedderOptions extends EmbedderOptions {
+  apiKey?: string  // Defaults to OPENAI_API_KEY env var
+  model?: OpenAIEmbeddingModel  // Default: text-embedding-3-small
+  baseUrl?: string  // For proxies or Azure
+  batchSize?: number  // Max inputs per API call (default: 100)
+  concurrency?: number  // Parallel API calls (default: 4)
+  retries?: number  // Retry attempts on failure (default: 3)
+  dimensions?: number  // Optional dimension reduction for text-embedding-3-* models
+}
+
+/**
  * Options for embedder factory (auto-selects best available)
  */
 export interface EmbedderFactoryOptions extends EmbedderOptions {

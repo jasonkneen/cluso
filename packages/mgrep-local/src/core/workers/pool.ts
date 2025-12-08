@@ -19,10 +19,13 @@ export interface IndexWorkerData {
   shardDbPaths: { [shardId: string]: string }
   files: Array<{ shardId: number; filePath: string; content: string }>
   embedderOptions: {
-    backend?: 'auto' | 'llamacpp' | 'mlx' | 'cpu'
+    backend?: 'auto' | 'llamacpp' | 'mlx' | 'cpu' | 'openai'
     modelName?: string
     cacheDir?: string
     verbose?: boolean
+    // OpenAI-specific options
+    openaiModel?: 'text-embedding-3-small' | 'text-embedding-3-large' | 'text-embedding-ada-002'
+    openaiConcurrency?: number
   }
   workerId: number
 }
