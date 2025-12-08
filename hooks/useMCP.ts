@@ -10,6 +10,10 @@ import type {
   MCPEvent,
   MCPConnectionStatus,
   MCPServerCapabilities,
+  SmartMCPContext,
+  ScoredMCPTool,
+  ToolUsageStats,
+  IndexHealthStatus,
 } from '../types/mcp'
 import { jsonSchemaToZod as sharedJsonSchemaToZod } from '../utils/zodSchema'
 import {
@@ -64,6 +68,15 @@ export interface UseMCPReturn {
   refreshTools: (serverId: string) => Promise<MCPTool[]>
   /** Re-run MCP auto-discovery */
   rediscover: () => Promise<void>
+  // Smart MCP features
+  /** Get context-aware tool suggestions */
+  getRelevantTools: (context: SmartMCPContext, limit?: number) => Promise<ScoredMCPTool[]>
+  /** Track tool usage for analytics */
+  trackToolUsage: (serverId: string, toolName: string, executionTime: number, success: boolean) => Promise<void>
+  /** Get tool usage statistics */
+  getToolUsageStats: (serverId: string, toolName: string) => Promise<ToolUsageStats | null>
+  /** Get index health status */
+  getIndexHealth: (projectPath?: string) => Promise<IndexHealthStatus>
   /** Check if any server is connecting */
   isConnecting: boolean
   /** Check if we're in Electron environment with MCP support */
@@ -475,6 +488,91 @@ export function useMCP(options: UseMCPOptions = {}): UseMCPReturn {
     }
   }, [servers, onError])
 
+  /**
+   * Get context-aware tool suggestions
+   */
+  const getRelevantTools = useCallback(async (
+    context: SmartMCPContext,
+    limit: number = 10
+  ): Promise<ScoredMCPTool[]> => {
+    if (!window.electronAPI?.mcp?.scoreToolRelevance) {
+      console.warn('[useMCP] Smart MCP features not available')
+      return []
+    }
+
+    try {
+      const tools = allTools.filter(t => t.serverId === allTools[0]?.serverId)
+      const scored = await window.electronAPI.mcp.scoreToolRelevance(tools, context)
+      return scored.sort((a, b) => b.relevanceScore - a.relevanceScore).slice(0, limit)
+    } catch (err) {
+      console.error('[useMCP] Failed to get relevant tools:', err)
+      return []
+    }
+  }, [allTools])
+
+  /**
+   * Track tool usage for analytics
+   */
+  const trackToolUsage = useCallback(async (
+    serverId: string,
+    toolName: string,
+    executionTime: number,
+    success: boolean
+  ): Promise<void> => {
+    if (!window.electronAPI?.mcp?.trackToolUsage) return
+
+    try {
+      await window.electronAPI.mcp.trackToolUsage(serverId, toolName, executionTime, success)
+    } catch (err) {
+      console.error('[useMCP] Failed to track tool usage:', err)
+    }
+  }, [])
+
+  /**
+   * Get tool usage statistics
+   */
+  const getToolUsageStats = useCallback(async (
+    serverId: string,
+    toolName: string
+  ): Promise<ToolUsageStats | null> => {
+    if (!window.electronAPI?.mcp?.getToolUsageStats) return null
+
+    try {
+      return await window.electronAPI.mcp.getToolUsageStats(serverId, toolName)
+    } catch (err) {
+      console.error('[useMCP] Failed to get tool usage stats:', err)
+      return null
+    }
+  }, [])
+
+  /**
+   * Get index health status
+   */
+  const getIndexHealth = useCallback(async (projectPath?: string): Promise<IndexHealthStatus> => {
+    if (!window.electronAPI?.mcp?.getIndexHealth) {
+      return {
+        ready: false,
+        indexing: false,
+        totalChunks: 0,
+        totalFiles: 0,
+        healthPercentage: 0,
+      }
+    }
+
+    try {
+      return await window.electronAPI.mcp.getIndexHealth(projectPath)
+    } catch (err) {
+      console.error('[useMCP] Failed to get index health:', err)
+      return {
+        ready: false,
+        indexing: false,
+        totalChunks: 0,
+        totalFiles: 0,
+        healthPercentage: 0,
+      }
+    }
+  }, [])
+
   // Compute aggregate values
   const allTools = Object.entries(servers).flatMap(([serverId, server]) =>
     server.status === 'connected'
@@ -495,6 +593,11 @@ export function useMCP(options: UseMCPOptions = {}): UseMCPReturn {
     callTool,
     refreshTools,
     rediscover,
+    // Smart MCP features
+    getRelevantTools,
+    trackToolUsage,
+    getToolUsageStats,
+    getIndexHealth,
     isConnecting,
     isAvailable,
     isDiscoveryAvailable: isDiscoveryAvailable(),

@@ -15,10 +15,13 @@ let MgrepLocalService = null
 let mainWindow = null
 
 // Multi-project state tracking - Map of projectPath -> service state
-const projects = new Map()  // projectPath -> { service, isInitialized, isIndexing, lastError }
+const projects = new Map()  // projectPath -> { service, isInitialized, isIndexing, lastError, stats, fileWatcher, changedFiles }
 
 // Legacy: track "active" project for backward compatibility with single-project API
 let activeProjectPath = null
+
+// File change tracking for incremental updates
+const chokidar = require('chokidar')
 
 /**
  * Set the main window for sending events to renderer
@@ -62,9 +65,256 @@ function getProjectState(projectDir) {
       isInitialized: false,
       isIndexing: false,
       lastError: null,
+      stats: null,
+      fileWatcher: null,
+      changedFiles: new Set(),
+      lastIndexTime: null,
     })
   }
   return projects.get(projectDir)
+}
+
+/**
+ * Setup file watcher for incremental updates
+ */
+function setupFileWatcher(projectDir) {
+  const state = getProjectState(projectDir)
+
+  // Ignore patterns
+  const ignorePatterns = [
+    '**/node_modules/**',
+    '**/.git/**',
+    '**/dist/**',
+    '**/build/**',
+    '**/.next/**',
+    '**/.nuxt/**',
+    '**/coverage/**',
+    '**/.cache/**',
+    '**/.mgrep-local/**',
+    '**/vendor/**',
+    '**/__pycache__/**',
+    '**/.venv/**',
+    '**/venv/**',
+    '**/target/**',
+    '**/.idea/**',
+    '**/.vscode/**',
+  ]
+
+  if (state.fileWatcher) {
+    state.fileWatcher.close()
+  }
+
+  state.fileWatcher = chokidar.watch(projectDir, {
+    ignored: ignorePatterns,
+    persistent: true,
+    awaitWriteFinish: {
+      stabilityThreshold: 2000,
+      pollInterval: 100,
+    },
+  })
+
+  state.fileWatcher
+    .on('add', (filepath) => {
+      handleFileChange(projectDir, filepath, 'add')
+    })
+    .on('change', (filepath) => {
+      handleFileChange(projectDir, filepath, 'change')
+    })
+    .on('unlink', (filepath) => {
+      handleFileChange(projectDir, filepath, 'unlink')
+    })
+    .on('error', (err) => {
+      console.error(`[mgrep] File watcher error for ${projectDir}:`, err)
+    })
+
+  console.log(`[mgrep] File watcher initialized for ${projectDir}`)
+}
+
+/**
+ * Handle file changes for incremental indexing
+ */
+async function handleFileChange(projectDir, filepath, type) {
+  const state = getProjectState(projectDir)
+
+  // Track changed files
+  if (type === 'unlink') {
+    state.changedFiles.delete(filepath)
+  } else {
+    state.changedFiles.add(filepath)
+  }
+
+  console.log(`[mgrep] File ${type}: ${filepath} (${state.changedFiles.size} pending)`)
+
+  // Batch updates: send event so UI can trigger incremental update if needed
+  sendToRenderer('mgrep:event', {
+    type: 'file-changed',
+    projectPath: projectDir,
+    filepath,
+    changeType: type,
+    pendingChanges: state.changedFiles.size,
+  })
+}
+
+/**
+ * Perform incremental index update for changed files
+ */
+async function incrementalUpdate(projectDir) {
+  const state = getProjectState(projectDir)
+
+  if (!state?.service || !state.isInitialized) {
+    return { success: false, error: 'mgrep not initialized for this project' }
+  }
+
+  if (state.changedFiles.size === 0) {
+    console.log(`[mgrep] No pending changes for ${projectDir}`)
+    return { success: true, filesProcessed: 0, totalChunks: 0 }
+  }
+
+  try {
+    state.isIndexing = true
+    const filesToUpdate = Array.from(state.changedFiles)
+    console.log(`[mgrep] Starting incremental update for ${filesToUpdate.length} files`)
+
+    sendToRenderer('mgrep:event', {
+      type: 'incremental-update-start',
+      projectPath: projectDir,
+      filesCount: filesToUpdate.length,
+    })
+
+    const filesToIndex = []
+    let skippedCount = 0
+
+    // Read changed files
+    for (const filepath of filesToUpdate) {
+      try {
+        const content = await fs.readFile(filepath, 'utf-8')
+        if (content.length < 1024 * 1024) {
+          filesToIndex.push({ filePath: filepath, content })
+        } else {
+          skippedCount++
+        }
+      } catch (err) {
+        console.warn(`[mgrep] Failed to read file ${filepath}:`, err.message)
+        skippedCount++
+      }
+    }
+
+    // Update index with changed files
+    if (filesToIndex.length > 0) {
+      const result = await state.service.indexFiles(filesToIndex)
+      console.log(`[mgrep] Incremental update complete: ${result.filesProcessed} files, ${result.totalChunks} chunks`)
+
+      // Update stats
+      try {
+        state.stats = await state.service.getStats()
+        state.lastIndexTime = Date.now()
+      } catch (err) {
+        console.error('[mgrep] Failed to update stats:', err)
+      }
+
+      // Clear the changed files tracker
+      state.changedFiles.clear()
+
+      state.isIndexing = false
+      sendToRenderer('mgrep:event', {
+        type: 'incremental-update-complete',
+        projectPath: projectDir,
+        ...result,
+      })
+
+      return { success: true, ...result }
+    } else {
+      state.changedFiles.clear()
+      state.isIndexing = false
+      return { success: true, filesProcessed: 0, totalChunks: 0 }
+    }
+  } catch (error) {
+    state.isIndexing = false
+    console.error('[mgrep] Incremental update failed:', error.message)
+    sendToRenderer('mgrep:event', {
+      type: 'error',
+      projectPath: projectDir,
+      error: error.message,
+    })
+    return { success: false, error: error.message }
+  }
+}
+
+/**
+ * Get index health status
+ */
+async function getIndexHealth(projectDir = null) {
+  projectDir = projectDir || activeProjectPath
+
+  if (!projectDir || !projects.has(projectDir)) {
+    return {
+      success: true,
+      health: {
+        ready: false,
+        indexing: false,
+        totalChunks: 0,
+        totalFiles: 0,
+        lastUpdated: null,
+        stalenessCount: 0,
+        healthPercentage: 0,
+      },
+    }
+  }
+
+  const state = getProjectState(projectDir)
+
+  if (!state.service || !state.isInitialized) {
+    return {
+      success: true,
+      health: {
+        ready: false,
+        indexing: state.isIndexing,
+        totalChunks: 0,
+        totalFiles: 0,
+        lastUpdated: null,
+        stalenessCount: 0,
+        healthPercentage: 0,
+      },
+    }
+  }
+
+  try {
+    const stats = state.stats || (await state.service.getStats())
+    const stalenessCount = state.changedFiles.size
+
+    // Calculate health percentage (100% if no pending changes and index ready)
+    let healthPercentage = 100
+    if (stalenessCount > 0) {
+      // Reduce health based on pending changes (max 30% reduction)
+      healthPercentage = Math.max(70, 100 - (stalenessCount * 2))
+    }
+
+    return {
+      success: true,
+      health: {
+        ready: state.isInitialized && !state.isIndexing,
+        indexing: state.isIndexing,
+        totalChunks: stats.totalChunks || 0,
+        totalFiles: stats.filesCount || 0,
+        lastUpdated: state.lastIndexTime,
+        stalenessCount,
+        healthPercentage,
+      },
+    }
+  } catch (error) {
+    return {
+      success: true,
+      health: {
+        ready: false,
+        indexing: state.isIndexing,
+        totalChunks: 0,
+        totalFiles: 0,
+        lastUpdated: state.lastIndexTime,
+        stalenessCount: state.changedFiles.size,
+        healthPercentage: 0,
+      },
+    }
+  }
 }
 
 /**
@@ -142,6 +392,9 @@ async function initialize(projectDir) {
     state.lastError = null
 
     console.log('[mgrep] Service initialized successfully for:', projectDir)
+
+    // Setup file watcher for incremental updates
+    setupFileWatcher(projectDir)
 
     // Automatically scan and index files in the project
     // This runs async - we don't wait for it to complete before returning
@@ -705,4 +958,7 @@ module.exports = {
   clearIndex,
   resync: scanAndIndexProject,  // Manual resync for debugging
   shutdown,
+  // Smart MCP features for index management
+  incrementalUpdate,     // Incremental index updates for changed files
+  getIndexHealth,        // Get index health status
 }

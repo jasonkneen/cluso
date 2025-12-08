@@ -12,6 +12,62 @@ const activeConnections = new Map()
 // Event listeners for forwarding to renderer
 let mainWindow = null
 
+// Tool usage analytics - Map of `${serverId}:${toolName}` -> { usageCount, lastUsed, executionTimes, successCount }
+const toolUsageAnalytics = new Map()
+
+// Persistence file for usage analytics (in user's home directory)
+const path = require('path')
+const fs = require('fs')
+const os = require('os')
+const ANALYTICS_PATH = path.join(os.homedir(), '.cache', 'ai-cluso', 'tool-analytics.json')
+
+/**
+ * Load analytics from disk
+ */
+function loadAnalytics() {
+  try {
+    const dir = path.dirname(ANALYTICS_PATH)
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true })
+      return
+    }
+
+    if (fs.existsSync(ANALYTICS_PATH)) {
+      const data = JSON.parse(fs.readFileSync(ANALYTICS_PATH, 'utf-8'))
+      for (const [key, stats] of Object.entries(data)) {
+        toolUsageAnalytics.set(key, stats)
+      }
+      console.log(`[MCP] Loaded analytics for ${data.length} tools`)
+    }
+  } catch (err) {
+    console.error('[MCP] Failed to load analytics:', err.message)
+  }
+}
+
+/**
+ * Save analytics to disk (debounced)
+ */
+let analyticsSaveTimeout = null
+function saveAnalyticsDebounced() {
+  clearTimeout(analyticsSaveTimeout)
+  analyticsSaveTimeout = setTimeout(() => {
+    try {
+      const dir = path.dirname(ANALYTICS_PATH)
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true })
+      }
+
+      const data = Object.fromEntries(toolUsageAnalytics)
+      fs.writeFileSync(ANALYTICS_PATH, JSON.stringify(data, null, 2))
+    } catch (err) {
+      console.error('[MCP] Failed to save analytics:', err.message)
+    }
+  }, 5000)
+}
+
+// Load analytics on module init
+loadAnalytics()
+
 /**
  * Set the main window reference for sending events
  */
@@ -939,6 +995,220 @@ async function discoverMcpServers(projectPath) {
 }
 
 /**
+ * Score tool relevance based on context
+ * Considers file type, recent usage, user intent, and error context
+ */
+function scoreToolRelevance(tools, context = {}) {
+  const {
+    currentFileType = '',
+    recentTools = [],
+    userIntent = '',
+    errorContext = '',
+    projectType = 'generic',
+  } = context
+
+  return tools.map(tool => {
+    let score = 0.5 // Base score
+    let reasons = []
+
+    // Score based on tool name and description matching file type
+    const fileTypeScore = calculateFileTypeRelevance(
+      tool.name,
+      tool.description || '',
+      currentFileType,
+      projectType
+    )
+    score += fileTypeScore * 0.25
+    if (fileTypeScore > 0.5) {
+      reasons.push(`Matches file type: ${currentFileType}`)
+    }
+
+    // Score based on recent usage (recency bonus)
+    if (recentTools.includes(tool.name)) {
+      score += 0.15
+      reasons.push('Recently used')
+    }
+
+    // Score based on user intent matching
+    const intentScore = calculateIntentRelevance(tool.name, tool.description || '', userIntent)
+    score += intentScore * 0.30
+    if (intentScore > 0.5) {
+      reasons.push(`Matches intent: ${userIntent}`)
+    }
+
+    // Score based on error context
+    if (errorContext) {
+      const errorScore = calculateErrorRelevance(tool.name, tool.description || '', errorContext)
+      score += errorScore * 0.20
+      if (errorScore > 0.5) {
+        reasons.push(`Relevant to error: ${errorContext}`)
+      }
+    }
+
+    // Get usage stats
+    const statsKey = `unknown:${tool.name}`
+    const usageStats = toolUsageAnalytics.get(statsKey)
+    if (usageStats && usageStats.usageCount > 0) {
+      // Tools used more frequently get a small boost
+      const usageBoost = Math.min(0.1, usageStats.usageCount * 0.01)
+      score += usageBoost
+      reasons.push(`Used ${usageStats.usageCount} times (${(usageStats.successRate * 100).toFixed(0)}% success)`)
+    }
+
+    // Clamp score to 0-1
+    score = Math.max(0, Math.min(1, score))
+
+    return {
+      ...tool,
+      relevanceScore: score,
+      scoreReason: reasons.length > 0 ? reasons.join(', ') : 'Generic tool',
+      usageStats,
+    }
+  })
+}
+
+/**
+ * Calculate relevance of tool to file type
+ */
+function calculateFileTypeRelevance(toolName, description, fileType, projectType) {
+  const text = `${toolName} ${description}`.toLowerCase()
+  const fileTypeLower = fileType.toLowerCase()
+
+  // Language-specific matches
+  const fileTypeKeywords = {
+    typescript: ['typescript', 'ts', 'node', 'react', 'jest'],
+    javascript: ['javascript', 'js', 'node', 'react', 'jest'],
+    python: ['python', 'py', 'django', 'flask', 'pytest'],
+    rust: ['rust', 'rs', 'cargo', 'clippy'],
+    go: ['go', 'golang', 'goland'],
+    java: ['java', 'maven', 'gradle', 'spring'],
+    markdown: ['markdown', 'md', 'docs', 'documentation'],
+  }
+
+  let score = 0
+  const keywords = fileTypeKeywords[fileTypeLower] || []
+  for (const keyword of keywords) {
+    if (text.includes(keyword)) {
+      score += 0.25
+    }
+  }
+
+  return Math.min(1, score)
+}
+
+/**
+ * Calculate relevance of tool to user intent
+ */
+function calculateIntentRelevance(toolName, description, intent) {
+  if (!intent) return 0
+
+  const text = `${toolName} ${description}`.toLowerCase()
+  const intentLower = intent.toLowerCase()
+
+  // Split intent into keywords and match
+  const keywords = intentLower.split(/\s+/).filter(w => w.length > 2)
+  let matches = 0
+
+  for (const keyword of keywords) {
+    if (text.includes(keyword)) {
+      matches++
+    }
+  }
+
+  return Math.min(1, matches / Math.max(1, keywords.length))
+}
+
+/**
+ * Calculate relevance of tool to error context
+ */
+function calculateErrorRelevance(toolName, description, errorContext) {
+  if (!errorContext) return 0
+
+  const text = `${toolName} ${description}`.toLowerCase()
+  const errorLower = errorContext.toLowerCase()
+
+  // Common error patterns and related tools
+  const errorPatterns = {
+    'type': ['type', 'typescript', 'schema', 'validation'],
+    'import': ['import', 'module', 'resolve', 'path'],
+    'syntax': ['syntax', 'parse', 'lint', 'format'],
+    'test': ['test', 'unit', 'integration', 'coverage'],
+    'performance': ['performance', 'profile', 'optimize', 'benchmark'],
+    'security': ['security', 'audit', 'vulnerability', 'scan'],
+  }
+
+  let score = 0
+  for (const [pattern, keywords] of Object.entries(errorPatterns)) {
+    if (errorLower.includes(pattern)) {
+      for (const keyword of keywords) {
+        if (text.includes(keyword)) {
+          score += 0.2
+        }
+      }
+    }
+  }
+
+  return Math.min(1, score)
+}
+
+/**
+ * Filter tools by context and return top N relevant tools
+ */
+function filterToolsByContext(tools, context, limit = 10) {
+  const scored = scoreToolRelevance(tools, context)
+  return scored
+    .sort((a, b) => b.relevanceScore - a.relevanceScore)
+    .slice(0, limit)
+}
+
+/**
+ * Track tool usage for analytics
+ */
+function trackToolUsage(serverId, toolName, executionTime, success) {
+  const key = `${serverId}:${toolName}`
+  const current = toolUsageAnalytics.get(key) || {
+    usageCount: 0,
+    executionTimes: [],
+    successCount: 0,
+  }
+
+  current.usageCount++
+  current.lastUsed = Date.now()
+  current.executionTimes.push(executionTime)
+  if (success) {
+    current.successCount++
+  }
+
+  // Keep only last 100 execution times to avoid unbounded growth
+  if (current.executionTimes.length > 100) {
+    current.executionTimes = current.executionTimes.slice(-100)
+  }
+
+  // Calculate derived stats
+  current.avgExecutionTime = current.executionTimes.reduce((a, b) => a + b, 0) / current.executionTimes.length
+  current.successRate = current.successCount / current.usageCount
+
+  toolUsageAnalytics.set(key, current)
+  saveAnalyticsDebounced()
+}
+
+/**
+ * Get tool usage statistics
+ */
+function getToolUsageStats(serverId, toolName) {
+  const key = `${serverId}:${toolName}`
+  const stats = toolUsageAnalytics.get(key)
+  if (!stats) return null
+
+  return {
+    usageCount: stats.usageCount,
+    lastUsed: stats.lastUsed,
+    avgExecutionTime: stats.avgExecutionTime,
+    successRate: stats.successRate,
+  }
+}
+
+/**
  * Try to connect to a discovered server and get its tools
  */
 async function probeServer(serverConfig) {
@@ -995,4 +1265,9 @@ module.exports = {
   getStatus,
   discoverMcpServers,
   probeServer,
+  // Smart MCP functions
+  scoreToolRelevance,
+  filterToolsByContext,
+  trackToolUsage,
+  getToolUsageStats,
 }
