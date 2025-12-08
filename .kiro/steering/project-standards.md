@@ -2,7 +2,7 @@
 
 ## Application Overview
 
-AI-Cluso is a **Gemini Live Interface** - an AI-powered development assistant combining:
+AI-Cluso is a **Cluso** - an AI-powered development assistant combining:
 - Real-time voice/video streaming with Gemini Live API
 - Browser inspector for UI development
 - Claude Code OAuth integration for Anthropic API access

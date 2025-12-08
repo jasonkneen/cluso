@@ -1,5 +1,5 @@
 {
-  "name": "Gemini Live Interface",
+  "name": "Cluso",
   "description": "A real-time multimodal voice and video interface powered by the Gemini Live API.",
   "requestFramePermissions": [
     "camera",

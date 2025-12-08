@@ -19,7 +19,7 @@ Set `VITE_GOOGLE_API_KEY` in `.env.local` for Gemini API access. The Vite config
 
 ## Architecture
 
-This is a **Gemini Live Interface** - an AI-powered development assistant that combines real-time voice/video streaming with a browser inspector for UI development.
+This is **Cluso** - an AI-powered development assistant that combines real-time voice/video streaming with a browser inspector for UI development.
 
 ### Core Structure
 
