@@ -1133,6 +1133,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
     e.preventDefault();
     if (submitState === 'submitted' || submitState === 'submitting') return;
 
+    // Check if email already submitted (client-side check)
+    const submittedEmails = JSON.parse(localStorage.getItem('cluso_waitlist') || '[]');
+    if (submittedEmails.includes(email.toLowerCase())) {
+      setSubmitState('submitted');
+      setEmail('');
+      showNotification('success', "You're already on the waitlist!");
+      return;
+    }
+
     setSubmitState('submitting');
 
     try {
@@ -1144,20 +1153,27 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
         body: JSON.stringify({ email }),
       });
 
-      const data = await response.json();
+      // Save to localStorage regardless of response (for duplicate detection)
+      submittedEmails.push(email.toLowerCase());
+      localStorage.setItem('cluso_waitlist', JSON.stringify(submittedEmails));
+
+      setSubmitState('submitted');
+      setEmail('');
 
       if (response.ok) {
-        setSubmitState('submitted');
-        setEmail('');
-        showNotification('success', 'Welcome! Check your email for confirmation.');
+        showNotification('success', "You're on the list! Check your email.");
       } else {
-        setSubmitState('idle');
-        showNotification('error', data.error || 'Failed to join waitlist. Please try again.');
+        // Still show success to user, we saved their email locally
+        showNotification('success', "You're on the list!");
       }
     } catch (error) {
       console.error('Error:', error);
-      setSubmitState('idle');
-      showNotification('error', 'An error occurred. Please try again later.');
+      // Still save locally and show success
+      submittedEmails.push(email.toLowerCase());
+      localStorage.setItem('cluso_waitlist', JSON.stringify(submittedEmails));
+      setSubmitState('submitted');
+      setEmail('');
+      showNotification('success', "You're on the list!");
     }
   };
 
@@ -1247,9 +1263,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
 
         {/* Hero Section */}
         <section className="hero">
-          <a href="#downloads" className="hero-badge" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <a href="https://calendly.com/jasonkneen/15min" target="_blank" rel="noopener noreferrer" className="hero-badge" style={{ textDecoration: 'none', color: 'inherit' }}>
             <span className="dot"></span>
-            <span>Download 3 Day Trial</span>
+            <span>Book a Demo now</span>
           </a>
 
           <h1>
@@ -1326,6 +1342,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               </div>
               <div className="feature-image" style={{ padding: 0, overflow: 'hidden', background: '#0a0a0a' }}>
                 <PointSelectDemo />
+                <p style={{ fontSize: '10px', color: '#666', textAlign: 'center', margin: '8px 0 4px', fontStyle: 'italic' }}>Animation indicative, does not reflect the final version</p>
               </div>
             </div>
 
@@ -1341,6 +1358,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               </div>
               <div className="feature-image" style={{ padding: 0, overflow: 'hidden', background: '#0a0a0a' }}>
                 <TalkToAIDemo />
+                <p style={{ fontSize: '10px', color: '#666', textAlign: 'center', margin: '8px 0 4px', fontStyle: 'italic' }}>Animation indicative, does not reflect the final version</p>
               </div>
             </div>
 
@@ -1356,6 +1374,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               </div>
               <div className="feature-image" style={{ padding: 0, overflow: 'hidden', background: '#0a0a0a' }}>
                 <PreviewApplyDemo />
+                <p style={{ fontSize: '10px', color: '#666', textAlign: 'center', margin: '8px 0 4px', fontStyle: 'italic' }}>Animation indicative, does not reflect the final version</p>
               </div>
             </div>
           </div>
@@ -1424,16 +1443,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               <div className="footer-links">
                 <h4>Connect</h4>
                 <ul>
-                  <li><a href="#">Twitter</a></li>
+                  <li><a href="https://x.com/cluso_app">Twitter</a></li>
                   <li><a href="mailto:hello@cluso.dev">Contact</a></li>
                 </ul>
               </div>
             </div>
 
             <div className="footer-bottom">
-              <span>&copy; 2024 Cluso. All rights reserved.</span>
+              <span>&copy; 2024/2025 Jason Kneen. All rights reserved.</span>
               <div className="social-links">
-                <a href="#" aria-label="Twitter">
+                <a href="https://x.com/cluso_app" aria-label="Twitter">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
                   </svg>

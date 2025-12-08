@@ -1425,16 +1425,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               <div className="footer-links">
                 <h4>Connect</h4>
                 <ul>
-                  <li><a href="#">Twitter</a></li>
+                  <li><a href="https://x.com/cluso_app">Twitter</a></li>
                   <li><a href="mailto:hello@cluso.dev">Contact</a></li>
                 </ul>
               </div>
             </div>
 
             <div className="footer-bottom">
-              <span>&copy; 2024 Cluso. All rights reserved.</span>
+              <span>&copy; 2024/2025 Jason Kneen. All rights reserved.</span>
               <div className="social-links">
-                <a href="#" aria-label="Twitter">
+                <a href="https://x.com/cluso_app" aria-label="Twitter">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
                   </svg>
