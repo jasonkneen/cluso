@@ -17,6 +17,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stashPop: () => ipcRenderer.invoke('git:stashPop'),
   },
 
+  // Backup/recovery operations
+  backup: {
+    create: (filePath, description) => ipcRenderer.invoke('backup:create', filePath, description),
+    restore: (filePath, backupId) => ipcRenderer.invoke('backup:restore', filePath, backupId),
+    list: (filePath) => ipcRenderer.invoke('backup:list', filePath),
+    getContent: (filePath, backupId) => ipcRenderer.invoke('backup:get-content', filePath, backupId),
+    delete: (filePath, backupId) => ipcRenderer.invoke('backup:delete', filePath, backupId),
+    cleanup: () => ipcRenderer.invoke('backup:cleanup'),
+  },
+
   // OAuth operations (for Anthropic API keys and Claude Code)
   oauth: {
     // Start OAuth login flow - mode: 'max' for Claude Pro/Max, 'console' for Console API
