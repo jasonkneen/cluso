@@ -587,14 +587,32 @@ To call an MCP tool, use the format: mcp_<serverId>_<toolName>`)
   return parts.join('\n')
 }
 
+// Clarifying question option type (mirrors ClarifyingQuestion component)
+export interface ClarifyingQuestionOption {
+  id: string
+  label: string
+  description?: string
+}
+
+// Clarifying question data type
+export interface ClarifyingQuestionData {
+  id: string
+  question: string
+  type: 'single-select' | 'multi-select' | 'text' | 'confirm'
+  options?: ClarifyingQuestionOption[]
+  placeholder?: string
+  required?: boolean
+}
+
 // Options for creating coding agent tools
 interface CreateCodingAgentToolsOptions {
   onFileModified?: (event: FileModificationEvent) => void
+  onAskClarifyingQuestion?: (question: ClarifyingQuestionData) => Promise<string | string[]>
 }
 
 // Define tools for the coding agent
 export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = {}): ToolsMap {
-  const { onFileModified } = options
+  const { onFileModified, onAskClarifyingQuestion } = options
 
   return {
     // File operations
@@ -1024,6 +1042,61 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
         return { error: result.error }
       },
     } as ToolDefinition,
+
+    // Ask clarifying question - allows AI to ask user for input
+    ask_clarifying_question: {
+      description: 'Ask the user a clarifying question to better understand their needs. Use this when you need more information before proceeding. Supports single-select, multi-select, text input, or simple confirmation.',
+      parameters: z.object({
+        question: z.string().describe('The question to ask the user'),
+        type: z.enum(['single-select', 'multi-select', 'text', 'confirm']).describe('Type of input: single-select (one choice), multi-select (multiple choices), text (free text), confirm (yes/no)'),
+        options: z.array(z.object({
+          id: z.string().describe('Unique ID for this option'),
+          label: z.string().describe('Display text for the option'),
+          description: z.string().optional().describe('Additional context for this option'),
+        })).optional().describe('Options for single-select or multi-select types'),
+        placeholder: z.string().optional().describe('Placeholder text for text input type'),
+        required: z.boolean().optional().describe('Whether the user must answer (default: false)'),
+      }),
+      execute: async (args: unknown) => {
+        const { question, type, options, placeholder, required } = args as {
+          question: string
+          type: 'single-select' | 'multi-select' | 'text' | 'confirm'
+          options?: Array<{ id: string; label: string; description?: string }>
+          placeholder?: string
+          required?: boolean
+        }
+
+        if (!onAskClarifyingQuestion) {
+          return { error: 'Clarifying questions not available in this context' }
+        }
+
+        // Validate that options are provided for select types
+        if ((type === 'single-select' || type === 'multi-select') && (!options || options.length === 0)) {
+          return { error: 'Options are required for single-select and multi-select question types' }
+        }
+
+        const questionData: ClarifyingQuestionData = {
+          id: `q_${Date.now()}`,
+          question,
+          type,
+          options,
+          placeholder,
+          required,
+        }
+
+        try {
+          const response = await onAskClarifyingQuestion(questionData)
+          return {
+            success: true,
+            question: question,
+            response: response,
+            type: type,
+          }
+        } catch (error) {
+          return { error: `Failed to get user response: ${error}` }
+        }
+      },
+    } as ToolDefinition,
   }
 }
 
@@ -1047,10 +1120,11 @@ interface UseCodingAgentOptions {
   mcpTools?: MCPToolDefinition[]
   callMCPTool?: MCPToolCaller
   onFileModified?: (event: FileModificationEvent) => void  // Callback when files are modified
+  onAskClarifyingQuestion?: (question: ClarifyingQuestionData) => Promise<string | string[]>  // Callback for clarifying questions
 }
 
 export function useCodingAgent(options: UseCodingAgentOptions = {}) {
-  const { mcpTools = [], callMCPTool, onFileModified } = options
+  const { mcpTools = [], callMCPTool, onFileModified, onAskClarifyingQuestion } = options
 
   const [state, setState] = useState<CodingAgentState>({
     context: {
@@ -1064,11 +1138,11 @@ export function useCodingAgent(options: UseCodingAgentOptions = {}) {
     isProcessing: false,
   })
 
-  // Create tools with the onFileModified callback
+  // Create tools with callbacks
   // Memoize to avoid recreating on every render
   const codingTools = useMemo(
-    () => createCodingAgentTools({ onFileModified }),
-    [onFileModified]
+    () => createCodingAgentTools({ onFileModified, onAskClarifyingQuestion }),
+    [onFileModified, onAskClarifyingQuestion]
   )
 
   // Memoize combined tools (coding agent + MCP)
