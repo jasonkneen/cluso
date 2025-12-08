@@ -9,6 +9,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { ClusoAgent, createClusoAgent, ClusoAgentCallbacks } from '../services/clusoAgent'
 import { useAppControl } from './useAppControl'
 import { initGeminiTTS, speakWithGemini } from '../services/geminiTTS'
+import { runDemo as runDemoScript, DemoScriptName, DEMO_SCRIPTS } from '../services/demoScript'
 
 export interface UseClusoAgentResult {
   isReady: boolean
@@ -18,6 +19,8 @@ export interface UseClusoAgentResult {
   chat: (message: string) => Promise<string>
   reset: () => void
   runDemo: (demoName: string) => Promise<void>
+  runScriptedDemo: (scriptName: DemoScriptName) => Promise<void>
+  availableScripts: readonly DemoScriptName[]
 }
 
 // Pre-defined demos
@@ -126,6 +129,28 @@ export function useClusoAgent(): UseClusoAgentResult {
     await chat(prompt)
   }, [chat])
 
+  // Run a scripted two-voice demo
+  const runScriptedDemo = useCallback(async (scriptName: DemoScriptName) => {
+    setIsProcessing(true)
+    setError(null)
+    setLastResponse(`Running ${scriptName} demo...`)
+
+    try {
+      await runDemoScript(scriptName, {
+        highlightElement: appControl.highlightElement,
+        clickElement: appControl.clickElement,
+        typeText: appControl.typeText,
+        wait: appControl.wait,
+      })
+      setLastResponse(`${scriptName} demo complete!`)
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Demo failed'
+      setError(errorMessage)
+    } finally {
+      setIsProcessing(false)
+    }
+  }, [appControl])
+
   return {
     isReady,
     isProcessing,
@@ -133,9 +158,13 @@ export function useClusoAgent(): UseClusoAgentResult {
     error,
     chat,
     reset,
-    runDemo
+    runDemo,
+    runScriptedDemo,
+    availableScripts: DEMO_SCRIPTS,
   }
 }
 
 // Export demo names for UI
 export const AVAILABLE_DEMOS = Object.keys(DEMOS)
+export { DEMO_SCRIPTS } from '../services/demoScript'
+export type { DemoScriptName } from '../services/demoScript'

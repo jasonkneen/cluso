@@ -2,7 +2,7 @@
  * Gemini TTS Service
  *
  * Uses Gemini's native voice to speak text instead of browser speechSynthesis.
- * Connects to Gemini Live API with audio output only.
+ * Supports multiple voices for demos (user voice vs app voice).
  */
 
 import { GoogleGenAI, Modality } from '@google/genai'
@@ -13,14 +13,23 @@ let audioContext: AudioContext | null = null
 let currentSources: Set<AudioBufferSourceNode> = new Set()
 let nextStartTime = 0
 
+// Available Gemini voices
+export type GeminiVoice = 'Zephyr' | 'Puck' | 'Kore' | 'Charon' | 'Fenrir' | 'Aoede'
+
+// Default voices for demo roles
+export const DEMO_VOICES = {
+  user: 'Puck' as GeminiVoice,    // Friendly, casual voice for "user"
+  app: 'Zephyr' as GeminiVoice,   // Professional voice for "app/AI"
+}
+
 // Initialize with API key
 export function initGeminiTTS(apiKey: string) {
   client = new GoogleGenAI({ apiKey })
   return true
 }
 
-// Speak text using Gemini's native voice
-export async function speakWithGemini(text: string): Promise<void> {
+// Speak text using specified Gemini voice
+export async function speakWithGemini(text: string, voice: GeminiVoice = 'Zephyr'): Promise<void> {
   if (!client) {
     console.warn('[GeminiTTS] Not initialized, falling back to browser TTS')
     fallbackSpeak(text)
@@ -37,11 +46,10 @@ export async function speakWithGemini(text: string): Promise<void> {
     }
 
     // Stop any currently playing audio
-    currentSources.forEach(src => {
-      try { src.stop() } catch {}
-    })
-    currentSources.clear()
+    stopGeminiTTS()
     nextStartTime = audioContext.currentTime
+
+    console.log(`[GeminiTTS] Speaking with voice "${voice}": ${text.substring(0, 50)}...`)
 
     // Connect to Gemini Live for TTS
     const session = await client.live.connect({
@@ -49,13 +57,14 @@ export async function speakWithGemini(text: string): Promise<void> {
       config: {
         responseModalities: [Modality.AUDIO],
         speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } },
         },
       },
     })
 
-    // Collect audio chunks
-    const audioChunks: ArrayBuffer[] = []
+    // Promise to track completion
+    let resolveComplete: () => void
+    const completePromise = new Promise<void>(resolve => { resolveComplete = resolve })
 
     session.on('audio', async (data: { data: string }) => {
       if (data.data && audioContext) {
@@ -75,20 +84,69 @@ export async function speakWithGemini(text: string): Promise<void> {
       }
     })
 
+    session.on('close', () => resolveComplete!())
+
     // Send the text to speak
     await session.sendClientContent({
       turns: [{ role: 'user', parts: [{ text: `Say exactly this: "${text}"` }] }],
       turnComplete: true,
     })
 
-    // Wait for response to complete then close
-    await new Promise(resolve => setTimeout(resolve, 2000 + text.length * 50))
+    // Wait for audio to be received then close
+    await new Promise(resolve => setTimeout(resolve, 1500 + text.length * 40))
     session.close()
+
+    // Wait for all audio to finish playing
+    const audioEndTime = nextStartTime - (audioContext?.currentTime || 0)
+    if (audioEndTime > 0) {
+      await new Promise(resolve => setTimeout(resolve, audioEndTime * 1000 + 200))
+    }
 
   } catch (error) {
     console.error('[GeminiTTS] Error:', error)
     fallbackSpeak(text)
   }
+}
+
+// Speak as "user" voice
+export async function speakAsUser(text: string): Promise<void> {
+  return speakWithGemini(text, DEMO_VOICES.user)
+}
+
+// Speak as "app" voice
+export async function speakAsApp(text: string): Promise<void> {
+  return speakWithGemini(text, DEMO_VOICES.app)
+}
+
+// Run a demo conversation between user and app voices
+export interface DemoLine {
+  role: 'user' | 'app'
+  text: string
+  action?: () => void | Promise<void>  // Optional UI action to run with this line
+}
+
+export async function runDemoConversation(lines: DemoLine[], delayBetween = 500): Promise<void> {
+  console.log('[GeminiTTS] Starting demo conversation with', lines.length, 'lines')
+
+  for (const line of lines) {
+    // Run any associated action first
+    if (line.action) {
+      await line.action()
+      await new Promise(resolve => setTimeout(resolve, 300))
+    }
+
+    // Speak the line
+    if (line.role === 'user') {
+      await speakAsUser(line.text)
+    } else {
+      await speakAsApp(line.text)
+    }
+
+    // Delay between lines
+    await new Promise(resolve => setTimeout(resolve, delayBetween))
+  }
+
+  console.log('[GeminiTTS] Demo conversation complete')
 }
 
 // Browser TTS fallback
