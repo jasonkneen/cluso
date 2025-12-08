@@ -8,9 +8,21 @@
 
 import { APP_KNOWLEDGE } from '../hooks/useAppControl'
 
-// Local model configuration
+// Local model configuration - pool of 3 instances for parallel execution
 const LOCAL_MODEL_URL = 'http://127.0.0.1:1234/v1/chat/completions'
-const LOCAL_MODEL_NAME = 'qwen2.5-0.5b-instruct-mlx'
+const MODEL_POOL = [
+  'qwen2.5-0.5b-instruct-mlx',
+  'qwen2.5-0.5b-instruct-mlx:2',
+  'qwen2.5-0.5b-instruct-mlx:3'
+]
+let modelIndex = 0
+
+// Round-robin model selection for load distribution
+function getNextModel(): string {
+  const model = MODEL_POOL[modelIndex]
+  modelIndex = (modelIndex + 1) % MODEL_POOL.length
+  return model
+}
 
 // Tool definitions for UI control
 const UI_CONTROL_TOOLS = [
@@ -240,7 +252,7 @@ export class ClusoAgent {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: LOCAL_MODEL_NAME,
+        model: getNextModel(),
         messages: this.messages,
         tools: UI_CONTROL_TOOLS,
         temperature: 0.3,
