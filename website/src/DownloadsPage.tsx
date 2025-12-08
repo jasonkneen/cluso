@@ -470,15 +470,15 @@ export const DownloadsPage: React.FC = () => {
           {/* Download Cards */}
           <div className="download-cards">
             {/* macOS */}
-            <div className="download-card">
-              <div className="download-icon">
+            <div className="download-card" style={{ opacity: 0.5, pointerEvents: 'none' }}>
+              <div className="download-icon" style={{ background: 'var(--text-muted)' }}>
                 <svg viewBox="0 0 24 24" fill="currentColor">
                   <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.3-3.14-2.53C4.25 17.12 3.75 15.36 4.4 13.9c.6-1.23 1.85-2.02 3.12-2.05 1.28-.03 2.5.77 3.27.77.76 0 2.39-1 4.04-.92 1.44.15 2.87.72 3.85 1.65-.35.2-1.65 1.24-1.65 2.73 0 1.73 1.4 2.58 1.4 2.58s-.45 1.52-1.47 2.27z"/>
                   <path d="M12.07 5.22c.65-.78 1.14-1.87.99-2.96-.96.04-2.14.65-2.85 1.44-.63.73-1.18 1.89-.99 3.01 1.07.08 2.17-.54 2.85-1.49z"/>
                 </svg>
               </div>
               <h2>macOS</h2>
-              <p className="subtitle">Version 1.0.0</p>
+              <p className="subtitle" style={{ color: 'var(--accent)' }}>Coming this week</p>
               <div className="system-requirements">
                 <h3>System Requirements</h3>
                 <ul>
@@ -487,14 +487,9 @@ export const DownloadsPage: React.FC = () => {
                   <li>• 2 GB RAM minimum</li>
                 </ul>
               </div>
-              <a href="https://github.com/anthropics/cluso/releases/download/v1.0.0/Cluso-1.0.0.dmg" className="download-button">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="7 10 12 15 17 10"/>
-                  <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-                Download for Mac
-              </a>
+              <span className="download-button" style={{ background: 'var(--text-muted)', cursor: 'not-allowed' }}>
+                Coming this week
+              </span>
             </div>
 
             {/* Windows */}
