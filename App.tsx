@@ -8608,6 +8608,8 @@ If you're not sure what the user wants, ask for clarification.
                               }
                           }}
                           placeholder="Plan, @ for context, / for commands"
+                          data-control-id="chat-input"
+                          data-control-type="input"
                           className={`w-full bg-transparent px-4 py-3 text-sm resize-none focus:outline-none min-h-[56px] ${isDarkMode ? 'text-neutral-100 placeholder-neutral-400' : ''}`}
                           rows={2}
                       />
@@ -8940,6 +8942,8 @@ If you're not sure what the user wants, ask for clarification.
                           <button
                               onClick={() => processPrompt(input)}
                               disabled={!input.trim()}
+                              data-control-id="send-button"
+                              data-control-type="button"
                               className={`p-1.5 rounded-lg transition-colors ml-1 disabled:opacity-30 disabled:cursor-not-allowed ${isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-800'}`}
                               title={connectionState === 'streaming' ? "Queue message" : "Send message"}
                           >
