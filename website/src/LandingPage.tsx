@@ -1342,6 +1342,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               </div>
               <div className="feature-image" style={{ padding: 0, overflow: 'hidden', background: '#0a0a0a' }}>
                 <PointSelectDemo />
+                <p style={{ fontSize: '10px', color: '#666', textAlign: 'center', margin: '8px 0 4px', fontStyle: 'italic' }}>Animation indicative, does not reflect the final version</p>
               </div>
             </div>
 
@@ -1357,6 +1358,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               </div>
               <div className="feature-image" style={{ padding: 0, overflow: 'hidden', background: '#0a0a0a' }}>
                 <TalkToAIDemo />
+                <p style={{ fontSize: '10px', color: '#666', textAlign: 'center', margin: '8px 0 4px', fontStyle: 'italic' }}>Animation indicative, does not reflect the final version</p>
               </div>
             </div>
 
@@ -1372,6 +1374,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               </div>
               <div className="feature-image" style={{ padding: 0, overflow: 'hidden', background: '#0a0a0a' }}>
                 <PreviewApplyDemo />
+                <p style={{ fontSize: '10px', color: '#666', textAlign: 'center', margin: '8px 0 4px', fontStyle: 'italic' }}>Animation indicative, does not reflect the final version</p>
               </div>
             </div>
           </div>
