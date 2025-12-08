@@ -272,12 +272,90 @@ export interface ElectronMCPAPI {
 }
 
 /**
+ * Tool usage analytics for smart tool prioritization
+ */
+export interface ToolUsageStats {
+  /** Total number of times the tool has been used */
+  usageCount: number
+  /** Last time the tool was used (timestamp) */
+  lastUsed?: number
+  /** Average execution time in milliseconds */
+  avgExecutionTime?: number
+  /** Success rate (0-1) */
+  successRate?: number
+}
+
+/**
+ * Context information for smart tool filtering
+ */
+export interface SmartMCPContext {
+  /** Current file type being worked on (e.g., 'typescript', 'python', 'markdown') */
+  currentFileType?: string
+  /** Recent tool names used in this session */
+  recentTools?: string[]
+  /** User's stated intent or search query */
+  userIntent?: string
+  /** Current error or problem context */
+  errorContext?: string
+  /** Project type hints */
+  projectType?: 'react' | 'node' | 'python' | 'rust' | 'go' | 'generic'
+}
+
+/**
+ * Tool with relevance score for prioritization
+ */
+export interface ScoredMCPTool extends MCPTool {
+  /** Relevance score (0-1) based on context */
+  relevanceScore: number
+  /** Reason for the relevance score */
+  scoreReason: string
+  /** Usage statistics for this tool */
+  usageStats?: ToolUsageStats
+}
+
+/**
+ * Index health status information
+ */
+export interface IndexHealthStatus {
+  /** Is the index ready for queries */
+  ready: boolean
+  /** Is the index currently being updated */
+  indexing: boolean
+  /** Total number of indexed chunks */
+  totalChunks: number
+  /** Total number of indexed files */
+  totalFiles: number
+  /** Last update timestamp */
+  lastUpdated?: number
+  /** Estimated staleness (files changed since last index) */
+  stalenessCount?: number
+  /** Overall health percentage (0-100) */
+  healthPercentage: number
+}
+
+/**
+ * Smart MCP API extensions
+ */
+export interface SmartMCPAPI {
+  /** Score tools based on context for smart filtering */
+  scoreToolRelevance: (tools: MCPTool[], context: SmartMCPContext) => Promise<ScoredMCPTool[]>
+  /** Get context-aware tool suggestions */
+  getRelevantTools: (context: SmartMCPContext, limit?: number) => Promise<ScoredMCPTool[]>
+  /** Track tool usage for analytics */
+  trackToolUsage: (serverId: string, toolName: string, executionTime: number, success: boolean) => Promise<void>
+  /** Get tool usage statistics */
+  getToolUsageStats: (serverId: string, toolName: string) => Promise<ToolUsageStats | null>
+  /** Get index health status */
+  getIndexHealth: (projectPath?: string) => Promise<IndexHealthStatus>
+}
+
+/**
  * Extend the existing ElectronAPI interface
  */
 declare global {
   interface Window {
     electronAPI?: {
-      mcp?: ElectronMCPAPI
+      mcp?: ElectronMCPAPI & SmartMCPAPI
     } & Window['electronAPI']
   }
 }
