@@ -195,9 +195,25 @@ export function useAppControl() {
     return document.querySelector(selector) as HTMLElement | null
   }, [])
 
+  // Convert named colors to hex for proper alpha channel support
+  const colorToHex = (color: string): string => {
+    const namedColors: Record<string, string> = {
+      blue: '#3b82f6',
+      green: '#22c55e',
+      red: '#ef4444',
+      orange: '#f97316',
+      purple: '#a855f7',
+      yellow: '#eab308',
+      pink: '#ec4899',
+      cyan: '#06b6d4',
+    }
+    return namedColors[color.toLowerCase()] || (color.startsWith('#') ? color : '#3b82f6')
+  }
+
   // Highlight an element with visual feedback
   const highlightElement = useCallback((nameOrSelector: string, options: HighlightOptions = {}) => {
-    const { color = '#3b82f6', duration = 3000, pulse = true, label } = options
+    const { color: rawColor = '#3b82f6', duration = 3000, pulse = true, label } = options
+    const color = colorToHex(rawColor)
     const element = getElement(nameOrSelector)
 
     if (!element) {
