@@ -544,9 +544,11 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
       mediaStreamRef.current = stream;
 
       // Build model name with native audio support
-      const modelName = selectedModelId
-        ? `${selectedModelId}-native-audio-preview-09-2025`
-        : 'gemini-2.5-flash-native-audio-preview-09-2025';
+      // Only use Gemini models for Live API - fall back to Flash if non-Gemini selected
+      const baseModel = selectedModelId && selectedModelId.startsWith('gemini-')
+        ? selectedModelId
+        : 'gemini-2.5-flash';
+      const modelName = `${baseModel}-native-audio-preview-09-2025`;
 
       const sessionPromise = aiRef.current.live.connect({
         model: modelName,
