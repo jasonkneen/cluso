@@ -6761,6 +6761,8 @@ If you're not sure what the user wants, ask for clarification.
               setIsScreenshotActive(false);
               setIsMoveActive(false);
             }}
+            data-control-id="inspector-button"
+            data-control-type="button"
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isInspectorActive ? 'bg-blue-100 text-blue-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500')}`}
             title="Element Inspector"
           >
@@ -6774,6 +6776,8 @@ If you're not sure what the user wants, ask for clarification.
               setIsInspectorActive(false);
               // DON'T disable screenshot mode - they work together
             }}
+            data-control-id="move-button"
+            data-control-type="button"
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isMoveActive ? 'bg-orange-100 text-orange-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500')}`}
             title="Move & Resize Element"
           >
@@ -6788,6 +6792,8 @@ If you're not sure what the user wants, ask for clarification.
                 webview.openDevTools();
               }
             }}
+            data-control-id="devtools-button"
+            data-control-type="button"
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'}`}
             title="Open Webview DevTools"
           >
