@@ -503,9 +503,11 @@ export const DocumentationPage: React.FC<DocumentationPageProps> = ({ isDark: in
                       <a
                         href={`#${subsection.id}`}
                         className={activeSection === subsection.id ? 'active' : ''}
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.preventDefault()
                           setActiveSection(subsection.id)
                           setSidebarOpen(false)
+                          document.getElementById(subsection.id)?.scrollIntoView({ behavior: 'smooth' })
                         }}
                       >
                         {subsection.label}
