@@ -2799,6 +2799,8 @@ export default function App() {
     selectedElement: selectedElement,
     // Pass Google API key from settings
     googleApiKey: appSettings.providers.find(p => p.id === 'google')?.apiKey,
+    // Pass selected model for Live Gemini streaming
+    selectedModelId: selectedModel.id,
   });
 
   // Load available prompts and directory files on mount

@@ -34,6 +34,8 @@ interface UseLiveGeminiParams {
   currentUrl?: string;
   // API key from settings (falls back to env if not provided)
   googleApiKey?: string;
+  // Selected model for Gemini Live
+  selectedModelId?: string;
 }
 
 // ToolArgs is now imported from utils/toolRouter
@@ -434,7 +436,7 @@ This reverts the application to the state before the last change was applied.`,
   },
 };
 
-export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, onOpenItem, onOpenFile, onOpenFolder, onBrowserBack, onCloseBrowser, onApproveChange, onRejectChange, onUndoChange, selectedElement, projectFolder, currentUrl, googleApiKey }: UseLiveGeminiParams) {
+export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, onOpenItem, onOpenFile, onOpenFolder, onBrowserBack, onCloseBrowser, onApproveChange, onRejectChange, onUndoChange, selectedElement, projectFolder, currentUrl, googleApiKey, selectedModelId }: UseLiveGeminiParams) {
   const [streamState, setStreamState] = useState<StreamState>({
     isConnected: false,
     isStreaming: false,
@@ -541,8 +543,13 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
 
+      // Build model name with native audio support
+      const modelName = selectedModelId
+        ? `${selectedModelId}-native-audio-preview-09-2025`
+        : 'gemini-2.5-flash-native-audio-preview-09-2025';
+
       const sessionPromise = aiRef.current.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+        model: modelName,
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
@@ -795,7 +802,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
       setStreamState(prev => ({ ...prev, error: error instanceof Error ? error.message : "Failed to connect" }));
       cleanup();
     }
-  }, [cleanup, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onApproveChange, onRejectChange, onUndoChange, selectedElement, googleApiKey]);
+  }, [cleanup, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onApproveChange, onRejectChange, onUndoChange, selectedElement, googleApiKey, selectedModelId]);
 
   const startVideoStreaming = useCallback(() => {
     if (frameIntervalRef.current) return;
