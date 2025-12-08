@@ -6738,6 +6738,8 @@ If you're not sure what the user wants, ask for clarification.
                 value={urlInput}
                 onChange={(e) => !activeTab.projectPath && setUrlInput(e.target.value)}
                 readOnly={!!activeTab.projectPath}
+                data-control-id="url-bar"
+                data-control-type="input"
                 className={`w-full h-8 px-3 pr-8 text-sm rounded-full focus:outline-none ${
                   activeTab.projectPath
                     ? `cursor-default ${isDarkMode ? 'bg-neutral-800 border-neutral-700 text-neutral-400' : 'bg-stone-100 border-stone-200 text-stone-500'}`
