@@ -8,12 +8,13 @@
 
 import { APP_KNOWLEDGE } from '../hooks/useAppControl'
 
-// Local model configuration - pool of 3 instances for parallel execution
+// Local model configuration - pool of 4 instances for parallel execution (~4x throughput)
 const LOCAL_MODEL_URL = 'http://127.0.0.1:1234/v1/chat/completions'
 const MODEL_POOL = [
   'qwen2.5-0.5b-instruct-mlx',
   'qwen2.5-0.5b-instruct-mlx:2',
-  'qwen2.5-0.5b-instruct-mlx:3'
+  'qwen2.5-0.5b-instruct-mlx:3',
+  'qwen2.5-0.5b-instruct-mlx:4'
 ]
 let modelIndex = 0
 
