@@ -2717,6 +2717,48 @@ export default function App() {
     return showFileBrowser(path);
   }, [showFileBrowser]);
 
+  // Handle instant code updates from Gemini's update_ui tool
+  const handleCodeUpdate = useCallback((html: string) => {
+    console.log('[InstantEdit] Applying HTML update to DOM');
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      console.warn('[InstantEdit] Webview not ready');
+      return;
+    }
+
+    // Inject HTML into the webview instantly
+    const injectCode = `
+      (function() {
+        try {
+          // Replace entire document with new HTML
+          document.documentElement.innerHTML = \`${html.replace(/`/g, '\\`')}\`;
+          return { success: true, message: 'HTML updated' };
+        } catch (err) {
+          return { success: false, error: err.message };
+        }
+      })()
+    `;
+
+    webview.executeJavaScript(injectCode)
+      .then((result: { success: boolean; message?: string; error?: string }) => {
+        if (result?.success) {
+          console.log('[InstantEdit] HTML applied to DOM successfully');
+          // Show success message
+          setMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            role: 'system',
+            content: '✓ UI updated instantly',
+            timestamp: new Date()
+          }]);
+        } else {
+          console.error('[InstantEdit] Failed to apply HTML:', result?.error);
+        }
+      })
+      .catch((err: Error) => {
+        console.error('[InstantEdit] Error injecting HTML:', err);
+      });
+  }, [isWebviewReady, activeTabId]);
+
   const {
     streamState,
     connect,
@@ -2727,7 +2769,7 @@ export default function App() {
   } = useLiveGemini({
     videoRef,
     canvasRef,
-    onCodeUpdate: () => {}, // No longer used for code updates
+    onCodeUpdate: handleCodeUpdate,
     onElementSelect: handleAiElementSelect,
     onExecuteCode: handleExecuteCode,
     onConfirmSelection: handleConfirmSelection,
@@ -3606,6 +3648,7 @@ export default function App() {
             applyCode: `document.querySelector('*').textContent = ${JSON.stringify(data.newText)}`,
             userRequest: 'Inline text edit',
             patchStatus: 'preparing',
+            userApproved: true, // Auto-approve: user already clicked tick to accept
           });
 
           prepareDomPatch(
