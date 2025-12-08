@@ -70,8 +70,8 @@
     "wait-on": "^9.0.3"
   },
   "build": {
-    "appId": "com.gemini.live-interface",
-    "productName": "Gemini Live Interface",
+    "appId": "com.cluso.desktop",
+    "productName": "Cluso",
     "directories": {
       "output": "release"
     },

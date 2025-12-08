@@ -274,6 +274,50 @@ const styles = `
     color: var(--accent);
   }
 
+  /* Soon Badge */
+  .soon-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.2rem 0.6rem;
+    background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+    border-radius: 9999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: white;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-left: 0.75rem;
+    vertical-align: middle;
+  }
+
+  .soon-section {
+    opacity: 0.6;
+  }
+
+  .soon-section h3 {
+    display: flex;
+    align-items: center;
+  }
+
+  .link-disabled {
+    color: var(--text-muted) !important;
+    cursor: not-allowed;
+    pointer-events: none;
+    text-decoration: line-through;
+  }
+
+  .link-soon {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .link-soon .soon-badge {
+    margin-left: 0;
+    font-size: 0.6rem;
+    padding: 0.15rem 0.4rem;
+  }
+
   .breadcrumb {
     font-size: 0.85rem;
     color: var(--text-muted);
@@ -392,15 +436,15 @@ export const DocumentationPage: React.FC<DocumentationPageProps> = ({ isDark: in
       subsections: [
         { id: 'ai-editing', label: 'AI-Powered Editing' },
         { id: 'live-preview', label: 'Live Preview' },
-        { id: 'code-export', label: 'Code Export' },
+        { id: 'code-export', label: 'Code Export', soon: true },
       ],
     },
     {
       id: 'advanced',
       label: 'Advanced',
       subsections: [
-        { id: 'api', label: 'API Reference' },
-        { id: 'plugins', label: 'Plugins & Extensions' },
+        { id: 'api', label: 'API Reference', soon: true },
+        { id: 'plugins', label: 'Plugins & Extensions', soon: true },
         { id: 'configuration', label: 'Configuration' },
       ],
     },
@@ -454,7 +498,7 @@ export const DocumentationPage: React.FC<DocumentationPageProps> = ({ isDark: in
               <div key={section.id} className="sidebar-section">
                 <div className="sidebar-title">{section.label}</div>
                 <ul className="sidebar-links">
-                  {section.subsections.map((subsection) => (
+                  {section.subsections.map((subsection: { id: string; label: string; soon?: boolean }) => (
                     <li key={subsection.id}>
                       <a
                         href={`#${subsection.id}`}
@@ -465,6 +509,7 @@ export const DocumentationPage: React.FC<DocumentationPageProps> = ({ isDark: in
                         }}
                       >
                         {subsection.label}
+                        {subsection.soon && <span className="soon-badge">Soon</span>}
                       </a>
                     </li>
                   ))}
@@ -489,13 +534,13 @@ export const DocumentationPage: React.FC<DocumentationPageProps> = ({ isDark: in
               <h3>Installation</h3>
               <p>Follow these steps to install Cluso on your system:</p>
               <ol>
-                <li>Download the installer from our <a href="#downloads" style={{ color: 'var(--accent)' }}>downloads page</a></li>
+                <li>Download the installer from our <a href="/downloads" style={{ color: 'var(--accent)' }}>downloads page</a></li>
                 <li>Run the installer and follow the setup wizard</li>
                 <li>Launch Cluso from your applications menu</li>
-                <li>Sign in with your account or create a new one</li>
+                <li>Configure your AI provider API keys in Settings</li>
               </ol>
               <div className="info-box">
-                <strong>💡 Tip:</strong> Make sure your system meets the minimum requirements before installation.
+                <strong>💡 Tip:</strong> Make sure your system meets the minimum requirements before installation. You'll need API keys from Google (Gemini) or other supported AI providers.
               </div>
             </section>
 
@@ -599,14 +644,19 @@ export const DocumentationPage: React.FC<DocumentationPageProps> = ({ isDark: in
               </ul>
             </section>
 
-            <section className="docs-section" id="code-export">
-              <h3>Code Export</h3>
-              <p>Export your changes in multiple formats:</p>
+            <section className="docs-section soon-section" id="code-export">
+              <h3>Code Export <span className="soon-badge">Soon</span></h3>
+              <p>Export your changes in multiple formats. Currently, changes are applied directly to your project files.</p>
+              <div className="info-box">
+                <strong>Coming Soon:</strong> Advanced export options are being developed to support multiple output formats.
+              </div>
+              <p>Planned export formats:</p>
               <ul>
                 <li><strong>HTML/CSS:</strong> Clean, production-ready code</li>
                 <li><strong>React:</strong> Component-ready JSX files</li>
-                <li><strong>Framework Agnostic:</strong> Vanilla JavaScript support</li>
-                <li><strong>Version Control:</strong> Git-compatible diffs</li>
+                <li><strong>Vue/Svelte:</strong> Framework-specific components</li>
+                <li><strong>Tailwind:</strong> Utility-class based exports</li>
+                <li><strong>Git Patches:</strong> Version control-ready diffs</li>
               </ul>
             </section>
 
@@ -616,43 +666,51 @@ export const DocumentationPage: React.FC<DocumentationPageProps> = ({ isDark: in
               <p>Unlock advanced capabilities for power users and developers.</p>
             </section>
 
-            <section className="docs-section" id="api">
-              <h3>API Reference</h3>
-              <p>Extend Cluso functionality with the API:</p>
-              <div className="code-block">
-GET /api/projects          List all projects
-POST /api/projects         Create a new project
-GET /api/projects/:id      Get project details
-PUT /api/projects/:id      Update project
-DELETE /api/projects/:id   Delete project
+            <section className="docs-section soon-section" id="api">
+              <h3>API Reference <span className="soon-badge">Soon</span></h3>
+              <p>We're building a powerful API to let you extend and integrate Cluso with your own tools and workflows.</p>
+              <div className="info-box">
+                <strong>Coming Soon:</strong> The Cluso API will allow programmatic access to UI analysis, code generation, and project management features. Join our waitlist to be notified when it launches.
               </div>
-              <p>For detailed API documentation, visit our <a href="#" style={{ color: 'var(--accent)' }}>API documentation</a>.</p>
+              <p>Planned capabilities:</p>
+              <ul>
+                <li>Programmatic element analysis</li>
+                <li>Batch code generation</li>
+                <li>Custom AI model integration</li>
+                <li>Webhook notifications</li>
+              </ul>
             </section>
 
-            <section className="docs-section" id="plugins">
-              <h3>Plugins & Extensions</h3>
-              <p>Create custom plugins to extend Cluso:</p>
-              <ol>
-                <li>Create a plugin manifest in JSON format</li>
-                <li>Implement plugin hooks and event handlers</li>
-                <li>Package and distribute your plugin</li>
-                <li>Users can install from the plugin marketplace</li>
-              </ol>
+            <section className="docs-section soon-section" id="plugins">
+              <h3>Plugins & Extensions <span className="soon-badge">Soon</span></h3>
+              <p>We're designing a plugin system to let you extend Cluso with custom functionality.</p>
+              <div className="info-box">
+                <strong>Coming Soon:</strong> The plugin marketplace will allow developers to create, share, and install extensions that add new capabilities to Cluso.
+              </div>
+              <p>Planned plugin capabilities:</p>
+              <ul>
+                <li>Custom AI model providers</li>
+                <li>Framework-specific code generators (Vue, Svelte, etc.)</li>
+                <li>Design system integrations</li>
+                <li>Custom export formats</li>
+                <li>Third-party service connectors</li>
+              </ul>
             </section>
 
             <section className="docs-section" id="configuration">
               <h3>Configuration</h3>
-              <p>Customize Cluso to fit your workflow. Edit the configuration file at:</p>
-              <div className="code-block">
-~/.cluso/config.json
-              </div>
+              <p>Customize Cluso to fit your workflow using the Settings panel. Click the gear icon in the top-right corner to access settings.</p>
               <p>Available options include:</p>
               <ul>
-                <li><strong>theme:</strong> 'light' or 'dark'</li>
-                <li><strong>autoPreview:</strong> Enable/disable live preview</li>
-                <li><strong>defaultModel:</strong> AI model selection</li>
-                <li><strong>apiKey:</strong> Your API key for cloud features</li>
+                <li><strong>Theme:</strong> Switch between light and dark mode</li>
+                <li><strong>AI Provider:</strong> Choose between Gemini, Claude, or other providers</li>
+                <li><strong>API Keys:</strong> Configure your AI provider credentials</li>
+                <li><strong>Voice Settings:</strong> Adjust voice input sensitivity and language</li>
+                <li><strong>Editor Preferences:</strong> Font size, tab behavior, and display options</li>
               </ul>
+              <div className="info-box">
+                <strong>🔐 Privacy:</strong> Your API keys are stored locally on your device and are never sent to our servers.
+              </div>
             </section>
 
             {/* Support Section */}
@@ -709,10 +767,22 @@ DELETE /api/projects/:id   Delete project
               <h3>Contact & Support</h3>
               <p>Need help? We're here for you:</p>
               <ul>
-                <li><strong>Email:</strong> <a href="mailto:support@cluso.dev" style={{ color: 'var(--accent)' }}>support@cluso.dev</a></li>
-                <li><strong>Twitter:</strong> <a href="https://twitter.com/cluso" style={{ color: 'var(--accent)' }}>@cluso</a></li>
-                <li><strong>Discord:</strong> <a href="#" style={{ color: 'var(--accent)' }}>Join our community</a></li>
-                <li><strong>Docs:</strong> <a href="#" style={{ color: 'var(--accent)' }}>GitHub Repository</a></li>
+                <li><strong>Email:</strong> <a href="mailto:hello@cluso.dev" style={{ color: 'var(--accent)' }}>hello@cluso.dev</a></li>
+                <li><strong>Twitter:</strong> <a href="https://twitter.com/clusodev" style={{ color: 'var(--accent)' }}>@clusodev</a></li>
+                <li>
+                  <strong>Discord:</strong>{' '}
+                  <span className="link-soon">
+                    <span style={{ color: 'var(--text-muted)' }}>Community server</span>
+                    <span className="soon-badge">Soon</span>
+                  </span>
+                </li>
+                <li>
+                  <strong>GitHub:</strong>{' '}
+                  <span className="link-soon">
+                    <span style={{ color: 'var(--text-muted)' }}>Public repository</span>
+                    <span className="soon-badge">Soon</span>
+                  </span>
+                </li>
               </ul>
               <div className="info-box" style={{ marginTop: '1.5rem' }}>
                 <strong>📧 Response Time:</strong> We typically respond to support emails within 24 hours on business days.

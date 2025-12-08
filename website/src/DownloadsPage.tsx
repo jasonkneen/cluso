@@ -498,14 +498,14 @@ export const DownloadsPage: React.FC = () => {
             </div>
 
             {/* Windows */}
-            <div className="download-card">
-              <div className="download-icon">
+            <div className="download-card" style={{ opacity: 0.5, pointerEvents: 'none' }}>
+              <div className="download-icon" style={{ background: 'var(--text-muted)' }}>
                 <svg viewBox="0 0 24 24" fill="currentColor">
                   <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/>
                 </svg>
               </div>
               <h2>Windows</h2>
-              <p className="subtitle">Version 1.0.0</p>
+              <p className="subtitle" style={{ color: 'var(--accent)' }}>Coming Soon</p>
               <div className="system-requirements">
                 <h3>System Requirements</h3>
                 <ul>
@@ -514,14 +514,9 @@ export const DownloadsPage: React.FC = () => {
                   <li>• 500 MB disk space</li>
                 </ul>
               </div>
-              <a href="https://github.com/anthropics/cluso/releases/download/v1.0.0/Cluso-1.0.0-Setup.exe" className="download-button">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="7 10 12 15 17 10"/>
-                  <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-                Download for Windows
-              </a>
+              <span className="download-button" style={{ background: 'var(--text-muted)', cursor: 'not-allowed' }}>
+                Coming Soon
+              </span>
             </div>
           </div>
 
