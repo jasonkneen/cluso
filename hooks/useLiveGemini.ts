@@ -614,7 +614,16 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
           APPROVAL: "yes"/"approve", "no"/"reject", "undo that"
           CONFIRM: "yes"/"approve", "no"/"reject"
 
-          Be concise. Describe what you're doing.`,
+          🚀 INSTANT DOM EDITS - CRITICAL:
+          When user requests UI changes ("flip it back", "change the color", "move that button", etc):
+          - IMMEDIATELY call update_ui with the modified HTML
+          - Do NOT read source files first - you can infer changes from the current DOM
+          - Do NOT explain or describe what you're doing
+          - Do NOT use tools like read_file, get_page_elements, or list_files
+          - Apply the change silently and instantly
+          - Only respond AFTER the DOM update is complete
+
+          Be silent on instant edits. Concise on other tasks.`,
         },
         callbacks: {
           onopen: () => {
