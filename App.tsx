@@ -144,7 +144,7 @@ async function generateUIUpdate(
   element: SelectedElement,
   userRequest: string,
   apiKey: string,
-  modelId: string = 'gemini-2.0-flash-001'  // Default fallback, but should be passed explicitly
+  modelId: string = 'gemini-2.5-flash'  // Default fallback, but should be passed explicitly
 ): Promise<UIUpdateResult> {
   const google = createGoogleGenerativeAI({ apiKey });
 
@@ -300,9 +300,9 @@ const DEFAULT_MODEL = { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', Icon: 
 const MODELS = [
   DEFAULT_MODEL,
   { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro', Icon: Sparkles },
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', Icon: Zap },
   { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', Icon: Rocket },
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', Icon: Rocket },
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', Icon: Zap },
+  { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', Icon: Zap },
 ];
 
 const DEFAULT_URL = ''; // Empty string shows project selection (NewTabPage)

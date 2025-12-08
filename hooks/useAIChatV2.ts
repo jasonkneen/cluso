@@ -155,12 +155,9 @@ export function shouldUseAgentSDK(modelId: string): boolean {
 const MODEL_PROVIDER_MAP: Record<string, ProviderType> = {
   // Google models
   'gemini-3-pro-preview': 'google',
-  'gemini-2.5-flash': 'google',
   'gemini-2.5-pro': 'google',
-  'gemini-2.0-flash': 'google',
-  'gemini-2.0-flash-lite': 'google',
-  'gemini-1.5-pro': 'google',
-  'gemini-1.5-flash': 'google',
+  'gemini-2.5-flash': 'google',
+  'gemini-2.5-flash-lite': 'google',
   // OpenAI models
   'gpt-4o': 'openai',
   'gpt-4o-mini': 'openai',

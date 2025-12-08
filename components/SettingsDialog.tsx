@@ -146,9 +146,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex', provider: 'codex', enabled: false },
     // Google Gemini models
     { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro', provider: 'google', enabled: true },
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'google', enabled: true },
     { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'google', enabled: true },
-    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'google', enabled: true },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'google', enabled: true },
+    { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', provider: 'google', enabled: true },
   ],
   connections: [
     {
