@@ -34,6 +34,7 @@ export function useElectronAPI() {
     mcp: api?.mcp ?? null,
     voice: api?.voice ?? null,
     tabdata: api?.tabdata ?? null,
+    lsp: api?.lsp ?? null,
     dialog: (api as { dialog?: { openFolder: () => Promise<{ canceled: boolean; filePaths: string[] }> } })?.dialog ?? null,
   }
 }
@@ -58,6 +59,7 @@ export function getElectronAPI() {
     mcp: api?.mcp ?? null,
     voice: api?.voice ?? null,
     tabdata: api?.tabdata ?? null,
+    lsp: api?.lsp ?? null,
     dialog: (api as { dialog?: { openFolder: () => Promise<{ canceled: boolean; filePaths: string[] }> } })?.dialog ?? null,
   }
 }

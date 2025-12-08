@@ -20,6 +20,10 @@ import { useAIChat, getProviderForModel, ProviderConfig, MCPToolDefinition, toCo
 import type { CoreMessage } from './hooks/useAIChat';
 import { useCodingAgent, CodingContext, FileModificationEvent, ClarifyingQuestionData } from './hooks/useCodingAgent';
 import { ClarifyingQuestion } from './components/ClarifyingQuestion';
+
+import { useLSPUI } from './hooks/useLSPUI';
+import { HoverTooltip } from './components/HoverTooltip';
+import { AutocompletePopup } from './components/AutocompletePopup';
 import { useMCP } from './hooks/useMCP';
 import { useSelectorAgent } from './hooks/useSelectorAgent';
 import { useToolTracker } from './hooks/useToolTracker';
@@ -28,7 +32,7 @@ import { SteeringQuestions } from './components/SteeringQuestions';
 import { generateTurnId } from './utils/turnUtils';
 import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler';
 import { PatchApprovalDialog } from './components/PatchApprovalDialog';
-import { SourcePatch } from './utils/generateSourcePatch';
+
 import { getElectronAPI } from './hooks/useElectronAPI';
 import type { MCPServerConfig } from './types/mcp';
 import { GoogleGenAI } from '@google/genai'; // Keep for voice streaming
@@ -1430,6 +1434,32 @@ export default function App() {
     startLine: number;
     endLine: number;
   } | null>(null);
+
+  // LSP UI - hover tooltips and autocomplete for code
+  const lspUI = useLSPUI(displayedSourceCode?.fileName);
+
+  // Handle mouse move over code for LSP hover
+  const handleCodeMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!displayedSourceCode) return;
+
+    // Get position relative to the code block
+    const target = e.target as HTMLElement;
+    const codeElement = target.closest('pre');
+    if (!codeElement) return;
+
+    // Calculate approximate line and character from mouse position
+    const rect = codeElement.getBoundingClientRect();
+    const lineHeight = 20; // Approximate line height in pixels
+    const charWidth = 8;   // Approximate character width in monospace
+
+    const relativeY = e.clientY - rect.top;
+    const relativeX = e.clientX - rect.left;
+
+    const line = Math.floor(relativeY / lineHeight) + displayedSourceCode.startLine;
+    const character = Math.floor(relativeX / charWidth);
+
+    lspUI.showHover(e.clientX, e.clientY, line, character);
+  }, [displayedSourceCode, lspUI]);
 
   // File Browser Overlay State
   interface FileBrowserItem {
@@ -5958,22 +5988,31 @@ If you're not sure what the user wants, ask for clarification.
     const startLine = src.line || 1;
     const endLine = src.endLine || startLine + 10;
 
-    if (!filePath || !isElectron || !window.electronAPI?.readFile) {
-      console.log('Cannot read file:', { filePath, isElectron });
+    if (!filePath || !isElectron || !window.electronAPI?.files?.readFile) {
+      console.log('Cannot read file:', { filePath, isElectron, hasFiles: !!window.electronAPI?.files });
       return;
     }
 
     // If path is relative and we have a project path, resolve it
-    if (!filePath.startsWith('/') && activeTab.projectPath) {
-      // Handle various relative path formats from bundlers
-      // e.g., "./src/App.tsx", "src/App.tsx", "/src/App.tsx" (relative to project root)
-      const cleanPath = filePath.replace(/^\.\//, '').replace(/^\/?/, '');
+    // Handle various path formats from bundlers:
+    // - "./src/App.tsx" (explicit relative)
+    // - "src/App.tsx" (implicit relative)
+    // - "/src/App.tsx" (root-relative, common in Vite/bundlers)
+    const isAbsolutePath = filePath.startsWith('/') && (
+      filePath.startsWith('/Users/') ||
+      filePath.startsWith('/home/') ||
+      filePath.startsWith('/var/') ||
+      filePath.startsWith('/tmp/')
+    );
+
+    if (!isAbsolutePath && activeTab.projectPath) {
+      const cleanPath = filePath.replace(/^\.\//, '').replace(/^\//, '');
       filePath = `${activeTab.projectPath}/${cleanPath}`;
       console.log('Resolved relative path:', filePath);
     }
 
     try {
-      const result = await window.electronAPI.readFile(filePath);
+      const result = await window.electronAPI.files.readFile(filePath);
       if (result.success && result.data) {
         const lines = result.data.split('\n');
         // Get lines around the target (with some context)
@@ -8195,22 +8234,45 @@ If you're not sure what the user wants, ask for clarification.
                       </div>
                   )}
 
-                  {/* Source Code Preview */}
+                  {/* Source Code Preview with LSP hover */}
                   {displayedSourceCode && (
                       <div className="px-3 pt-3">
                           <div className={`text-xs font-mono mb-1 ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
                             {displayedSourceCode.fileName} ({displayedSourceCode.startLine}-{displayedSourceCode.endLine})
                           </div>
-                          <CodeBlock
-                            code={displayedSourceCode.code}
-                            language="tsx"
-                            showLineNumbers={true}
-                            isDarkMode={isDarkMode}
+                          <div
+                            onMouseMove={handleCodeMouseMove}
+                            onMouseLeave={() => lspUI.hideHover()}
                           >
-                            <CodeBlockCopyButton />
-                          </CodeBlock>
+                            <CodeBlock
+                              code={displayedSourceCode.code}
+                              language="tsx"
+                              showLineNumbers={true}
+                              isDarkMode={isDarkMode}
+                            >
+                              <CodeBlockCopyButton />
+                            </CodeBlock>
+                          </div>
                       </div>
                   )}
+
+                  {/* LSP Hover Tooltip */}
+                  <HoverTooltip
+                    data={lspUI.uiState.hoverTooltip.data}
+                    position={lspUI.uiState.hoverTooltip.position}
+                    isVisible={lspUI.uiState.hoverTooltip.isVisible}
+                    onDismiss={() => lspUI.hideHover()}
+                  />
+
+                  {/* LSP Autocomplete Popup */}
+                  <AutocompletePopup
+                    items={lspUI.uiState.autocomplete.items}
+                    position={lspUI.uiState.autocomplete.position}
+                    isVisible={lspUI.uiState.autocomplete.isVisible}
+                    filterText={lspUI.uiState.autocomplete.filterText}
+                    onSelect={(item) => lspUI.selectCompletion(item)}
+                    onDismiss={() => lspUI.hideAutocomplete()}
+                  />
 
                   <div className="relative">
                       <textarea
