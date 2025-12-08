@@ -2,11 +2,13 @@
  * useClusoAgent - React hook for Cluso Agent integration
  *
  * Connects the local LLM agent to the UI control system.
+ * Uses Gemini's native voice for TTS instead of browser speechSynthesis.
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { ClusoAgent, createClusoAgent, ClusoAgentCallbacks } from '../services/clusoAgent'
 import { useAppControl } from './useAppControl'
+import { initGeminiTTS, speakWithGemini } from '../services/geminiTTS'
 
 export interface UseClusoAgentResult {
   isReady: boolean
@@ -37,6 +39,15 @@ export function useClusoAgent(): UseClusoAgentResult {
 
   // Initialize agent with callbacks
   useEffect(() => {
+    // Initialize Gemini TTS with API key from environment
+    const apiKey = (import.meta as any).env?.VITE_GOOGLE_API_KEY || (window as any).process?.env?.API_KEY
+    if (apiKey) {
+      initGeminiTTS(apiKey)
+      console.log('[ClusoAgent] Gemini TTS initialized')
+    } else {
+      console.warn('[ClusoAgent] No API key found, using browser TTS fallback')
+    }
+
     const callbacks: ClusoAgentCallbacks = {
       onHighlight: (element, options) => {
         console.log('[ClusoAgent] Highlight:', element, options)
@@ -58,12 +69,9 @@ export function useClusoAgent(): UseClusoAgentResult {
         await appControl.typeText(element, text)
       },
       onSpeak: (message) => {
-        console.log('[ClusoAgent] Speak:', message)
-        if ('speechSynthesis' in window) {
-          const utterance = new SpeechSynthesisUtterance(message)
-          utterance.rate = 1.1
-          speechSynthesis.speak(utterance)
-        }
+        console.log('[ClusoAgent] Speak (Gemini voice):', message)
+        // Use Gemini's native voice instead of browser TTS
+        speakWithGemini(message)
       },
       onWait: (duration) => {
         console.log('[ClusoAgent] Wait:', duration)
