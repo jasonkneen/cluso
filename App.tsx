@@ -7105,6 +7105,8 @@ If you're not sure what the user wants, ask for clarification.
 
                     <button
                         onClick={streamState.isConnected ? disconnect : connect}
+                        data-control-id="voice-button"
+                        data-control-type="button"
                         className={`flex items-center justify-center w-9 h-9 rounded-full font-medium transition-all ${streamState.isConnected ? 'bg-red-50 text-red-600 ring-1 ring-red-100' : (isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-800')}`}
                         title={streamState.isConnected ? 'End voice session' : 'Start voice session'}
                     >

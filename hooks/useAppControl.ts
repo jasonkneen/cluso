@@ -52,6 +52,11 @@ const ELEMENT_REGISTRY: Record<string, { selector: string; description: string; 
     description: 'Toggle the Cluso Agent demo panel',
     action: 'click'
   },
+  'voice-button': {
+    selector: '[data-control-id="voice-button"]',
+    description: 'Start/stop voice session with Gemini - small mic icon in chat area',
+    action: 'click'
+  },
 
   // Chat area
   'chat-input': {
