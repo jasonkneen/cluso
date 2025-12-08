@@ -140,6 +140,7 @@ const styles = `
   .docs-sidebar {
     position: sticky;
     top: 5rem;
+    left: -20px;
     height: fit-content;
     max-height: calc(100vh - 6rem);
     overflow-y: auto;
@@ -471,7 +472,7 @@ export const DocumentationPage: React.FC<DocumentationPageProps> = ({ isDark: in
                 src={isDark ? '/logo_dark.png' : '/logo_light.png'}
                 alt="Cluso"
               />
-            </a>
+</a>
             <div className="docs-nav-right">
               <a href="/" className="docs-nav-link">Back to Home</a>
               <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
@@ -511,7 +512,7 @@ export const DocumentationPage: React.FC<DocumentationPageProps> = ({ isDark: in
                         }}
                       >
                         {subsection.label}
-                        {subsection.soon && <span className="soon-badge">Soon</span>}
+                        {subsection.soon && <span className="soon-badge" style={{ fontSize: '9.8px' }}>Soon</span>}
                       </a>
                     </li>
                   ))}
@@ -670,7 +671,6 @@ export const DocumentationPage: React.FC<DocumentationPageProps> = ({ isDark: in
                 <li>"Go back" - Navigate back in file browser</li>
                 <li>"Close that" / "Clear" / "Dismiss" - Close the file browser</li>
               </ul>
-
               <p style={{ marginTop: '1.5rem' }}><strong>Page Navigation</strong></p>
               <ul>
                 <li>"Click that" / "Click the download button" - Click elements</li>
