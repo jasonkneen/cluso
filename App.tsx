@@ -847,6 +847,14 @@ export default function App() {
   const [commandSearchQuery, setCommandSearchQuery] = useState('');
   const [showCommandAutocomplete, setShowCommandAutocomplete] = useState(false);
 
+  // Context Chips State (+ for include, - for exclude)
+  // +aisdk = include context, -gpt-4 = exclude/negative context
+  const [contextChips, setContextChips] = useState<Array<{name: string; type: 'include' | 'exclude'}>>([]);
+  const [recentContextChips, setRecentContextChips] = useState<Array<{name: string; type: 'include' | 'exclude'}>>([]);
+  const [showChipAutocomplete, setShowChipAutocomplete] = useState(false);
+  const [chipSearchQuery, setChipSearchQuery] = useState('');
+  const [chipSearchType, setChipSearchType] = useState<'include' | 'exclude'>('include');
+
   // Thinking/Reasoning Mode State
   type ThinkingLevel = 'off' | 'low' | 'med' | 'high' | 'ultrathink';
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('off');
@@ -2912,11 +2920,150 @@ export default function App() {
     );
   }, [builtInCommandsForAutocomplete, availableCommands, commandSearchQuery]);
 
-  // Detect @ and / commands in input
+  // Filtered recent context chips for autocomplete
+  const filteredContextChips = useMemo(() => {
+    // Filter by search query and exclude already-selected chips
+    return recentContextChips.filter(chip => {
+      const matchesQuery = chip.name.toLowerCase().includes(chipSearchQuery.toLowerCase());
+      const alreadySelected = contextChips.some(c => c.name === chip.name && c.type === chip.type);
+      return matchesQuery && !alreadySelected;
+    });
+  }, [recentContextChips, chipSearchQuery, contextChips]);
+
+  // Handle chip selection from autocomplete
+  const handleChipSelect = useCallback((chip: {name: string; type: 'include' | 'exclude'}) => {
+    // Add the chip
+    setContextChips(prev => {
+      const exists = prev.some(c => c.name === chip.name && c.type === chip.type);
+      if (exists) return prev;
+      return [...prev, chip];
+    });
+    // Remove the +/- prefix from input
+    setInput(prev => {
+      const prefix = chip.type === 'include' ? '+' : '-';
+      const pattern = new RegExp(`\\${prefix}[a-zA-Z0-9_-]*$`);
+      return prev.replace(pattern, '');
+    });
+    // Hide autocomplete
+    setShowChipAutocomplete(false);
+    setChipSearchQuery('');
+  }, []);
+
+  // Detect @ and / and +/- commands in input
   const handleInputChange = useCallback((value: string) => {
     console.log('[Input] Changed:', value);
-    setInput(value);
+
+    // Detect +word and -word patterns for context chips
+    // +word = include context, -word = exclude/negative context
+    // Only convert to chip when followed by space (means user finished typing)
+    const includePattern = /\+([a-zA-Z0-9_-]+)\s/g;
+    const excludePattern = /-([a-zA-Z0-9_-]+)\s/g;
+    let processedValue = value;
+    const newChips: Array<{name: string; type: 'include' | 'exclude'}> = [];
+
+    // Find include chips (+word)
+    let match;
+    while ((match = includePattern.exec(value)) !== null) {
+      newChips.push({ name: match[1], type: 'include' });
+      processedValue = processedValue.replace(match[0], '');
+    }
+
+    // Find exclude chips (-word) - but not if it looks like a number or math
+    // Only match if preceded by space or start of string
+    const excludeMatches = value.matchAll(/(?:^|\s)-([a-zA-Z][a-zA-Z0-9_-]*)\s/g);
+    for (const m of excludeMatches) {
+      newChips.push({ name: m[1], type: 'exclude' });
+      processedValue = processedValue.replace(m[0], m[0].startsWith(' ') ? ' ' : '');
+    }
+
+    // Add new chips (avoid duplicates) and update recent chips
+    if (newChips.length > 0) {
+      setContextChips(prev => {
+        const combined = [...prev];
+        newChips.forEach(chip => {
+          const exists = combined.some(c => c.name === chip.name && c.type === chip.type);
+          if (!exists) {
+            combined.push(chip);
+          }
+        });
+        return combined;
+      });
+      // Add to recent chips for autocomplete
+      setRecentContextChips(prev => {
+        const updated = [...prev];
+        newChips.forEach(chip => {
+          // Move to front if already exists, or add to front
+          const existingIdx = updated.findIndex(c => c.name === chip.name);
+          if (existingIdx !== -1) {
+            updated.splice(existingIdx, 1);
+          }
+          updated.unshift(chip);
+        });
+        // Keep only 20 most recent
+        const limited = updated.slice(0, 20);
+        // Save to localStorage
+        try {
+          const storageKey = `cluso-context-chips-${activeTab.projectPath || 'global'}`;
+          localStorage.setItem(storageKey, JSON.stringify(limited));
+        } catch (e) {
+          console.warn('[ContextChips] Failed to save to localStorage:', e);
+        }
+        return limited;
+      });
+      // Update input with chips removed
+      setInput(processedValue);
+    } else {
+      setInput(value);
+    }
+
     setAutocompleteIndex(0);
+
+    // Detect + or - for context chip autocomplete
+    // Check for + (include)
+    const lastPlusIndex = processedValue.lastIndexOf('+');
+    const lastMinusIndex = processedValue.lastIndexOf('-');
+
+    // Find which is more recent (later in string) and is a valid chip start
+    let chipPrefix: '+' | '-' | null = null;
+    let chipStartIndex = -1;
+
+    if (lastPlusIndex !== -1) {
+      const beforePlus = lastPlusIndex > 0 ? processedValue.charAt(lastPlusIndex - 1) : ' ';
+      const afterPlus = processedValue.substring(lastPlusIndex + 1);
+      const isStartOfWord = beforePlus === ' ' || lastPlusIndex === 0;
+      const hasSpaceAfter = afterPlus.includes(' ');
+      if (isStartOfWord && !hasSpaceAfter) {
+        chipPrefix = '+';
+        chipStartIndex = lastPlusIndex;
+      }
+    }
+
+    if (lastMinusIndex !== -1 && lastMinusIndex > chipStartIndex) {
+      const beforeMinus = lastMinusIndex > 0 ? processedValue.charAt(lastMinusIndex - 1) : ' ';
+      const afterMinus = processedValue.substring(lastMinusIndex + 1);
+      const isStartOfWord = beforeMinus === ' ' || lastMinusIndex === 0;
+      const hasSpaceAfter = afterMinus.includes(' ');
+      // Only treat as exclude chip if followed by a letter (not a number)
+      const startsWithLetter = /^[a-zA-Z]/.test(afterMinus);
+      if (isStartOfWord && !hasSpaceAfter && startsWithLetter) {
+        chipPrefix = '-';
+        chipStartIndex = lastMinusIndex;
+      }
+    }
+
+    if (chipPrefix && chipStartIndex !== -1) {
+      const query = processedValue.substring(chipStartIndex + 1);
+      setChipSearchQuery(query);
+      setChipSearchType(chipPrefix === '+' ? 'include' : 'exclude');
+      setShowChipAutocomplete(true);
+      setShowFileAutocomplete(false);
+      setShowCommandAutocomplete(false);
+      return; // Don't check other patterns
+    }
+
+    // Hide chip autocomplete if not in +/- mode
+    setShowChipAutocomplete(false);
+    setChipSearchQuery('');
 
     // Detect @ command for file selection - works ANYWHERE in input
     // Find the last @ symbol to get the current query
@@ -4247,6 +4394,29 @@ export default function App() {
 
     // NO CLEANUP - watchers stay active until app closes
   }, [isElectron, activeTab.projectPath]);
+
+  // Load recent context chips from localStorage when project changes
+  useEffect(() => {
+    try {
+      const storageKey = `cluso-context-chips-${activeTab.projectPath || 'global'}`;
+      const stored = localStorage.getItem(storageKey);
+      if (stored) {
+        const chips = JSON.parse(stored);
+        if (Array.isArray(chips)) {
+          setRecentContextChips(chips);
+          console.log('[ContextChips] Loaded', chips.length, 'recent chips for', storageKey);
+        }
+      } else {
+        // No chips stored for this project, start fresh
+        setRecentContextChips([]);
+      }
+    } catch (e) {
+      console.warn('[ContextChips] Failed to load from localStorage:', e);
+      setRecentContextChips([]);
+    }
+    // Also clear current context chips when switching projects
+    setContextChips([]);
+  }, [activeTab.projectPath]);
 
   // Sync Inspector State with Webview
   useEffect(() => {
@@ -8249,15 +8419,35 @@ If you're not sure what the user wants, ask for clarification.
                       </div>
                   )}
 
-                  {/* File Chips */}
-                  {selectedFiles.length > 0 && (
+                  {/* File Chips and Context Chips */}
+                  {(selectedFiles.length > 0 || contextChips.length > 0) && (
                       <div className={`px-3 pt-2 flex flex-wrap gap-2`}>
+                          {/* File Chips */}
                           {selectedFiles.map((file, idx) => (
-                              <div key={idx} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs ${isDarkMode ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
+                              <div key={`file-${idx}`} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs ${isDarkMode ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
                                   <Code2 size={12} />
                                   <span className="font-mono max-w-[120px] truncate">{file.path.split('/').pop()}</span>
                                   <button
                                       onClick={() => setSelectedFiles(prev => prev.filter((_, i) => i !== idx))}
+                                      className="hover:opacity-70"
+                                  >
+                                      <X size={12} />
+                                  </button>
+                              </div>
+                          ))}
+                          {/* Context Chips */}
+                          {contextChips.map((chip) => (
+                              <div
+                                key={`chip-${chip.name}-${chip.type}`}
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs ${
+                                  chip.type === 'exclude'
+                                    ? isDarkMode ? 'bg-red-500/20 text-red-300 border border-red-500/30' : 'bg-red-50 text-red-700 border border-red-200'
+                                    : isDarkMode ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-blue-50 text-blue-700 border border-blue-200'
+                                }`}
+                              >
+                                  <span className="font-medium uppercase">{chip.name}</span>
+                                  <button
+                                      onClick={() => setContextChips(prev => prev.filter(c => !(c.name === chip.name && c.type === chip.type)))}
                                       className="hover:opacity-70"
                                   >
                                       <X size={12} />
@@ -8476,6 +8666,34 @@ If you're not sure what the user wants, ask for clarification.
                                       >
                                           <Terminal size={14} />
                                           /{cmd.name}
+                                      </button>
+                                  ))
+                              )}
+                          </div>
+                      )}
+
+                      {/* Autocomplete for +/- (context chips) */}
+                      {showChipAutocomplete && (
+                          <div className={`absolute bottom-full left-0 mb-2 w-64 rounded-xl shadow-xl py-1 z-[100] max-h-[264px] overflow-y-auto ${isDarkMode ? 'bg-neutral-700 border border-neutral-600' : 'bg-white border border-stone-200'}`}>
+                              {filteredContextChips.length === 0 ? (
+                                  <div className={`px-3 py-2 text-sm ${isDarkMode ? 'text-neutral-400' : 'text-stone-400'}`}>
+                                      {recentContextChips.length === 0 ? 'No recent chips' : 'No matching chips'}
+                                  </div>
+                              ) : (
+                                  filteredContextChips.slice(0, 6).map((chip, idx) => (
+                                      <button
+                                          key={`${chip.type}-${chip.name}`}
+                                          onClick={() => handleChipSelect({ ...chip, type: chipSearchType })}
+                                          className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 ${idx === autocompleteIndex ? (isDarkMode ? 'bg-neutral-600' : 'bg-stone-100') : ''} ${isDarkMode ? 'hover:bg-neutral-600 text-neutral-200' : 'hover:bg-stone-50'}`}
+                                      >
+                                          <span className={`inline-flex items-center justify-center w-4 h-4 rounded text-[10px] font-bold ${
+                                            chipSearchType === 'exclude'
+                                              ? isDarkMode ? 'bg-red-500/30 text-red-300' : 'bg-red-100 text-red-600'
+                                              : isDarkMode ? 'bg-blue-500/30 text-blue-300' : 'bg-blue-100 text-blue-600'
+                                          }`}>
+                                            {chipSearchType === 'exclude' ? '-' : '+'}
+                                          </span>
+                                          <span className="uppercase font-medium">{chip.name}</span>
                                       </button>
                                   ))
                               )}
