@@ -216,12 +216,17 @@ export class ClusoAgent {
       while (response.tool_calls && response.tool_calls.length > 0 && iterations < maxIterations) {
         iterations++
 
-        // Execute each tool call
-        for (const toolCall of response.tool_calls) {
-          const args = JSON.parse(toolCall.function.arguments)
-          const result = await this.executeTool(toolCall.function.name, args)
+        // Execute all tool calls in PARALLEL for ~4x speedup with 4 model instances
+        const toolResults = await Promise.all(
+          response.tool_calls.map(async (toolCall) => {
+            const args = JSON.parse(toolCall.function.arguments)
+            const result = await this.executeTool(toolCall.function.name, args)
+            return { toolCall, result }
+          })
+        )
 
-          // Add tool result to messages
+        // Add all tool results to messages (order preserved)
+        for (const { toolCall, result } of toolResults) {
           this.messages.push({
             role: 'tool',
             content: JSON.stringify(result),
