@@ -912,7 +912,7 @@ export const DocumentationPage: React.FC<DocumentationPageProps> = ({ isDark: in
               <p>Need help? We're here for you:</p>
               <ul>
                 <li><strong>Email:</strong> <a href="mailto:hello@cluso.dev" style={{ color: 'var(--accent)' }}>hello@cluso.dev</a></li>
-                <li><strong>Twitter:</strong> <a href="https://twitter.com/clusodev" style={{ color: 'var(--accent)' }}>@clusodev</a></li>
+                <li><strong>X:</strong> <a href="https://x.com/cluso_app" style={{ color: 'var(--accent)' }}>@cluso_app</a></li>
                 <li>
                   <strong>Discord:</strong>{' '}
                   <span className="link-soon">

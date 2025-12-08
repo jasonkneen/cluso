@@ -856,7 +856,7 @@ export const PlansPage: React.FC<PlansPageProps> = ({ isDark = true, onToggleThe
         <footer className="plans-footer">
           <div className="footer-container">
             <div className="footer-bottom">
-              <span>&copy; 2024 Cluso. All rights reserved.</span>
+              <span>&copy; 2024/2025 Jason Kneen. All rights reserved.</span>
               <div style={{ fontSize: '0.9rem' }}>
                 All plans include 14-day free trial. No credit card required.
               </div>
