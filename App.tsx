@@ -2644,7 +2644,9 @@ export default function App() {
     onApproveChange: handleVoiceApprove,
     onRejectChange: handleVoiceReject,
     onUndoChange: handleVoiceUndo,
-    selectedElement: selectedElement
+    selectedElement: selectedElement,
+    // Pass Google API key from settings
+    googleApiKey: appSettings.providers.find(p => p.id === 'google')?.apiKey,
   });
 
   // Load available prompts and directory files on mount

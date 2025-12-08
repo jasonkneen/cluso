@@ -32,6 +32,8 @@ interface UseLiveGeminiParams {
   // Context for logging
   projectFolder?: string;
   currentUrl?: string;
+  // API key from settings (falls back to env if not provided)
+  googleApiKey?: string;
 }
 
 // ToolArgs is now imported from utils/toolRouter
@@ -432,7 +434,7 @@ This reverts the application to the state before the last change was applied.`,
   },
 };
 
-export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, onOpenItem, onOpenFile, onOpenFolder, onBrowserBack, onCloseBrowser, selectedElement, projectFolder, currentUrl }: UseLiveGeminiParams) {
+export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, onOpenItem, onOpenFile, onOpenFolder, onBrowserBack, onCloseBrowser, selectedElement, projectFolder, currentUrl, googleApiKey }: UseLiveGeminiParams) {
   const [streamState, setStreamState] = useState<StreamState>({
     isConnected: false,
     isStreaming: false,
@@ -524,8 +526,9 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
     try {
       setStreamState({ isConnected: false, isStreaming: true, error: null });
 
-      const apiKey = process.env.API_KEY;
-      if (!apiKey) throw new Error("API_KEY not found in environment");
+      // Use passed API key first, then fall back to environment variable
+      const apiKey = googleApiKey || process.env.API_KEY;
+      if (!apiKey) throw new Error("API_KEY not found - add it in Settings > Providers or .env.local");
       aiRef.current = new GoogleGenAI({ apiKey });
 
       const AudioContextClass = window.AudioContext || (window as WindowWithWebkit).webkitAudioContext;
@@ -785,7 +788,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
       setStreamState(prev => ({ ...prev, error: error instanceof Error ? error.message : "Failed to connect" }));
       cleanup();
     }
-  }, [cleanup, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onApproveChange, onRejectChange, onUndoChange, selectedElement]);
+  }, [cleanup, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onApproveChange, onRejectChange, onUndoChange, selectedElement, googleApiKey]);
 
   const startVideoStreaming = useCallback(() => {
     if (frameIntervalRef.current) return;
