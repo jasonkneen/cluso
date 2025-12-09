@@ -16,6 +16,7 @@ const agentTodos = require('./agent-todos.cjs')
 const lsp = require('./lsp-bridge.cjs')
 const mgrep = require('./mgrep.cjs')
 const backupManager = require('./backup-manager.cjs')
+const morph = require('./shared/morph.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -1092,6 +1093,7 @@ function registerGitHandlers() {
     if (!filePath || typeof filePath !== 'string') {
       return { success: false, error: 'Invalid file path' }
     }
+    const projectFolder = process.cwd()
     // Validate path - must be within project folder
     const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(projectFolder, filePath)
     if (!absolutePath.startsWith(projectFolder)) {
@@ -3274,6 +3276,10 @@ app.whenReady().then(async () => {
 
   // Register AI SDK handlers and initialize
   aiSdkWrapper.registerHandlers()
+
+  // Register Morph IPC handlers (cloud apply/router) in main to avoid renderer CORS
+  morph.registerMorphHandlers()
+
   try {
     await aiSdkWrapper.initialize()
     console.log('[Main] AI SDK wrapper initialized')

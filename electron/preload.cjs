@@ -85,6 +85,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Webview preload path - fetched from main process
   getWebviewPreloadPath: () => ipcRenderer.invoke('get-webview-preload-path'),
 
+  // Morph (cloud apply / router) - handled in main to avoid CORS
+  morph: {
+    fastApply: (payload) => ipcRenderer.invoke('morph:fast-apply', payload),
+    selectModel: (payload) => ipcRenderer.invoke('morph:select-model', payload),
+  },
+
   // File operations
   files: {
     // Read operations

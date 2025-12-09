@@ -1,9 +1,10 @@
 import { EventEmitter } from 'events'
 import * as fs from 'fs'
 import * as path from 'path'
+import * as os from 'os'
 import * as https from 'https'
 import * as http from 'http'
-import type { ModelVariant, DownloadProgress } from './types'
+import type { ModelVariant, DownloadProgress, ModelDefinition } from './types'
 import { MODELS, MODEL_REPO } from './config'
 
 export interface DownloaderEvents {
@@ -107,6 +108,8 @@ export class Downloader extends EventEmitter {
       console.log('[Downloader] Download complete, renaming temp file...')
       // Rename temp file to final path
       await fs.promises.rename(tempPath, modelPath)
+
+      await this.validateDownloadedFile(modelPath, modelDef)
 
       console.log('[Downloader] Model saved to:', modelPath)
       this.emit('complete', modelPath)
@@ -273,10 +276,53 @@ export class Downloader extends EventEmitter {
    * Check if there's enough disk space
    */
   private async checkDiskSpace(requiredBytes: number): Promise<void> {
-    // On macOS/Linux, we can use statvfs via fs.statfs (Node 18.15+)
-    // For now, we'll skip this check as it requires platform-specific code
-    // The download will fail gracefully if there's not enough space
-    return Promise.resolve()
+    const statfs = (fs.promises as any).statfs
+    try {
+      if (typeof statfs === 'function') {
+        const stats = await statfs(this.storageDir)
+        const freeBytes = Number(stats.bavail) * Number(stats.bsize)
+        if (freeBytes < requiredBytes) {
+          throw new Error(
+            `Not enough disk space. Required: ${Math.round(requiredBytes / (1024 * 1024))} MB, available: ${Math.round(
+              freeBytes / (1024 * 1024)
+            )} MB`
+          )
+        }
+        return
+      }
+    } catch (error) {
+      console.warn('[Downloader] statfs check failed, falling back to freemem():', error)
+    }
+
+    const freeBytes = os.freemem()
+    if (freeBytes < requiredBytes) {
+      throw new Error(
+        `Not enough memory-reported free space. Required: ${Math.round(requiredBytes / (1024 * 1024))} MB, available: ${Math.round(
+          freeBytes / (1024 * 1024)
+        )} MB`
+      )
+    }
+  }
+
+  /**
+   * Validate downloaded file size and delete if it is incomplete.
+   */
+  private async validateDownloadedFile(modelPath: string, modelDef: ModelDefinition): Promise<void> {
+    const expectedBytes = modelDef.size * 1024 * 1024
+    const stats = await fs.promises.stat(modelPath)
+    const withinTolerance = stats.size >= expectedBytes * 0.99 && stats.size <= expectedBytes * 1.01
+    if (!withinTolerance) {
+      try {
+        await fs.promises.unlink(modelPath)
+      } catch {
+        // ignore cleanup errors
+      }
+      throw new Error(
+        `Downloaded file size mismatch for ${modelDef.file}. Expected ~${modelDef.size} MB, got ${Math.round(
+          stats.size / (1024 * 1024)
+        )} MB`
+      )
+    }
   }
 }
 

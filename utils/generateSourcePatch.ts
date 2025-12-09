@@ -31,6 +31,139 @@ export interface GenerateSourcePatchParams {
   userRequest?: string
   textChange?: { oldText: string; newText: string }
   srcChange?: { oldSrc: string; newSrc: string }
+  disableFastApply?: boolean
+  morphApiKey?: string
+}
+
+/**
+ * Use Morph Fast Apply (morph-v3-fast) to merge edits server-side.
+ * Falls back to null on any failure so the caller can continue with other strategies.
+ */
+async function morphFastApplyMerge(
+  originalCode: string,
+  updateSnippet: string,
+  instruction: string,
+  apiKeyOverride?: string
+): Promise<{ success: boolean; code?: string; error?: string }> {
+  try {
+    const apiKey =
+      apiKeyOverride ||
+      (window as any)?.env?.MORPH_API_KEY ||
+      (typeof process !== 'undefined' ? (process as any).env?.MORPH_API_KEY : undefined)
+
+    if (!apiKey) {
+      console.log('[Morph Fast Apply] No MORPH_API_KEY set - skipping')
+      return { success: false, error: 'MORPH_API_KEY missing' }
+    }
+
+    console.log('[Morph Fast Apply] Using MORPH_API_KEY (len):', String(apiKey).length)
+    console.log('[Morph Fast Apply] Request summary:', {
+      originalLen: originalCode.length,
+      updateSnippet: updateSnippet.substring(0, 200),
+      instruction: instruction.substring(0, 200),
+    })
+
+    // Prefer Electron IPC to avoid CORS
+    if (window.electronAPI?.morph?.fastApply) {
+      console.log('[Morph Fast Apply] Delegating to main via IPC')
+      const resp = await window.electronAPI.morph.fastApply({
+        apiKey,
+        originalCode,
+        updateSnippet,
+        instruction,
+      })
+      if (resp?.success && resp.code) {
+        return { success: true, code: resp.code }
+      }
+      return { success: false, error: resp?.error || 'Unknown IPC error' }
+    }
+
+    console.log('[Morph Fast Apply] IPC not available, falling back to direct fetch (may be blocked by CORS)')
+
+    const payload = {
+      model: 'morph-v3-fast',
+      messages: [
+        {
+          role: 'user',
+          content: `<instruction>${instruction}</instruction>\n<code>${originalCode}</code>\n<update>${updateSnippet}</update>`,
+        },
+      ],
+    }
+
+    const response = await fetch('https://api.morphllm.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(payload),
+    })
+
+    if (!response.ok) {
+      const text = await response.text()
+      console.warn('[Morph Fast Apply] HTTP error:', response.status, text)
+      return { success: false, error: `HTTP ${response.status}` }
+    }
+
+    const data = await response.json()
+    console.log('[Morph Fast Apply] HTTP', response.status, 'response keys:', Object.keys(data || {}))
+    const merged =
+      data?.choices?.[0]?.message?.content ||
+      data?.choices?.[0]?.message?.content?.[0]?.text ||
+      null
+
+    if (!merged || typeof merged !== 'string') {
+      console.warn('[Morph Fast Apply] No merged content returned')
+      return { success: false, error: 'No merged content' }
+    }
+
+    console.log('[Morph Fast Apply] Merge success, length:', merged.length, '| preview:', merged.substring(0, 200))
+    return { success: true, code: merged }
+  } catch (error) {
+    console.warn('[Morph Fast Apply] Exception:', error)
+    return { success: false, error: String(error) }
+  }
+}
+
+/**
+ * Route to the best Anthropic model using Morph, if available.
+ * Falls back to null on any error so callers can use their default model.
+ */
+async function selectMorphModel(input: string, apiKeyOverride?: string): Promise<string | null> {
+  try {
+    const apiKey =
+      apiKeyOverride ||
+      (window as any)?.env?.MORPH_API_KEY ||
+      (typeof process !== 'undefined' ? (process as any).env?.MORPH_API_KEY : undefined)
+    if (!apiKey) return null
+    console.log('[Source Patch] Morph router input len:', input.length)
+
+    // Prefer Electron IPC (main process). Renderer import of morphsdk is not allowed (bundle/dirname issues).
+    if (window.electronAPI?.morph?.selectModel) {
+      const resp = await window.electronAPI.morph.selectModel({ apiKey, input, provider: 'anthropic' })
+      if (resp?.success && resp.model) {
+        console.log('[Source Patch] Morph router selected model (IPC):', resp.model)
+        return resp.model
+      }
+      console.warn('[Source Patch] Morph router IPC failed:', resp?.error)
+      return null
+    }
+
+    // Fallback for web builds: dynamic import (may fail in browser)
+    console.log('[Source Patch] Morph router IPC not available; attempting local import (may fail in browser)')
+    const { MorphClient } = await import('@morphllm/morphsdk')
+    const morph = new MorphClient({ apiKey })
+    const result = await morph.routers.anthropic.selectModel({
+      input,
+    })
+    if (result?.model) {
+      console.log('[Source Patch] Morph router selected model:', result.model)
+      return result.model
+    }
+  } catch (error) {
+    console.warn('[Source Patch] Morph routing failed, using default model:', error)
+  }
+  return null
 }
 
 /**
@@ -273,8 +406,9 @@ async function tryFastApply(
   codeSnippet: string,
   element: SelectedElement,
   cssChanges: Record<string, string>,
-  userRequest?: string
-): Promise<{ success: boolean; code?: string; durationMs?: number; error?: string }> {
+  userRequest?: string,
+  targetLineInSnippet?: number // 1-indexed line number within the snippet
+  ): Promise<{ success: boolean; code?: string; durationMs?: number; error?: string }> {
   if (!window.electronAPI?.fastApply) {
     return { success: false, error: 'Fast Apply not available' }
   }
@@ -289,24 +423,34 @@ async function tryFastApply(
 
     console.log('[Source Patch] Fast Apply has active model:', fastApplyStatus.activeModel)
 
-    const hasCssChanges = Object.keys(cssChanges).length > 0
-    const isRemoveRequest = userRequest && /(?:remove|delete|hide)\s+(?:this|that|it|the|element)?/i.test(userRequest)
+  const hasCssChanges = Object.keys(cssChanges).length > 0
+  const isRemoveRequest = userRequest && /(?:remove|delete|hide)\s+(?:this|that|it|the|element)?/i.test(userRequest)
 
-    let updateDescription = ''
-    const classAttr = element.className ? ` className="${element.className.split(' ')[0]}"` : ''
-    const originalTag = `<${element.tagName}${classAttr}>`
+  let updateDescription = ''
+  const lineHint = targetLineInSnippet ? ` at or near line ${targetLineInSnippet}` : ''
+  const tagHint = element.tagName ? element.tagName.toLowerCase() : ''
+  const classHint = element.className ? element.className.split(' ')[0] : ''
+  const idHint = element.id || ''
+  const textHint = element.text ? element.text.substring(0, 60) : ''
+  const targetDescriptorParts = [
+    tagHint ? `tag <${tagHint}>` : null,
+    classHint ? `class "${classHint}"` : null,
+    idHint ? `id "${idHint}"` : null,
+    textHint ? `text "${textHint}"` : null,
+  ].filter(Boolean)
+  const targetDescriptor = targetDescriptorParts.length ? ` Target element: ${targetDescriptorParts.join(', ')}${lineHint}` : lineHint
 
-    if (isRemoveRequest) {
-      updateDescription = `FIND: ${originalTag}\nREPLACE WITH: {false && ${originalTag}...${element.tagName}>}`
-    } else if (hasCssChanges) {
-      const styleObjEntries = Object.entries(cssChanges)
-        .map(([prop, val]) => `${prop}: '${val}'`)
-        .join(', ')
-      const newTag = `<${element.tagName} style={{ ${styleObjEntries} }}${classAttr}>`
-      updateDescription = `FIND: ${originalTag}\nREPLACE WITH: ${newTag}`
-    } else {
-      updateDescription = userRequest || ''
-    }
+  // Describe the change with line number hint for the model
+  if (isRemoveRequest) {
+    updateDescription = userRequest || `Remove the element${targetDescriptor} by wrapping with {false && ...}`
+  } else if (hasCssChanges) {
+    const styleDesc = Object.entries(cssChanges)
+      .map(([prop, val]) => `${prop}: '${val}'`)
+      .join(', ')
+    updateDescription = `Add style={{ ${styleDesc} }} to the JSX element${targetDescriptor}`
+  } else {
+    updateDescription = `${userRequest || ''}${targetDescriptor ? `\n${targetDescriptor}` : ''}`.trim()
+  }
 
     const fastResult = await window.electronAPI.fastApply.apply(codeSnippet, updateDescription)
 
@@ -327,19 +471,29 @@ async function tryFastApply(
       /you (should|can|need to)/i,
     ]
 
-    const firstLine = fastResult.code.trim().split('\n')[0]
-    const isProse = proseIndicators.some(p => p.test(firstLine))
+  const firstLine = fastResult.code.trim().split('\n')[0]
+  const isProse = proseIndicators.some(p => p.test(firstLine))
 
-    if (isProse) {
-      console.log('[Source Patch] Fast Apply returned PROSE instead of code - rejecting')
-      return { success: false, error: 'Model returned prose instead of code' }
-    }
+  if (isProse) {
+    console.log('[Source Patch] Fast Apply returned PROSE instead of code - rejecting')
+    return { success: false, error: 'Model returned prose instead of code' }
+  }
 
-    return {
-      success: true,
-      code: fastResult.code,
-      durationMs: fastResult.durationMs,
-    }
+  const missingTarget =
+    (!!tagHint && !new RegExp(`<${tagHint}[\\s>]`, 'i').test(fastResult.code)) ||
+    (!!classHint && !new RegExp(`class(Name)?=["'\`][^"'\`]*\\b${classHint}\\b`).test(fastResult.code)) ||
+    (!!idHint && !new RegExp(`id=["'\`]${idHint}["'\`]`).test(fastResult.code))
+
+  if (missingTarget) {
+    console.log('[Source Patch] Fast Apply response missing target element hints - rejecting')
+    return { success: false, error: 'Model output did not include the targeted element' }
+  }
+
+  return {
+    success: true,
+    code: fastResult.code,
+    durationMs: fastResult.durationMs,
+  }
   } catch (error) {
     console.log('[Source Patch] Fast Apply error:', error)
     return { success: false, error: String(error) }
@@ -359,7 +513,9 @@ async function useAIForPatch(
   targetLine: number,
   startLine: number,
   endLine: number,
-  userRequest?: string
+  userRequest?: string,
+  disableFastApply?: boolean,
+  apiKeyOverride?: string
 ): Promise<string | null> {
   // Check if AI SDK is available
   if (!window.electronAPI?.aiSdk?.generate) {
@@ -368,6 +524,10 @@ async function useAIForPatch(
   }
 
   const hasCssChanges = Object.keys(cssChanges).length > 0
+  const morphModel = disableFastApply ? await selectMorphModel(userRequest || codeSnippet, apiKeyOverride) : null
+  const effectiveModelId = morphModel || providerConfig.modelId
+
+  console.log('[Source Patch] AI SDK path using model:', effectiveModelId, '| morphModel:', morphModel || 'none', '| disableFastApply:', !!disableFastApply)
 
   const cssString = hasCssChanges
     ? Object.entries(cssChanges)
@@ -458,7 +618,7 @@ Output the modified code snippet:`
 
   try {
     // Use the configured model (likely claude-haiku-4-5) via the existing connection
-    const modelId = providerConfig.modelId || 'claude-haiku-4-5'
+    const modelId = effectiveModelId || 'claude-haiku-4-5'
     console.log('[Source Patch] Calling AI SDK for code modification with model:', modelId)
 
     // Build provider configs for the generate call
@@ -527,7 +687,16 @@ Output the modified code snippet:`
 export async function generateSourcePatch(
   params: GenerateSourcePatchParams
 ): Promise<SourcePatch | null> {
-  const { element, cssChanges, providerConfig, projectPath, userRequest, textChange, srcChange } = params
+  const {
+    element,
+    cssChanges,
+    providerConfig,
+    projectPath,
+    userRequest,
+    textChange,
+    srcChange,
+    morphApiKey,
+  } = params
 
   console.log('='.repeat(60))
   console.log('[Source Patch] === STARTING PATCH GENERATION ===')
@@ -673,16 +842,68 @@ export async function generateSourcePatch(
     targetLine = lines.length
   }
 
-  // Use smaller context for Fast Apply (local LLM is slower with large inputs)
-  const fastApplyContextLines = 30 // ~60 lines total - faster for local LLM
+  // Context for Fast Apply - need enough to capture full component structure
+  const fastApplyContextLines = 50 // ~100 lines total to avoid truncating JSX components
   const fastApplyStartLine = Math.max(0, targetLine - fastApplyContextLines)
   const fastApplyEndLine = Math.min(lines.length, targetLine + fastApplyContextLines)
   const fastApplySnippet = lines.slice(fastApplyStartLine, fastApplyEndLine).join('\n')
 
   console.log('[Source Patch] Fast Apply snippet: lines', fastApplyStartLine + 1, 'to', fastApplyEndLine, '(', fastApplySnippet.length, 'chars)')
 
+  if (params.disableFastApply) {
+    console.log('[Source Patch] Fast Apply disabled by settings - using Morph Fast Apply if available. Morph key length:', (morphApiKey || '').length)
+
+    // Build a concise update snippet for Morph based on CSS/text/src changes or user request
+    const updateSnippet = (() => {
+      if (Object.keys(cssChanges).length > 0) {
+        const styleDesc = Object.entries(cssChanges)
+          .map(([prop, val]) => `${prop}: '${val}'`)
+          .join(', ')
+        return `Add style={{ ${styleDesc} }} to the matching element`
+      }
+      if (textChange?.newText) {
+        return `Change text to "${textChange.newText}"`
+      }
+      if (srcChange?.newSrc) {
+        return `Update src to "${srcChange.newSrc}"`
+      }
+      return userRequest || 'Apply requested changes'
+    })()
+
+    const morphResult = await morphFastApplyMerge(
+      fastApplySnippet,
+      updateSnippet,
+      userRequest || updateSnippet,
+      morphApiKey
+    )
+
+    if (morphResult.success && morphResult.code) {
+      const patchedLines = morphResult.code.split('\n')
+      const beforeLines = lines.slice(0, fastApplyStartLine)
+      const afterLines = lines.slice(fastApplyEndLine)
+      const fullPatchedContent = [...beforeLines, ...patchedLines, ...afterLines].join('\n')
+
+      if (fullPatchedContent !== originalContent) {
+        console.log('[Source Patch] Morph Fast Apply produced a patch')
+        return {
+          filePath,
+          originalContent,
+          patchedContent: fullPatchedContent,
+          lineNumber: source.line,
+          generatedBy: 'fast-apply',
+        }
+      }
+    }
+
+    console.log('[Source Patch] Morph Fast Apply failed or returned no changes, falling through to AI SDK (no local Fast Apply). Error:', morphResult.error)
+    // Do not return; continue to AI SDK path below. Local Fast Apply remains disabled.
+  } else {
+
+  // Calculate target line within the snippet (1-indexed)
+  const targetLineInSnippet = targetLine - fastApplyStartLine
+
   // Try Fast Apply (local LLM) first with smaller snippet
-  const fastApplyResult = await tryFastApply(fastApplySnippet, element, cssChanges, userRequest)
+  const fastApplyResult = await tryFastApply(fastApplySnippet, element, cssChanges, userRequest, targetLineInSnippet)
   
   if (fastApplyResult.success && fastApplyResult.code) {
     console.log('[Source Patch] Fast Apply SUCCESS! Duration:', fastApplyResult.durationMs, 'ms')
@@ -716,6 +937,7 @@ export async function generateSourcePatch(
   } else {
     console.log('[Source Patch] Fast Apply not available or failed:', fastApplyResult.error)
   }
+  }
 
   // Larger context for Gemini (cloud API is faster with large inputs)
   const contextLines = 100
@@ -740,10 +962,13 @@ export async function generateSourcePatch(
     targetLine,
     startLine,
     endLine,
-    userRequest
+    userRequest,
+    params.disableFastApply,
+    morphApiKey
   )
 
   if (!patchedSnippet) {
+    console.log('[Source Patch] AI SDK returned null/empty patched snippet')
     return null
   }
 

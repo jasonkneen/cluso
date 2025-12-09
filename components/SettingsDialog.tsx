@@ -33,6 +33,7 @@ import {
   Server,
   Download,
   HardDrive,
+  Cloud,
 } from 'lucide-react'
 import { debugLog } from '../utils/debug'
 import { FastApplySettings } from './FastApplySettings'
@@ -110,6 +111,7 @@ export interface AppSettings {
   providers: Provider[]
   models: SettingsModel[]
   connections: Connection[]
+  clusoCloudEditsEnabled?: boolean
   // Claude Code OAuth state
   claudeCodeAuthenticated?: boolean
   claudeCodeExpiresAt?: number | null
@@ -123,10 +125,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sendAnalytics: false,
   fontSize: 'medium',
   showLineNumbers: true,
+  clusoCloudEditsEnabled: false,
   providers: [
     { id: 'google', name: 'Google AI (Gemini)', apiKey: '', enabled: true },
     { id: 'openai', name: 'OpenAI', apiKey: '', enabled: false },
     { id: 'anthropic', name: 'Anthropic', apiKey: '', enabled: false },
+    { id: 'morph', name: 'Morph', apiKey: '', enabled: false },
   ],
   models: [
     // Claude Code OAuth models (recommended for Agent SDK)
@@ -1243,7 +1247,7 @@ export function SettingsDialog({
                           ? 'bg-green-500/10 text-green-500'
                           : isDarkMode ? 'bg-neutral-700 text-neutral-400' : 'bg-stone-200 text-stone-400'
                       }`}>
-                        <Cpu size={16} />
+                        {provider.id === 'morph' ? <Cloud size={16} /> : <Cpu size={16} />}
                       </div>
                       <span className={`font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
                         {provider.name}
@@ -1252,20 +1256,20 @@ export function SettingsDialog({
                         <CheckCircle size={16} className="text-green-500" />
                       )}
                     </div>
-                    <button
-                      onClick={() => toggleProviderEnabled(provider.id)}
-                      className={`w-10 h-6 rounded-full transition-colors relative ${
-                        provider.enabled
-                          ? 'bg-green-500'
-                          : isDarkMode ? 'bg-neutral-600' : 'bg-stone-300'
-                      }`}
-                    >
-                      <span
-                        className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                          provider.enabled ? 'left-5' : 'left-1'
+                      <button
+                        onClick={() => toggleProviderEnabled(provider.id)}
+                        className={`w-10 h-6 rounded-full transition-colors relative ${
+                          provider.enabled
+                            ? 'bg-green-500'
+                            : isDarkMode ? 'bg-neutral-600' : 'bg-stone-300'
                         }`}
-                      />
-                    </button>
+                      >
+                        <span
+                          className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                            provider.enabled ? 'left-5' : 'left-1'
+                          }`}
+                        />
+                      </button>
                   </div>
 
                   <div className="flex gap-2">
@@ -1274,7 +1278,7 @@ export function SettingsDialog({
                         type={showApiKeys[provider.id] ? 'text' : 'password'}
                         value={provider.apiKey}
                         onChange={(e) => updateProviderApiKey(provider.id, e.target.value)}
-                        placeholder="Enter API key..."
+                        placeholder={`Enter ${provider.id === 'morph' ? 'MORPH_API_KEY' : 'API key'}...`}
                         className={`w-full px-3 py-2 pr-10 rounded-lg text-sm ${
                           isDarkMode
                             ? 'bg-neutral-700 border-neutral-600 text-neutral-200 placeholder-neutral-500'
@@ -2556,7 +2560,51 @@ serve"
 
       case 'pro':
         return (
-          <FastApplySettings isDarkMode={isDarkMode} isPro={true} />
+          <div className="space-y-6">
+            <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-neutral-800/60 border-neutral-700' : 'bg-stone-50 border-stone-200'}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${isDarkMode ? 'bg-blue-500/20' : 'bg-blue-100'}`}>
+                    <Cloud size={18} className={isDarkMode ? 'text-blue-300' : 'text-blue-700'} />
+                  </div>
+                  <div>
+                    <h3 className={`font-semibold ${isDarkMode ? 'text-white' : 'text-stone-900'}`}>Cluso Cloud Edits</h3>
+                    <p className={`text-sm ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>
+                      Route edits through Morph + Anthropic (no local models). Fast Apply and local model controls are disabled when this is on.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => updateSettings({ clusoCloudEditsEnabled: !settings.clusoCloudEditsEnabled })}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium border transition ${
+                    settings.clusoCloudEditsEnabled
+                      ? isDarkMode
+                        ? 'bg-blue-600 text-white border-blue-500'
+                        : 'bg-blue-600 text-white border-blue-600'
+                      : isDarkMode
+                        ? 'bg-neutral-800 text-neutral-200 border-neutral-600 hover:bg-neutral-700'
+                        : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
+                  }`}
+                >
+                  {settings.clusoCloudEditsEnabled ? 'Enabled' : 'Enable'}
+                </button>
+              </div>
+              <div className={`mt-3 p-3 rounded-lg ${isDarkMode ? 'bg-neutral-900/60' : 'bg-white'} border ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
+                <p className={`text-xs ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>
+                  The app will call Morph Fast Apply automatically when enabled. Set <code className="px-1 py-0.5 rounded bg-black/10">MORPH_API_KEY</code> in your environment. No local model download required.
+                </p>
+              </div>
+            </div>
+
+            {settings.clusoCloudEditsEnabled ? (
+              <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-neutral-900/70 border-neutral-800 text-neutral-300' : 'bg-white border-stone-200 text-stone-600'}`}>
+                <p className="text-sm font-medium mb-1">Fast Apply disabled</p>
+                <p className="text-sm">Local model downloads and Fast Apply controls are turned off while Cluso Cloud edits are enabled.</p>
+              </div>
+            ) : (
+              <FastApplySettings isDarkMode={isDarkMode} isPro={true} />
+            )}
+          </div>
         )
 
       default:

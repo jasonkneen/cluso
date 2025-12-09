@@ -1198,6 +1198,7 @@ export default function App() {
     userApproved?: boolean  // Set to true when user clicks Accept, triggers auto-apply when patch is ready
   }
   const [pendingDOMApproval, setPendingDOMApproval] = useState<PendingDOMApproval | null>(null)
+  const cancelledApprovalsRef = useRef<Set<string>>(new Set())
   const [isGeneratingSourcePatch, setIsGeneratingSourcePatch] = useState(false)
 
   // Initialize AI Chat hook with streaming support
@@ -1606,6 +1607,10 @@ export default function App() {
   // Check Fast Apply status (Pro Feature)
   useEffect(() => {
     const checkFastApplyStatus = async () => {
+      if (appSettings.clusoCloudEditsEnabled) {
+        setFastApplyReady(false);
+        return;
+      }
       if (!window.electronAPI?.fastApply) return;
       try {
         const status = await window.electronAPI.fastApply.getStatus();
@@ -1629,7 +1634,7 @@ export default function App() {
       unsubLoaded?.();
       unsubUnloaded?.();
     };
-  }, []);
+  }, [appSettings.clusoCloudEditsEnabled]);
 
   // Keep refs in sync with state for webview event handler closures
   useEffect(() => {
@@ -1653,15 +1658,15 @@ export default function App() {
         thinkingLevel: thinkingLevel,
       };
 
-      // Prefer Claude Haiku 4.5 for fast tooling, fallback to other fast models
+      // Prefer Gemini 2.5 Flash Lite for fast tooling, fallback to other fast models
       const fastModel = displayModels.find(m =>
-        m.id === 'claude-haiku-4-5' && m.isAvailable
-      ) || displayModels.find(m =>
-        m.id.includes('haiku') && m.isAvailable
+        m.id === 'gemini-2.5-flash-lite' && m.isAvailable
       ) || displayModels.find(m =>
         m.id.includes('gemini-2') && m.id.includes('flash') && m.isAvailable
       ) || displayModels.find(m =>
         m.id.includes('flash') && m.isAvailable
+      ) || displayModels.find(m =>
+        m.id.includes('haiku') && m.isAvailable
       );
 
       if (fastModel) {
@@ -6551,6 +6556,8 @@ If you're not sure what the user wants, ask for clarification.
     textChange?: { oldText: string; newText: string },
     srcChange?: { oldSrc: string; newSrc: string }
   ) => {
+    // Ensure this approval id is not considered cancelled
+    cancelledApprovalsRef.current.delete(approvalId);
     console.log('='.repeat(60));
     console.log('[DOM Approval] === PREPARING SOURCE PATCH ===');
     console.log('[DOM Approval] Inputs:', {
@@ -6575,11 +6582,14 @@ If you're not sure what the user wants, ask for clarification.
       userRequest,
       textChange,
       srcChange,
+      disableFastApply: appSettings.clusoCloudEditsEnabled,
+      morphApiKey: appSettings.providers.find(p => p.id === 'morph')?.apiKey,
     })
       .then(patch => {
         console.log('[DOM Approval] Patch generation completed:', { approvalId, success: !!patch });
         setPendingDOMApproval(prev => {
           if (!prev || prev.id !== approvalId) return prev;
+          if (cancelledApprovalsRef.current.has(approvalId)) return prev;
           if (patch) {
             const patchPayload: PendingPatch = {
               id: `patch-${Date.now()}`,
@@ -6611,6 +6621,7 @@ If you're not sure what the user wants, ask for clarification.
         console.error('[DOM Approval] Patch generation failed:', { approvalId, error: errorMessage });
         setPendingDOMApproval(prev => {
           if (!prev || prev.id !== approvalId) return prev;
+          if (cancelledApprovalsRef.current.has(approvalId)) return prev;
           return { ...prev, patchStatus: 'error', patch: undefined, patchError: errorMessage };
         });
       });
@@ -6619,6 +6630,10 @@ If you're not sure what the user wants, ask for clarification.
   // Handle accepting DOM preview - generates source patch and auto-approves
   const handleAcceptDOMApproval = useCallback(async () => {
     if (!pendingDOMApproval) return;
+    if (cancelledApprovalsRef.current.has(pendingDOMApproval.id)) {
+      console.log('[DOM Approval] Accept aborted - approval was cancelled:', pendingDOMApproval.id);
+      return;
+    }
 
     console.log('[DOM Approval] Accept clicked:', {
       id: pendingDOMApproval.id,
@@ -6731,6 +6746,8 @@ If you're not sure what the user wants, ask for clarification.
     setIsGeneratingSourcePatch(false);
     setPendingDOMApproval(null);
     setPendingChange(null); // Clear pill toolbar too
+    // Cleanup cancellation marker once lifecycle ends
+    cancelledApprovalsRef.current.delete(pendingDOMApproval.id);
   }, [pendingDOMApproval, addEditedFile]);
 
   // Auto-apply when patch is ready and user has pre-approved
@@ -6745,6 +6762,7 @@ If you're not sure what the user wants, ask for clarification.
   const handleRejectDOMApproval = useCallback(() => {
     if (!pendingDOMApproval) return;
 
+    cancelledApprovalsRef.current.add(pendingDOMApproval.id);
     const webview = webviewRefs.current.get(activeTabId);
     if (pendingDOMApproval.undoCode && webview) {
       (webview as Electron.WebviewTag).executeJavaScript(pendingDOMApproval.undoCode);
@@ -7350,51 +7368,15 @@ If you're not sure what the user wants, ask for clarification.
               const activeUrl = activeTab.url || '';
               const isLocalhost = activeUrl.includes('localhost') || activeUrl.includes('127.0.0.1');
 
-              if (isLocalhost) {
-                // Localhost URLs can't be loaded in iframe due to security restrictions
-                return (
-                  <div className={`w-full h-full flex items-center justify-center ${isDarkMode ? 'bg-neutral-800' : 'bg-stone-50'}`}>
-                    <div className="text-center p-8 max-w-md">
-                      <div className={`w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center ${isDarkMode ? 'bg-green-900/30' : 'bg-green-100'}`}>
-                        <Globe size={32} className={isDarkMode ? 'text-green-400' : 'text-green-600'} />
-                      </div>
-                      <h3 className={`text-lg font-medium mb-2 ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`}>
-                        Project Running
-                      </h3>
-                      <p className={`text-sm mb-4 ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
-                        Your project is available at:
-                      </p>
-                      <a
-                        href={activeUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-                          isDarkMode
-                            ? 'bg-blue-600 hover:bg-blue-500 text-white'
-                            : 'bg-blue-500 hover:bg-blue-600 text-white'
-                        }`}
-                      >
-                        <Globe size={16} />
-                        {activeUrl}
-                      </a>
-                      <p className={`text-xs mt-4 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-                        Localhost preview requires the Electron desktop app.
-                        <br />Use the chat sidebar to work with your code.
-                      </p>
-                    </div>
-                  </div>
-                );
-              } else {
-                // External URLs can be loaded in iframe
-                return (
-                  <iframe
-                    src={activeUrl}
-                    className="w-full h-full border-0"
-                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                    title="Web Preview"
-                  />
-                );
-              }
+              // Both localhost and external URLs can be loaded in iframe
+              return (
+                <iframe
+                  src={activeUrl}
+                  className="w-full h-full border-0"
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
+                  title="Web Preview"
+                />
+              );
             })()
           )}
 

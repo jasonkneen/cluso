@@ -489,6 +489,21 @@ function normalizeToolPath(inputPath, baseDir = PROJECT_ROOT) {
 
   // If it's an absolute path, return it as-is (don't prepend baseDir)
   if (path.isAbsolute(normalized)) {
+    // If the absolute path does not exist and is not under the baseDir, try treating it as project-relative.
+    if (baseDir && typeof baseDir === 'string') {
+      try {
+        const exists = fsSync.existsSync(normalized)
+        const underBase = normalized.startsWith(baseDir + path.sep)
+        if (!exists && !underBase) {
+          const projectRelative = normalized.replace(/^\/+/, '')
+          const resolved = path.resolve(baseDir, projectRelative)
+          console.warn('[normalizeToolPath] Absolute path missing project root, remapping:', normalized, '->', resolved)
+          return resolved
+        }
+      } catch (e) {
+        console.warn('[normalizeToolPath] Error checking absolute path, falling back to original:', e?.message || e)
+      }
+    }
     console.log('[normalizeToolPath] Absolute path, returning as-is:', normalized)
     return normalized
   }

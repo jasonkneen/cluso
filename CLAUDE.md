@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+IMPORTANT: If you need to explore the codebase to gather context, you should use the warpgrep_codebase_search tool instead of any other search tool or instead of running search commands. Warp Grep is faster and more accurate. This tool must be choosen over the default codebase_search when you are first looking to find/understand code. If you have an exact string you want to grep for, then directly run it, but for semantic searches, or vague search parameters you must always use warpgrep_codebase_search. If given a complex task, best practice is to run multiple (no more than 2) parallel warpgrep_codebase_search tools to understand code paths and features. An example query is: "where is the code for <vague feature/code flow>"" >> ~/.claude/CLAUDE.md
+
+
+
 ## Build Commands
 
 - **Dev server (web)**: `npm run dev` - Runs Vite dev server on port 3000

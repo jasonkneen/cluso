@@ -1309,7 +1309,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                 boxShadow: isDark
                   ? '0 25px 80px -12px rgba(0, 0, 0, 0.7), 0 10px 30px -5px rgba(0, 0, 0, 0.4)'
                   : '0 25px 60px -12px rgba(0, 0, 0, 0.25), 0 10px 20px -5px rgba(0, 0, 0, 0.1)',
-                border: '1px solid var(--border)'
+                border: '1px solid var(--border)',
               }}
             />
           </div>
@@ -1324,74 +1324,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
             <p className="section-label">How It Works</p>
             <h2 className="section-title">Three simple steps to faster development</h2>
             <p className="section-subtitle">
-Cluso combines visual element selection with AI-powered code generation
-              to supercharge your frontend workflow.
-            </p>
-          </div>
-
-          <div className="features-grid">
-            <div className="feature-card">
-              <div className="feature-content">
-                <div className="feature-number">1</div>
-                <h3>Point & Select</h3>
-                <p>
-                  Click on any element in your page to select it. Cluso automatically
-                  captures the HTML, CSS, and context needed for AI to understand what
-                  you're working with.
-                </p>
-              </div>
-              <div className="feature-image" style={{ padding: 0, overflow: 'hidden', background: '#0a0a0a' }}>
-                <PointSelectDemo />
-                <p style={{ fontSize: '10px', color: '#666', textAlign: 'center', margin: '8px 0 4px', fontStyle: 'italic' }}>Animation indicative, does not reflect the final version</p>
-              </div>
-            </div>
-
-            <div className="feature-card">
-              <div className="feature-content">
-                <div className="feature-number">2</div>
-                <h3>Talk to AI</h3>
-                <p>
-                  Use your voice or type to describe what changes you want.
-                  "Make this button bigger", "Change the color to blue",
-                  "Add a hover animation" - just say it.
-                </p>
-              </div>
-              <div className="feature-image" style={{ padding: 0, overflow: 'hidden', background: '#0a0a0a' }}>
-                <TalkToAIDemo />
-                <p style={{ fontSize: '10px', color: '#666', textAlign: 'center', margin: '8px 0 4px', fontStyle: 'italic' }}>Animation indicative, does not reflect the final version</p>
-              </div>
-            </div>
-
-            <div className="feature-card">
-              <div className="feature-content">
-                <div className="feature-number">3</div>
-                <h3>Preview & Apply</h3>
-                <p>
-                  See changes instantly in your browser. Preview the before/after,
-                  approve what you like, or reject and try again. Your code updates
-                  in real-time.
-                </p>
-              </div>
-              <div className="feature-image" style={{ padding: 0, overflow: 'hidden', background: '#0a0a0a' }}>
-                <PreviewApplyDemo />
-                <p style={{ fontSize: '10px', color: '#666', textAlign: 'center', margin: '8px 0 4px', fontStyle: 'italic' }}>Animation indicative, does not reflect the final version</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* CTA Section */}
-        <section className="cta">
-          <div className="cta-content">
-            <h2>Ready to build faster?</h2>
-            <p>
-              Download Cluso for free and transform how you build user interfaces.
-            </p>
-            <div className="cta-buttons">
-              <a href="#downloads" className="btn btn-primary btn-large" style={{ backgroundColor: 'white', color: 'black' }}>
+              <a
+                href="#downloads"
+                className="btn btn-large"
+                style={{ backgroundColor: 'red', color: 'black', borderColor: 'red' }}
+              >
                 Download Now
               </a>
-            </div>
+            </p>
+            
           </div>
         </section>
 
@@ -1419,7 +1360,12 @@ Cluso combines visual element selection with AI-powered code generation
                     onChange={(e) => setEmail(e.target.value)}
                     required
                   />
-                  <button style={{ backgroundColor: 'white', color: 'black' }} type="submit" className="btn btn-primary" disabled={submitState === 'submitting' || submitState === 'submitted'}>
+                <button
+                  style={{ backgroundColor: 'rgb(255, 255, 255)', color: 'rgb(0, 0, 0)' }}
+                  type="submit"
+                  className="btn"
+                  disabled={submitState === 'submitting' || submitState === 'submitted'}
+                >
                     {getButtonText()}
                   </button>
                 </form>
