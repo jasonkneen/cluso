@@ -149,7 +149,7 @@ async function generateUIUpdate(
   element: SelectedElement,
   userRequest: string,
   apiKey: string,
-  modelId: string = 'gemini-2.5-flash'  // Default fallback, but should be passed explicitly
+  modelId: string = 'gemini-2.5-flash-lite'  // Default fallback, but should be passed explicitly
 ): Promise<UIUpdateResult> {
   const google = createGoogleGenerativeAI({ apiKey });
 
@@ -298,8 +298,8 @@ const getShortModelName = (name: string): string => {
   return name
 };
 
-// Default model - Claude Haiku 4.5 for fast, efficient responses
-const DEFAULT_MODEL = { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', Icon: ClaudeIcon, provider: 'claude-code' };
+// Default model - Gemini 2.5 Flash Lite for fast, efficient responses
+const DEFAULT_MODEL = { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', Icon: Zap, provider: 'google' };
 
 // Legacy MODELS constant for backwards compatibility
 const MODELS = [
@@ -5773,10 +5773,10 @@ If you're not sure what the user wants, ask for clarification.
           console.log('[Instant UI] NO sourceLocation on selectedElement!');
         }
 
-        // Phase 1: Instant DOM update using Gemini Flash (always use Google for instant UI since we need the API key anyway)
+        // Phase 1: Instant DOM update using Gemini Flash Lite (always use Google for instant UI since we need the API key anyway)
         // This generates CSS/text changes based on user request - fast and cheap
-        const geminiModelForUI = 'gemini-2.5-flash';
-        setStreamingMessage(prev => prev ? { ...prev, content: `🎯 Analyzing \`<${selectedElement.tagName.toLowerCase()}>\` element...\n\n⚡ Generating CSS changes with Gemini Flash...` } : null);
+        const geminiModelForUI = 'gemini-2.5-flash-lite';
+        setStreamingMessage(prev => prev ? { ...prev, content: `🎯 Analyzing \`<${selectedElement.tagName.toLowerCase()}>\` element...\n\n⚡ Generating CSS changes with Gemini Flash Lite...` } : null);
 
         const uiResult = await generateUIUpdate(selectedElement, userMessage.content, googleProvider.apiKey, geminiModelForUI);
         const hasCssChanges = Object.keys(uiResult.cssChanges).length > 0;
