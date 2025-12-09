@@ -355,6 +355,12 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
           content: m.content,
         }))
 
+        // Convert providers array to providers map for server
+        const providersMap: Record<string, string> = {}
+        for (const p of providers) {
+          providersMap[p.id] = p.apiKey
+        }
+
         // Use streaming endpoint
         const response = await fetch(`${apiUrl}/api/ai/chat/stream`, {
           method: 'POST',
@@ -362,9 +368,8 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
           body: JSON.stringify({
             messages: apiMessages,
             modelId,
-            system: systemPrompt,
-            temperature,
-            maxTokens,
+            system,
+            providers: providersMap,
           }),
         })
 
@@ -915,6 +920,13 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
 
       try {
         const apiUrl = getWebApiUrl()
+
+        // Convert providers array to providers map for server
+        const providersMap: Record<string, string> = {}
+        for (const p of providers) {
+          providersMap[p.id] = p.apiKey
+        }
+
         const response = await fetch(`${apiUrl}/api/ai/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -922,6 +934,7 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
             messages,
             modelId,
             system,
+            providers: providersMap,
           }),
         })
 

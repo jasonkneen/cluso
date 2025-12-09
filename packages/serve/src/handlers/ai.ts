@@ -4,7 +4,7 @@
  *
  * Provides server-side AI chat capabilities using the Vercel AI SDK.
  * This allows the web mode to use AI features without requiring
- * API keys in the browser.
+ * API keys in the browser - keys can be passed per-request or from env vars.
  */
 
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
@@ -14,13 +14,13 @@ import { streamText, generateText, type CoreMessage } from 'ai'
 import type { Result } from '../types/api.js'
 import { success, error } from '../types/api.js'
 
-// Provider instances (lazily initialized)
-let googleProvider: ReturnType<typeof createGoogleGenerativeAI> | null = null
-let anthropicProvider: ReturnType<typeof createAnthropic> | null = null
-let openaiProvider: ReturnType<typeof createOpenAI> | null = null
+// Default provider instances from env vars (lazily initialized)
+let defaultGoogleProvider: ReturnType<typeof createGoogleGenerativeAI> | null = null
+let defaultAnthropicProvider: ReturnType<typeof createAnthropic> | null = null
+let defaultOpenaiProvider: ReturnType<typeof createOpenAI> | null = null
 
 /**
- * Initialize providers from environment variables
+ * Initialize default providers from environment variables
  */
 export function initializeProviders(config?: {
   googleApiKey?: string
@@ -28,49 +28,96 @@ export function initializeProviders(config?: {
   openaiApiKey?: string
 }) {
   if (config?.googleApiKey || process.env.GOOGLE_API_KEY || process.env.VITE_GOOGLE_API_KEY) {
-    googleProvider = createGoogleGenerativeAI({
+    defaultGoogleProvider = createGoogleGenerativeAI({
       apiKey: config?.googleApiKey || process.env.GOOGLE_API_KEY || process.env.VITE_GOOGLE_API_KEY,
     })
   }
 
   if (config?.anthropicApiKey || process.env.ANTHROPIC_API_KEY) {
-    anthropicProvider = createAnthropic({
+    defaultAnthropicProvider = createAnthropic({
       apiKey: config?.anthropicApiKey || process.env.ANTHROPIC_API_KEY,
     })
   }
 
   if (config?.openaiApiKey || process.env.OPENAI_API_KEY) {
-    openaiProvider = createOpenAI({
+    defaultOpenaiProvider = createOpenAI({
       apiKey: config?.openaiApiKey || process.env.OPENAI_API_KEY,
     })
   }
 }
 
 /**
- * Get provider for a given model ID
+ * Provider configs passed from frontend
  */
-function getProviderForModel(modelId: string) {
+export interface ProviderConfigs {
+  google?: string
+  anthropic?: string
+  openai?: string
+}
+
+/**
+ * Create a provider instance with the given API key (or use default)
+ */
+function createProviderWithKey(providerType: 'google' | 'anthropic' | 'openai', apiKey?: string) {
+  switch (providerType) {
+    case 'google': {
+      const key = apiKey || process.env.GOOGLE_API_KEY || process.env.VITE_GOOGLE_API_KEY
+      if (!key) return null
+      return createGoogleGenerativeAI({ apiKey: key })
+    }
+    case 'anthropic': {
+      const key = apiKey || process.env.ANTHROPIC_API_KEY
+      if (!key) return null
+      return createAnthropic({ apiKey: key })
+    }
+    case 'openai': {
+      const key = apiKey || process.env.OPENAI_API_KEY
+      if (!key) return null
+      return createOpenAI({ apiKey: key })
+    }
+    default:
+      return null
+  }
+}
+
+/**
+ * Get provider for a given model ID, using request-specific keys if provided
+ */
+function getProviderForModel(modelId: string, providers?: ProviderConfigs) {
   const lowerModel = modelId.toLowerCase()
 
   if (lowerModel.startsWith('gemini-')) {
-    if (!googleProvider) {
-      throw new Error('Google API key not configured. Set GOOGLE_API_KEY or VITE_GOOGLE_API_KEY.')
+    // Try request-specific key first, then fallback to default provider
+    if (providers?.google) {
+      const provider = createProviderWithKey('google', providers.google)
+      if (provider) return provider(modelId)
     }
-    return googleProvider(modelId)
+    if (defaultGoogleProvider) {
+      return defaultGoogleProvider(modelId)
+    }
+    throw new Error('Google API key not configured. Pass google API key in providers or set GOOGLE_API_KEY.')
   }
 
   if (lowerModel.startsWith('claude-')) {
-    if (!anthropicProvider) {
-      throw new Error('Anthropic API key not configured. Set ANTHROPIC_API_KEY.')
+    if (providers?.anthropic) {
+      const provider = createProviderWithKey('anthropic', providers.anthropic)
+      if (provider) return provider(modelId)
     }
-    return anthropicProvider(modelId)
+    if (defaultAnthropicProvider) {
+      return defaultAnthropicProvider(modelId)
+    }
+    throw new Error('Anthropic API key not configured. Pass anthropic API key in providers or set ANTHROPIC_API_KEY.')
   }
 
   if (lowerModel.startsWith('gpt-') || lowerModel.startsWith('o1') || lowerModel.startsWith('o3')) {
-    if (!openaiProvider) {
-      throw new Error('OpenAI API key not configured. Set OPENAI_API_KEY.')
+    if (providers?.openai) {
+      const provider = createProviderWithKey('openai', providers.openai)
+      if (provider) return provider(modelId)
     }
-    return openaiProvider(modelId)
+    if (defaultOpenaiProvider) {
+      return defaultOpenaiProvider(modelId)
+    }
+    throw new Error('OpenAI API key not configured. Pass openai API key in providers or set OPENAI_API_KEY.')
   }
 
   throw new Error(`Unknown model provider for: ${modelId}`)
@@ -83,6 +130,7 @@ export interface ChatRequest {
   temperature?: number
   maxTokens?: number
   stream?: boolean
+  providers?: ProviderConfigs  // API keys from frontend
 }
 
 /**
@@ -93,7 +141,7 @@ export async function generateChatCompletion(request: ChatRequest): Promise<Resu
   usage?: { promptTokens: number; completionTokens: number }
 }>> {
   try {
-    const model = getProviderForModel(request.modelId)
+    const model = getProviderForModel(request.modelId, request.providers)
 
     const result = await generateText({
       model,
@@ -125,7 +173,7 @@ export async function* streamChatCompletion(request: ChatRequest): AsyncGenerato
   text?: string
   usage?: { promptTokens: number; completionTokens: number }
 }> {
-  const model = getProviderForModel(request.modelId)
+  const model = getProviderForModel(request.modelId, request.providers)
 
   const result = streamText({
     model,
