@@ -1,4 +1,4 @@
-"use client"
+
 
 import { useEffect, useMemo, useState } from "react"
 import { RiCalendarCheckLine } from "@remixicon/react"

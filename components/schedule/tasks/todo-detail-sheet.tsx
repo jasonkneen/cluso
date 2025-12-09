@@ -1,4 +1,4 @@
-"use client"
+
 
 import React from "react"
 // Link removed - using native anchor tags for Vite compatibility
