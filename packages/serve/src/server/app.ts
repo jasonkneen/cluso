@@ -22,7 +22,9 @@ import { createGitRoutes } from './routes/git.js'
 import { createFilesRoutes } from './routes/files.js'
 import { createBackupRoutes } from './routes/backup.js'
 import { createOAuthRoutes } from './routes/oauth.js'
+import { createAIRoutes } from './routes/ai.js'
 import { WebSocketManager } from '../websocket/manager.js'
+import { initializeProviders } from '../handlers/ai.js'
 
 // Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url)
@@ -85,16 +87,21 @@ export function createApp(options: ServerOptions): Hono<{ Variables: Variables }
   // API Routes
   // ==========================================
 
+  // Initialize AI providers from environment
+  initializeProviders()
+
   // Mount API routes under /api
   const gitRoutes = createGitRoutes()
   const filesRoutes = createFilesRoutes()
   const backupRoutes = createBackupRoutes()
   const oauthRoutes = createOAuthRoutes()
+  const aiRoutes = createAIRoutes()
 
   app.route('/api/git', gitRoutes)
   app.route('/api/files', filesRoutes)
   app.route('/api/backup', backupRoutes)
   app.route('/api/oauth', oauthRoutes)
+  app.route('/api/ai', aiRoutes)
 
   // ==========================================
   // Static File Serving & SPA Fallback

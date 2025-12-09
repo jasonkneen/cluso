@@ -12,6 +12,12 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { debugLog } from '../utils/debug'
 import { normalizeToJsonSchema } from '../utils/zodSchema'
 
+// Detect if running in web mode (not Electron)
+const isWebMode = () => !window.electronAPI?.isElectron
+
+// Web mode API base URL (same origin)
+const getWebApiUrl = () => window.location.origin
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -242,6 +248,27 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
 
   // Initialize AI SDK on mount
   useEffect(() => {
+    // In web mode, check server availability
+    if (isWebMode()) {
+      debugLog.aiChat.log('[Web Mode] Checking AI providers availability')
+      fetch(`${getWebApiUrl()}/api/ai/providers`)
+        .then(res => res.json())
+        .then(result => {
+          if (result.success) {
+            const providers = result.data
+            debugLog.aiChat.log('[Web Mode] Available providers:', providers)
+            setIsInitialized(true)
+          }
+        })
+        .catch(err => {
+          debugLog.aiChat.warn('[Web Mode] AI providers check failed:', err)
+          // Still mark as initialized so the UI loads, errors will show on actual use
+          setIsInitialized(true)
+        })
+      return
+    }
+
+    // Electron mode
     if (!window.electronAPI?.aiSdk) {
       debugLog.aiChat.warn('Electron AI SDK not available')
       return
@@ -310,6 +337,98 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     toolResults?: ToolResultPart[]
     reasoning?: string
   }> => {
+    // =========================================================================
+    // Web Mode: Use REST API instead of Electron IPC
+    // =========================================================================
+    if (isWebMode()) {
+      debugLog.aiChat.log('[Web Mode] Using REST API for AI chat')
+      setIsLoading(true)
+      setIsGenerating(true)
+      setError(null)
+
+      try {
+        const apiUrl = getWebApiUrl()
+
+        // Convert messages to AI SDK format
+        const apiMessages = messages.map(m => ({
+          role: m.role,
+          content: m.content,
+        }))
+
+        // Use streaming endpoint
+        const response = await fetch(`${apiUrl}/api/ai/chat/stream`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: apiMessages,
+            modelId,
+            system: systemPrompt,
+            temperature,
+            maxTokens,
+          }),
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.error || `HTTP ${response.status}`)
+        }
+
+        // Process SSE stream
+        const reader = response.body?.getReader()
+        if (!reader) {
+          throw new Error('No response body')
+        }
+
+        const decoder = new TextDecoder()
+        let fullText = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          const chunk = decoder.decode(value, { stream: true })
+          const lines = chunk.split('\n')
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6)
+              if (data === '[DONE]') continue
+
+              try {
+                const parsed = JSON.parse(data)
+                if (parsed.type === 'text-delta' && parsed.text) {
+                  fullText += parsed.text
+                  onChunk?.(parsed.text)
+                  optionsRef.current.onTextDelta?.(parsed.text)
+                } else if (parsed.type === 'error') {
+                  throw new Error(parsed.error)
+                }
+              } catch {
+                // Ignore parse errors for incomplete chunks
+              }
+            }
+          }
+        }
+
+        setIsLoading(false)
+        setIsGenerating(false)
+        optionsRef.current.onResponse?.(fullText)
+        optionsRef.current.onFinish?.()
+
+        return { text: fullText }
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err))
+        setError(error)
+        setIsLoading(false)
+        setIsGenerating(false)
+        optionsRef.current.onError?.(error)
+        return { text: null }
+      }
+    }
+
+    // =========================================================================
+    // Electron Mode: Use IPC
+    // =========================================================================
     if (!window.electronAPI?.aiSdk) {
       const err = new Error('AI SDK not available - requires Electron environment')
       setError(err)
@@ -786,6 +905,51 @@ export function useAIChatV2(options: UseAIChatOptions = {}) {
     toolCalls?: ToolCallPart[]
     toolResults?: ToolResultPart[]
   }> => {
+    // =========================================================================
+    // Web Mode: Use REST API (simplified, no tool calling support yet)
+    // =========================================================================
+    if (isWebMode()) {
+      debugLog.aiChat.log('[Web Mode] Using REST API for conversation')
+      setIsLoading(true)
+      setError(null)
+
+      try {
+        const apiUrl = getWebApiUrl()
+        const response = await fetch(`${apiUrl}/api/ai/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages,
+            modelId,
+            system,
+          }),
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.error || `HTTP ${response.status}`)
+        }
+
+        const result = await response.json()
+        setIsLoading(false)
+
+        if (result.success) {
+          return { text: result.data.text }
+        } else {
+          throw new Error(result.error || 'Unknown error')
+        }
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err))
+        setError(error)
+        setIsLoading(false)
+        optionsRef.current.onError?.(error)
+        return { text: null }
+      }
+    }
+
+    // =========================================================================
+    // Electron Mode: Use IPC
+    // =========================================================================
     if (!window.electronAPI?.aiSdk) {
       const err = new Error('AI SDK not available - requires Electron environment')
       setError(err)
