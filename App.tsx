@@ -7345,17 +7345,57 @@ If you're not sure what the user wants, ask for clarification.
               <div className={`w-8 h-8 border-2 rounded-full animate-spin ${isDarkMode ? 'border-neutral-600 border-t-neutral-400' : 'border-stone-300 border-t-stone-600'}`}></div>
             </div>
           ) : (
-            <div className={`w-full h-full flex items-center justify-center ${isDarkMode ? 'bg-neutral-800' : 'bg-stone-50'}`}>
-              <div className="text-center p-8">
-                <div className={`w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center ${isDarkMode ? 'bg-neutral-700' : 'bg-stone-200'}`}>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={isDarkMode ? 'text-neutral-500' : 'text-stone-400'}><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
-                </div>
-                <h3 className={`text-lg font-medium mb-2 ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`}>Browser Preview</h3>
-                <p className={`text-sm max-w-xs ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
-                  Run this app in Electron to browse localhost projects with the inspector.
-                </p>
-              </div>
-            </div>
+            /* Web mode: Use iframe for external URLs, show project info for localhost */
+            (() => {
+              const activeUrl = activeTab.url || '';
+              const isLocalhost = activeUrl.includes('localhost') || activeUrl.includes('127.0.0.1');
+
+              if (isLocalhost) {
+                // Localhost URLs can't be loaded in iframe due to security restrictions
+                return (
+                  <div className={`w-full h-full flex items-center justify-center ${isDarkMode ? 'bg-neutral-800' : 'bg-stone-50'}`}>
+                    <div className="text-center p-8 max-w-md">
+                      <div className={`w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center ${isDarkMode ? 'bg-green-900/30' : 'bg-green-100'}`}>
+                        <Globe size={32} className={isDarkMode ? 'text-green-400' : 'text-green-600'} />
+                      </div>
+                      <h3 className={`text-lg font-medium mb-2 ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`}>
+                        Project Running
+                      </h3>
+                      <p className={`text-sm mb-4 ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                        Your project is available at:
+                      </p>
+                      <a
+                        href={activeUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                          isDarkMode
+                            ? 'bg-blue-600 hover:bg-blue-500 text-white'
+                            : 'bg-blue-500 hover:bg-blue-600 text-white'
+                        }`}
+                      >
+                        <Globe size={16} />
+                        {activeUrl}
+                      </a>
+                      <p className={`text-xs mt-4 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                        Localhost preview requires the Electron desktop app.
+                        <br />Use the chat sidebar to work with your code.
+                      </p>
+                    </div>
+                  </div>
+                );
+              } else {
+                // External URLs can be loaded in iframe
+                return (
+                  <iframe
+                    src={activeUrl}
+                    className="w-full h-full border-0"
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                    title="Web Preview"
+                  />
+                );
+              }
+            })()
           )}
 
             {/* Floating Toolbar when sidebar collapsed */}
