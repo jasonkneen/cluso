@@ -31,7 +31,12 @@ const DEMOS = {
   'edit-workflow': 'Show me the workflow for making a UI change to a webpage.'
 }
 
-export function useClusoAgent(): UseClusoAgentResult {
+export interface UseClusoAgentParams {
+  googleApiKey?: string
+}
+
+export function useClusoAgent(params: UseClusoAgentParams = {}): UseClusoAgentResult {
+  const { googleApiKey } = params
   const [isReady, setIsReady] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [lastResponse, setLastResponse] = useState('')
@@ -42,11 +47,11 @@ export function useClusoAgent(): UseClusoAgentResult {
 
   // Initialize agent with callbacks
   useEffect(() => {
-    // Initialize Gemini TTS with API key from environment
-    const apiKey = (import.meta as any).env?.VITE_GOOGLE_API_KEY || (window as any).process?.env?.API_KEY
+    // Initialize Gemini TTS with API key from props or environment
+    const apiKey = googleApiKey || (import.meta as any).env?.VITE_GOOGLE_API_KEY || (window as any).process?.env?.API_KEY
     if (apiKey) {
       initGeminiTTS(apiKey)
-      console.log('[ClusoAgent] Gemini TTS initialized')
+      console.log('[ClusoAgent] Gemini TTS initialized with API key')
     } else {
       console.warn('[ClusoAgent] No API key found, using browser TTS fallback')
     }
@@ -88,7 +93,7 @@ export function useClusoAgent(): UseClusoAgentResult {
     return () => {
       agentRef.current = null
     }
-  }, [appControl])
+  }, [appControl, googleApiKey])
 
   const chat = useCallback(async (message: string): Promise<string> => {
     if (!agentRef.current) {

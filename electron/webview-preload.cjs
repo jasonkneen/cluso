@@ -560,6 +560,90 @@ ipcRenderer.on('clear-selection', () => {
   }
 })
 
+// Highlight element by number - for voice control
+ipcRenderer.on('highlight-element-by-number', (event, elementNumber) => {
+  console.log('[AI] Highlighting element by number:', elementNumber)
+
+  // If we have multiple matches from a previous selector, use those
+  if (multipleMatches.length > 0) {
+    const index = elementNumber - 1 // Convert to 0-indexed
+    if (index >= 0 && index < multipleMatches.length) {
+      const element = multipleMatches[index]
+
+      // Clear previous selection highlight (keep numbers visible)
+      if (currentSelected && currentSelected !== element) {
+        currentSelected.classList.remove('inspector-selected-target')
+      }
+
+      // Highlight the selected element
+      element.classList.add('inspector-selected-target')
+      currentSelected = element
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+
+      const summary = getElementSummary(element)
+      const rect = element.getBoundingClientRect()
+
+      ipcRenderer.sendToHost('HIGHLIGHT_BY_NUMBER_SUCCESS', {
+        elementNumber: elementNumber,
+        element: summary,
+        rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
+      })
+    } else {
+      ipcRenderer.sendToHost('HIGHLIGHT_BY_NUMBER_FAILED', {
+        elementNumber: elementNumber,
+        error: `Element number ${elementNumber} not found. Valid range: 1-${multipleMatches.length}`
+      })
+    }
+  } else {
+    // No previous selector - try to find all interactive elements and number them
+    const interactiveSelector = 'button, a, input, [role="button"], [onclick], img, video, h1, h2, h3, p, span, div[class*="card"], div[class*="item"]'
+    const elements = document.querySelectorAll(interactiveSelector)
+
+    if (elements.length === 0) {
+      ipcRenderer.sendToHost('HIGHLIGHT_BY_NUMBER_FAILED', {
+        elementNumber: elementNumber,
+        error: 'No elements found on page to highlight'
+      })
+      return
+    }
+
+    // Store and number all elements
+    clearNumberBadges()
+    multipleMatches = Array.from(elements)
+
+    multipleMatches.forEach((element, index) => {
+      const badge = createNumberBadge(index + 1)
+      element.style.position = element.style.position || 'relative'
+      element.appendChild(badge)
+      numberBadges.push(badge)
+    })
+
+    // Now highlight the requested number
+    const index = elementNumber - 1
+    if (index >= 0 && index < multipleMatches.length) {
+      const element = multipleMatches[index]
+      element.classList.add('inspector-selected-target')
+      currentSelected = element
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+
+      const summary = getElementSummary(element)
+      const rect = element.getBoundingClientRect()
+
+      ipcRenderer.sendToHost('HIGHLIGHT_BY_NUMBER_SUCCESS', {
+        elementNumber: elementNumber,
+        element: summary,
+        totalElements: multipleMatches.length,
+        rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
+      })
+    } else {
+      ipcRenderer.sendToHost('HIGHLIGHT_BY_NUMBER_FAILED', {
+        elementNumber: elementNumber,
+        error: `Element number ${elementNumber} not found. Valid range: 1-${multipleMatches.length}`
+      })
+    }
+  }
+})
+
 // Clear number badges helper
 function clearNumberBadges() {
   numberBadges.forEach(badge => badge.remove())

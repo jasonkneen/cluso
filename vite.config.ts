@@ -18,11 +18,15 @@ export default defineConfig(({ mode }) => {
       ],
       define: {
         'process.env.API_KEY': JSON.stringify(env.VITE_GOOGLE_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.VITE_GOOGLE_API_KEY)
+        'process.env.GEMINI_API_KEY': JSON.stringify(env.VITE_GOOGLE_API_KEY),
+        // Buffer polyfill for browser (needed by @google/genai Live API)
+        'global': 'globalThis',
       },
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
+          // Buffer polyfill for browser
+          'buffer': 'buffer/',
         }
       },
       build: {
@@ -33,7 +37,7 @@ export default defineConfig(({ mode }) => {
       optimizeDeps: {
         // Pre-bundle shiki to avoid 504 errors during HMR
         // Shiki dynamically imports themes/languages which can cause stale dep issues
-        include: ['shiki'],
+        include: ['shiki', 'buffer'],
       },
       css: {
         devSourcemap: true,

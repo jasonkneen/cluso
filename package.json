@@ -42,6 +42,7 @@
     "ai": "^5.0.104",
     "better-sqlite3": "^12.5.0",
     "bippy": "0.5.16",
+    "buffer": "^6.0.3",
     "chokidar": "^5.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

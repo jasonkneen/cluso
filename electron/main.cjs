@@ -1023,7 +1023,7 @@ function registerCodexHandlers() {
           'originator': 'codex_cli_rs'
         },
         body: JSON.stringify({
-          model: 'gpt-5.1-nano',
+          model: 'gpt-5.1-codex',
           input: 'Reply with OK only.',
           instructions: 'You are a helpful assistant. Reply concisely.'
         })

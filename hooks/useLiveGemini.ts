@@ -28,6 +28,10 @@ interface UseLiveGeminiParams {
   onApproveChange?: (reason?: string) => void;
   onRejectChange?: (reason?: string) => void;
   onUndoChange?: (reason?: string) => void;
+  onHighlightByNumber?: (elementNumber: number) => Promise<{ success: boolean; element?: any; error?: string }>;
+  onClearFocus?: () => Promise<{ success: boolean }>;
+  onSetViewport?: (mode: 'mobile' | 'tablet' | 'desktop') => Promise<{ success: boolean }>;
+  onSwitchTab?: (type: 'browser' | 'kanban' | 'todos' | 'notes') => Promise<{ success: boolean }>;
   selectedElement?: SelectedElement | null;
   // Context for logging
   projectFolder?: string;
@@ -436,7 +440,123 @@ This reverts the application to the state before the last change was applied.`,
   },
 };
 
-export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, onOpenItem, onOpenFile, onOpenFolder, onBrowserBack, onCloseBrowser, onApproveChange, onRejectChange, onUndoChange, selectedElement, projectFolder, currentUrl, googleApiKey, selectedModelId }: UseLiveGeminiParams) {
+// Highlight element by number tool - uses existing numbered badges
+// Also sets focus for hierarchical navigation
+const highlightByNumberTool: FunctionDeclaration = {
+  name: 'highlight_element_by_number',
+  description: `Highlight an element AND SET IT AS FOCUS for hierarchical navigation.
+
+Elements on the page are numbered with visible badges (1, 2, 3, etc).
+This is the PREFERRED way to highlight elements - no CSS selector errors!
+
+🎯 HIERARCHICAL FOCUSING:
+When you highlight an element, it becomes the FOCUS. Subsequent get_page_elements
+calls will ONLY show elements WITHIN the focused element. This lets users
+drill down: "middle section" → "left side" → "that button"
+
+WORKFLOW:
+1. get_page_elements() - shows all page elements numbered
+2. User: "the middle section" → highlight_element_by_number(N) for that section
+3. get_page_elements() - now ONLY shows elements INSIDE the section
+4. User: "the button on the left" → highlight_element_by_number(M)
+5. User: "clear focus" → call clear_focus() to see all elements again
+
+WHEN TO USE:
+- "highlight 3" or "number 3" → highlight_element_by_number(3)
+- "that section" / "the header" → highlight it to set focus
+- User points to a region → set it as focus for drilling down`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      elementNumber: {
+        type: Type.NUMBER,
+        description: 'The 1-indexed element number to highlight (from the numbered badges on the page)',
+      },
+      description: {
+        type: Type.STRING,
+        description: 'Brief description of what element you are highlighting (for user confirmation)',
+      },
+    },
+    required: ['elementNumber'],
+  },
+};
+
+// Clear focus tool - resets hierarchical navigation to show all elements
+const clearFocusTool: FunctionDeclaration = {
+  name: 'clear_focus',
+  description: `Clear the current focus scope and show ALL page elements again.
+
+Use this when the user wants to "zoom out" or see the full page elements again after
+drilling down into a specific section.
+
+TRIGGERS:
+- "clear focus" / "zoom out" / "show all" / "reset" / "go back to all"
+- "start over" / "full page" / "everything"
+
+After clearing focus, call get_page_elements() to re-number all elements on the page.`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {},
+    required: [],
+  },
+};
+
+// Set viewport mode - switch between mobile, tablet, desktop views
+const setViewportTool: FunctionDeclaration = {
+  name: 'set_viewport',
+  description: `Switch the viewport/device preview mode in Cluso.
+
+MODES:
+- 'mobile' - Phone view (375px wide)
+- 'tablet' - Tablet view (768px wide)
+- 'desktop' - Full width desktop view
+
+TRIGGERS:
+- "switch to mobile" / "show mobile view" / "phone view"
+- "switch to tablet" / "tablet view" / "iPad view"
+- "switch to desktop" / "desktop view" / "full width"
+- "how does it look on mobile?"`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      mode: {
+        type: Type.STRING,
+        description: 'Viewport mode: mobile, tablet, or desktop',
+      },
+    },
+    required: ['mode'],
+  },
+};
+
+// Switch tab - open kanban, todos, notes, or browser tabs
+const switchTabTool: FunctionDeclaration = {
+  name: 'switch_tab',
+  description: `Switch to or create a different tab type in Cluso.
+
+TAB TYPES:
+- 'browser' - Web browser tab for viewing/editing websites
+- 'kanban' - Kanban board for project management
+- 'todos' - Todo list for task tracking
+- 'notes' - Notes tab for documentation
+
+TRIGGERS:
+- "open kanban" / "show kanban board" / "project board"
+- "open todos" / "show my tasks" / "task list"
+- "open notes" / "show notes"
+- "go to browser" / "back to website"`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      type: {
+        type: Type.STRING,
+        description: 'Tab type: browser, kanban, todos, or notes',
+      },
+    },
+    required: ['type'],
+  },
+};
+
+export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, onOpenItem, onOpenFile, onOpenFolder, onBrowserBack, onCloseBrowser, onApproveChange, onRejectChange, onUndoChange, onHighlightByNumber, onClearFocus, onSetViewport, onSwitchTab, selectedElement, projectFolder, currentUrl, googleApiKey, selectedModelId }: UseLiveGeminiParams) {
   const [streamState, setStreamState] = useState<StreamState>({
     isConnected: false,
     isStreaming: false,
@@ -557,7 +677,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
           },
-          tools: [{ functionDeclarations: [updateUiTool, selectElementTool, executeCodeTool, confirmSelectionTool, getPageElementsTool, patchSourceFileTool, listFilesTool, readFileTool, clickElementTool, navigateTool, scrollTool, openFileBrowserItemTool, openFileTool, openFolderTool, fileBrowserBackTool, closeFileBrowserTool, approveCchangeTool, rejectChangeTool, undoChangeTool] }],
+          tools: [{ functionDeclarations: [updateUiTool, selectElementTool, executeCodeTool, confirmSelectionTool, getPageElementsTool, patchSourceFileTool, listFilesTool, readFileTool, clickElementTool, navigateTool, scrollTool, openFileBrowserItemTool, openFileTool, openFolderTool, fileBrowserBackTool, closeFileBrowserTool, approveCchangeTool, rejectChangeTool, undoChangeTool, highlightByNumberTool, clearFocusTool, setViewportTool, switchTabTool] }],
           systemInstruction: `You are a specialized AI UI Engineer with voice control, file browsing, element selection, and browser navigation.
 
           You can see the user's screen or video feed if enabled.
@@ -565,21 +685,42 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
 
           CAPABILITIES:
           📁 FILE BROWSER: Browse files with numbered overlay, navigate folders, view files/images
-          🔍 PAGE INSPECTION: Get page elements, select elements, execute code
+          🔍 PAGE INSPECTION: Get page elements, highlight by number, execute code
           🧭 NAVIGATION: Click links, go back/forward, scroll, navigate to URLs
           ✏️ EDITING: Preview changes with execute_code, save with patch_source_file
 
-          ⚠️ MANDATORY ELEMENT SELECTION WORKFLOW:
-          NEVER guess selectors! ALWAYS follow this sequence:
-          1. FIRST: Call get_page_elements() to see what's actually on the page
-          2. THEN: Review the returned elements - check their counts, classes, and attributes
-          3. FINALLY: Use select_element() with selectors based on what you found
+          🎯 ELEMENT HIGHLIGHTING - USE NUMBERS, NOT CSS SELECTORS!
+          Elements on the page are numbered (1, 2, 3...). Use highlight_element_by_number() to highlight them.
+          This is MORE RELIABLE than CSS selectors and never causes errors.
 
-          Example: User says "select the image"
-          ❌ WRONG: Immediately call select_element('img') - might not exist!
-          ✅ RIGHT: Call get_page_elements('images') first, see results, then select
+          🔍 HIERARCHICAL FOCUSING - DRILL DOWN INTO SECTIONS:
+          When you highlight an element, it becomes the FOCUS. Subsequent get_page_elements
+          calls will ONLY show elements WITHIN the focused element. This lets users drill down:
 
-          If get_page_elements returns 0 for a category, tell the user "I don't see any [X] on this page."
+          Example conversation:
+          User: "show me the page" → get_page_elements()
+          You: "I see 20 elements. The header is #1, main section #5, footer #12"
+          User: "that middle section" → highlight_element_by_number(5) - SETS FOCUS
+          You: "Now focused on the main section"
+          User: "what's in there?" → get_page_elements() - now shows ONLY elements inside #5
+          You: "Within the main section: 3 buttons (#1, #2, #3)"
+          User: "the left one" → highlight_element_by_number(1)
+          User: "zoom out" → clear_focus() then get_page_elements() - shows all again
+
+          WORKFLOW:
+          1. get_page_elements() - shows all page elements numbered
+          2. User picks a section → highlight_element_by_number(N) - sets focus to that section
+          3. get_page_elements() - now ONLY shows children of focused section
+          4. User: "clear focus" / "zoom out" → clear_focus() to see full page again
+
+          NUMBER-BASED COMMANDS:
+          - "highlight 3" / "number 3" → highlight_element_by_number(3)
+          - "that section" / "the header" → highlight to set focus
+          - "clear focus" / "zoom out" / "show all" → clear_focus()
+          - "show me the buttons" → get_page_elements('buttons')
+
+          ⚠️ IMPORTANT: highlight_element_by_number sets FOCUS for drilling down.
+          Use execute_code or update_ui for actual code changes.
 
           FILE BROWSER OVERLAY:
           When user asks to see files ("show files", "list files", "check the public folder"), use list_files.
@@ -605,10 +746,6 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
           - If element is selected → confirm_selection(false)
           - Otherwise → acknowledge and do nothing
 
-          CRITICAL - CSS SELECTORS:
-          Modern frameworks use: 'button, [role="button"]' not just 'button'
-          NO :contains() - it will crash!
-
           ${selectedElement ? `SELECTED ELEMENT: ${selectedElement.tagName} "${selectedElement.text || ''}"` : ''}
 
           VOICE APPROVAL COMMANDS:
@@ -618,10 +755,10 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
           - "undo that", "undo the last change", "revert", "go back" → undo_change()
 
           VOICE COMMANDS SUMMARY:
+          HIGHLIGHTING: "highlight 3", "show me the buttons", "number 2"
           FILE BROWSER: "show files", "open 3", "go back", "close that"
-          PAGE: "highlight buttons", "click that", "scroll down"
+          PAGE: "click that", "scroll down"
           APPROVAL: "yes"/"approve", "no"/"reject", "undo that"
-          CONFIRM: "yes"/"approve", "no"/"reject"
 
           🚀 INSTANT DOM EDITS - CRITICAL:
           When user requests UI changes ("flip it back", "change the color", "move that button", etc):
@@ -685,6 +822,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                       onApproveChange,
                       onRejectChange,
                       onUndoChange,
+                      onHighlightByNumber,
                     };
 
                     // Convert to typed tool calls
@@ -872,13 +1010,31 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
 
   // Expose a method to send text manually if needed (for text chat integration with Live model if desired)
   // For now, we rely on the chat pane using standard generateContent for text, and this hook for voice.
-  
+
+  // Stop speaking - interrupts current audio playback without disconnecting
+  const stopSpeaking = useCallback(() => {
+    debugLog.liveGemini.log('Stopping speech - clearing audio queue');
+    const sourcesToStop = Array.from(audioSourcesRef.current);
+    audioSourcesRef.current.clear();
+    sourcesToStop.forEach(source => {
+      try { source.stop(); } catch { /* ignore already stopped sources */ }
+    });
+    nextStartTimeRef.current = 0;
+  }, []);
+
+  // Intentional disconnect - prevents auto-reconnect
+  const disconnect = useCallback(() => {
+    debugLog.liveGemini.log('User initiated disconnect - preventing auto-reconnect');
+    cleanup(true); // Pass skipReconnect=true to prevent auto-reconnect
+  }, [cleanup]);
+
   return {
     streamState,
     connect,
-    disconnect: cleanup,
+    disconnect,
     startVideoStreaming,
     stopVideoStreaming,
+    stopSpeaking,
     volume,
   };
 }

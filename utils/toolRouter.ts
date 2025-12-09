@@ -24,6 +24,9 @@ export interface ToolArgs {
   target?: string
   itemNumber?: number
   name?: string
+  reason?: string
+  mode?: string
+  type?: string
 }
 
 // Tool call from Gemini
@@ -58,6 +61,13 @@ export interface ToolHandlers {
   onOpenFolder?: (name?: string, itemNumber?: number) => Promise<string>
   onBrowserBack?: () => string
   onCloseBrowser?: () => string
+  onApproveChange?: (reason?: string) => void
+  onRejectChange?: (reason?: string) => void
+  onUndoChange?: (reason?: string) => void
+  onHighlightByNumber?: (elementNumber: number) => Promise<{ success: boolean; element?: any; error?: string }>
+  onClearFocus?: () => Promise<{ success: boolean }>
+  onSetViewport?: (mode: 'mobile' | 'tablet' | 'desktop') => Promise<{ success: boolean }>
+  onSwitchTab?: (type: 'browser' | 'kanban' | 'todos' | 'notes') => Promise<{ success: boolean }>
 }
 
 // Function to send response back to Gemini session
@@ -407,6 +417,122 @@ const toolHandlerRegistry: Record<string, ToolHandler> = {
       sendResponse(call.id, call.name, {
         error: err instanceof Error ? err.message : 'Failed to close browser',
       })
+    }
+  },
+
+  approve_change: (call, handlers, sendResponse) => {
+    const { reason } = call.args
+    if (handlers.onApproveChange) {
+      handlers.onApproveChange(reason)
+    }
+    sendResponse(call.id, call.name, { result: 'Change approved' })
+  },
+
+  reject_change: (call, handlers, sendResponse) => {
+    const { reason } = call.args
+    if (handlers.onRejectChange) {
+      handlers.onRejectChange(reason)
+    }
+    sendResponse(call.id, call.name, { result: 'Change rejected' })
+  },
+
+  undo_change: (call, handlers, sendResponse) => {
+    const { reason } = call.args
+    if (handlers.onUndoChange) {
+      handlers.onUndoChange(reason)
+    }
+    sendResponse(call.id, call.name, { result: 'Change undone' })
+  },
+
+  highlight_element_by_number: async (call, handlers, sendResponse) => {
+    const { elementNumber, description } = call.args
+    if (!handlers.onHighlightByNumber) {
+      sendResponse(call.id, call.name, { error: 'highlight_element_by_number not available' })
+      return
+    }
+    if (elementNumber === undefined) {
+      sendResponse(call.id, call.name, { error: 'highlight_element_by_number requires elementNumber' })
+      return
+    }
+    try {
+      const result = await withTimeout(
+        handlers.onHighlightByNumber(elementNumber),
+        TIMEOUTS.QUICK,
+        'highlight_element_by_number'
+      )
+      if (result.success) {
+        const elementInfo = result.element
+          ? ` (${result.element.tagName}${result.element.text ? ': ' + result.element.text.substring(0, 30) : ''})`
+          : ''
+        sendResponse(call.id, call.name, {
+          result: `Element ${elementNumber} highlighted${elementInfo}${description ? ': ' + description : ''}`,
+        })
+      } else {
+        sendResponse(call.id, call.name, { error: result.error || 'Failed to highlight element' })
+      }
+    } catch (err) {
+      const errorMsg = err instanceof TimeoutError
+        ? err.message
+        : (err instanceof Error ? err.message : 'Failed to highlight element')
+      sendResponse(call.id, call.name, { error: errorMsg })
+    }
+  },
+
+  clear_focus: async (call, handlers, sendResponse) => {
+    if (!handlers.onClearFocus) {
+      sendResponse(call.id, call.name, { error: 'clear_focus not available' })
+      return
+    }
+    try {
+      const result = await handlers.onClearFocus()
+      sendResponse(call.id, call.name, {
+        result: 'Focus cleared. Call get_page_elements() to see all elements.',
+      })
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to clear focus'
+      sendResponse(call.id, call.name, { error: errorMsg })
+    }
+  },
+
+  set_viewport: async (call, handlers, sendResponse) => {
+    if (!handlers.onSetViewport) {
+      sendResponse(call.id, call.name, { error: 'set_viewport not available' })
+      return
+    }
+    const mode = call.args.mode as 'mobile' | 'tablet' | 'desktop'
+    if (!mode || !['mobile', 'tablet', 'desktop'].includes(mode)) {
+      sendResponse(call.id, call.name, { error: 'Invalid mode. Use: mobile, tablet, or desktop' })
+      return
+    }
+    try {
+      await handlers.onSetViewport(mode)
+      sendResponse(call.id, call.name, {
+        result: `Viewport switched to ${mode} mode`,
+      })
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to set viewport'
+      sendResponse(call.id, call.name, { error: errorMsg })
+    }
+  },
+
+  switch_tab: async (call, handlers, sendResponse) => {
+    if (!handlers.onSwitchTab) {
+      sendResponse(call.id, call.name, { error: 'switch_tab not available' })
+      return
+    }
+    const type = call.args.type as 'browser' | 'kanban' | 'todos' | 'notes'
+    if (!type || !['browser', 'kanban', 'todos', 'notes'].includes(type)) {
+      sendResponse(call.id, call.name, { error: 'Invalid type. Use: browser, kanban, todos, or notes' })
+      return
+    }
+    try {
+      await handlers.onSwitchTab(type)
+      sendResponse(call.id, call.name, {
+        result: `Switched to ${type} tab`,
+      })
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to switch tab'
+      sendResponse(call.id, call.name, { error: errorMsg })
     }
   },
 }

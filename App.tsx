@@ -27,7 +27,7 @@ import { AutocompletePopup } from './components/AutocompletePopup';
 import { useMCP } from './hooks/useMCP';
 import { useSelectorAgent } from './hooks/useSelectorAgent';
 import { useToolTracker } from './hooks/useToolTracker';
-import { useClusoAgent, AVAILABLE_DEMOS } from './hooks/useClusoAgent';
+import { useClusoAgent, AVAILABLE_DEMOS, DEMO_SCRIPTS } from './hooks/useClusoAgent';
 import { useSteeringQuestions } from './hooks/useSteeringQuestions';
 import { SteeringQuestions } from './components/SteeringQuestions';
 import { generateTurnId } from './utils/turnUtils';
@@ -835,14 +835,65 @@ export default function App() {
   const [popupInput, setPopupInput] = useState('');
   const [showElementChat, setShowElementChat] = useState(false);
 
+  // Auto-show floating chat when element is selected
+  useEffect(() => {
+    if (selectedElement && !isSidebarOpen) {
+      setShowElementChat(true);
+    }
+  }, [selectedElement, isSidebarOpen]);
+
   // File Selection State (@ commands)
-  const [selectedFiles, setSelectedFiles] = useState<Array<{path: string; content: string}>>([]);
+  const [selectedFiles, setSelectedFiles] = useState<Array<{
+    path: string;
+    content: string;
+    displayName?: string;  // Clean filename for display (no query params)
+    elementType?: string;  // e.g., "Button", "Section", "Component"
+    lineStart?: number;
+    lineEnd?: number;
+  }>>([]);
   const [fileSearchQuery, setFileSearchQuery] = useState('');
   const [showFileAutocomplete, setShowFileAutocomplete] = useState(false);
   const [directoryFiles, setDirectoryFiles] = useState<Array<{name: string; path: string; isDirectory: boolean}>>([]);
   const [currentDirectory, setCurrentDirectory] = useState<string>('');
   const [directoryStack, setDirectoryStack] = useState<string[]>([]);
   const [autocompleteIndex, setAutocompleteIndex] = useState(0);
+
+  // Helper to format file display: "LandingPage.tsx / Button (1426-31)"
+  const formatFileDisplay = useCallback((file: typeof selectedFiles[0]): string => {
+    // Get clean filename (remove query params like ?t=...)
+    const rawName = file.path.split('/').pop() || file.path;
+    const cleanName = rawName.split('?')[0];
+
+    // Build display parts
+    let display = cleanName;
+
+    // Add element type if available
+    if (file.elementType) {
+      display += ` / ${file.elementType}`;
+    }
+
+    // Add line range if available (compact format: 1426-31 instead of 1426-1431)
+    if (file.lineStart !== undefined) {
+      if (file.lineEnd !== undefined && file.lineEnd !== file.lineStart) {
+        // Compact line range: if same prefix, show shortened end
+        const startStr = file.lineStart.toString();
+        const endStr = file.lineEnd.toString();
+        // Find common prefix length
+        let commonLen = 0;
+        while (commonLen < startStr.length && commonLen < endStr.length &&
+               startStr[commonLen] === endStr[commonLen]) {
+          commonLen++;
+        }
+        // Show shortened end if they share a prefix
+        const shortEnd = commonLen > 0 ? endStr.slice(commonLen) : endStr;
+        display += ` (${startStr}-${shortEnd})`;
+      } else {
+        display += ` (${file.lineStart})`;
+      }
+    }
+
+    return display;
+  }, []);
 
   // Slash Command State (/ commands)
   const [availableCommands, setAvailableCommands] = useState<Array<{name: string; prompt: string}>>([]);
@@ -869,8 +920,7 @@ export default function App() {
   // Tool Execution Tracking
   const toolTracker = useToolTracker();
 
-  // Cluso Agent - AI control of UI elements
-  const clusoAgent = useClusoAgent();
+  // Cluso Agent - initialized below after appSettings
   const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false);
 
   const [commitMessage, setCommitMessage] = useState('');
@@ -983,6 +1033,11 @@ export default function App() {
       console.error('Failed to load settings from localStorage:', e);
     }
     return DEFAULT_SETTINGS;
+  });
+
+  // Cluso Agent - AI control of UI elements (must be after appSettings)
+  const clusoAgent = useClusoAgent({
+    googleApiKey: appSettings.providers.find(p => p.id === 'google')?.apiKey,
   });
 
   // Persist settings to localStorage when they change
@@ -1956,91 +2011,227 @@ export default function App() {
     }
   }, [aiSelectedElement, activeTabId]);
 
+  // Handle highlight by number - visually highlights element without editing code
+  // Uses window.__numberedElements from get_page_elements to ensure consistent numbering
+  const handleHighlightByNumber = useCallback(async (elementNumber: number): Promise<{ success: boolean; element?: any; error?: string }> => {
+    console.log('[AI] Highlighting element by number:', elementNumber);
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      return { success: false, error: 'Webview not ready' };
+    }
+
+    const highlightCode = `
+      (function() {
+        const elementNumber = ${elementNumber};
+        const elements = window.__numberedElements;
+
+        if (!elements || elements.length === 0) {
+          return { success: false, error: 'No numbered elements. Call get_page_elements first.' };
+        }
+
+        const index = elementNumber - 1; // Convert to 0-indexed
+        if (index < 0 || index >= elements.length) {
+          return { success: false, error: 'Element ' + elementNumber + ' not found. Valid range: 1-' + elements.length };
+        }
+
+        const element = elements[index];
+
+        // Clear any previous highlight
+        document.querySelectorAll('.cluso-highlighted').forEach(el => {
+          el.classList.remove('cluso-highlighted');
+          el.style.outline = '';
+          el.style.outlineOffset = '';
+        });
+
+        // Clear all number badges now that user has selected one
+        document.querySelectorAll('.element-number-badge').forEach(b => b.remove());
+
+        // Highlight the selected element
+        element.classList.add('cluso-highlighted');
+        element.style.outline = '3px solid #3b82f6';
+        element.style.outlineOffset = '2px';
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        // Store as current focus for subsequent operations
+        window.__focusedElement = element;
+
+        const text = element.innerText?.substring(0, 50) || '';
+        const tag = element.tagName.toLowerCase();
+
+        return {
+          success: true,
+          element: { number: elementNumber, tag, text: text.trim(), totalElements: elements.length }
+        };
+      })()
+    `;
+
+    try {
+      const result = await webview.executeJavaScript(highlightCode);
+      console.log('[AI] Highlight by number result:', result);
+      return result;
+    } catch (err) {
+      console.error('[AI] Highlight by number error:', err);
+      return { success: false, error: (err as Error).message };
+    }
+  }, [isWebviewReady, activeTabId]);
+
+  // Handle clear_focus tool - clears the hierarchical focus scope
+  const handleClearFocus = useCallback(async (): Promise<{ success: boolean }> => {
+    console.log('[AI] Clearing focus scope');
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      return { success: false };
+    }
+
+    const clearCode = `
+      (function() {
+        // Clear focus
+        window.__focusedElement = null;
+
+        // Clear all highlights
+        document.querySelectorAll('.cluso-highlighted').forEach(el => {
+          el.classList.remove('cluso-highlighted');
+          el.style.outline = '';
+          el.style.outlineOffset = '';
+        });
+
+        // Clear number badges
+        document.querySelectorAll('.element-number-badge').forEach(b => b.remove());
+
+        // Clear stored elements
+        window.__numberedElements = [];
+
+        return { success: true };
+      })()
+    `;
+
+    try {
+      await webview.executeJavaScript(clearCode);
+      console.log('[AI] Focus cleared');
+      return { success: true };
+    } catch (err) {
+      console.error('[AI] Clear focus error:', err);
+      return { success: false };
+    }
+  }, [isWebviewReady, activeTabId]);
+
+  // Handle set_viewport tool - switches between mobile/tablet/desktop views
+  const handleSetViewport = useCallback(async (mode: 'mobile' | 'tablet' | 'desktop'): Promise<{ success: boolean }> => {
+    console.log('[AI] Setting viewport to:', mode);
+    setViewportSize(mode);
+    return { success: true };
+  }, []);
+
+  // Handle switch_tab tool - switches to or creates different tab types
+  const handleSwitchTab = useCallback(async (type: 'browser' | 'kanban' | 'todos' | 'notes'): Promise<{ success: boolean }> => {
+    console.log('[AI] Switching to tab type:', type);
+    // Check if a tab of this type already exists
+    const existingTab = tabs.find(t => t.type === type);
+    if (existingTab) {
+      setActiveTabId(existingTab.id);
+    } else {
+      // Create a new tab of the specified type
+      handleNewTab(type);
+    }
+    return { success: true };
+  }, [tabs, handleNewTab]);
+
   // Handle get_page_elements tool - scans page for interactive elements
-  const handleGetPageElements = useCallback(async (category?: string): Promise<string> => {
-    console.log('[AI] Getting page elements, category:', category);
+  // Supports hierarchical focusing: if an element is focused, only shows children of that element
+  // showBadges: when false, doesn't create visual number badges (used for background context priming)
+  const handleGetPageElements = useCallback(async (category?: string, showBadges: boolean = true): Promise<string> => {
+    console.log('[AI] Getting page elements, category:', category, 'showBadges:', showBadges);
     const webview = webviewRefs.current.get(activeTabId);
     if (!webview || !isWebviewReady) {
       return 'Error: Webview not ready';
     }
 
+    // Build selector based on category - this selector is used for BOTH counting AND numbering
+    const categorySelectors: Record<string, string> = {
+      'buttons': 'button, [role="button"], [data-slot="button"], input[type="button"], input[type="submit"]',
+      'links': 'a[href], [role="link"]',
+      'inputs': 'input, textarea, select, [role="textbox"], [contenteditable="true"]',
+      'images': 'img, [role="img"], svg',
+      'headings': 'h1, h2, h3, h4, h5, h6, [role="heading"]',
+      'all': 'button, [role="button"], a[href], input, textarea, select, img, h1, h2, h3, h4, h5, h6'
+    };
+
+    const selector = categorySelectors[category || 'all'] || categorySelectors['all'];
+
     const scanCode = `
       (function() {
         const category = '${category || 'all'}';
+        const selector = '${selector}';
+        const showBadges = ${showBadges};
         const results = {};
 
+        // Clear existing number badges
+        document.querySelectorAll('.element-number-badge').forEach(b => b.remove());
+
+        // Check if we have a focused element (scoped search)
+        const focusScope = window.__focusedElement;
+        const searchRoot = focusScope || document;
+
         // Helper to get element summary
-        function summarize(el) {
+        function summarize(el, number) {
           const text = el.innerText?.substring(0, 50) || '';
           const id = el.id ? '#' + el.id : '';
-          const classes = el.className ? '.' + el.className.split(' ').slice(0, 2).join('.') : '';
+          const classes = el.className ? '.' + String(el.className).split(' ').filter(c => c && !c.includes('inspector') && !c.includes('cluso')).slice(0, 2).join('.') : '';
           const href = el.getAttribute('href') || '';
           const ariaLabel = el.getAttribute('aria-label') || '';
-          return { tag: el.tagName.toLowerCase(), id, classes, text: text.trim(), href, ariaLabel };
+          return { number, tag: el.tagName.toLowerCase(), id, classes, text: text.trim(), href, ariaLabel };
         }
 
-        // Buttons (native + ARIA + shadcn)
-        if (category === 'all' || category === 'buttons') {
-          const buttons = document.querySelectorAll('button, [role="button"], [data-slot="button"], input[type="button"], input[type="submit"]');
-          results.buttons = {
-            count: buttons.length,
-            examples: Array.from(buttons).slice(0, 5).map(summarize)
-          };
+        // Create number badge
+        function createBadge(number) {
+          const badge = document.createElement('div');
+          badge.className = 'element-number-badge';
+          badge.textContent = number;
+          badge.style.cssText = 'position:absolute;top:-8px;left:-8px;width:20px;height:20px;background:#3b82f6;color:white;border-radius:50%;font-size:11px;font-weight:bold;display:flex;align-items:center;justify-content:center;z-index:999999;pointer-events:none;box-shadow:0 1px 3px rgba(0,0,0,0.3);';
+          return badge;
         }
 
-        // Links
-        if (category === 'all' || category === 'links') {
-          const links = document.querySelectorAll('a[href], [role="link"]');
-          results.links = {
-            count: links.length,
-            examples: Array.from(links).slice(0, 5).map(summarize)
-          };
-        }
+        // Find elements - scoped to focused element if exists
+        const elements = searchRoot.querySelectorAll(selector);
+        const numberedElements = [];
 
-        // Inputs
-        if (category === 'all' || category === 'inputs') {
-          const inputs = document.querySelectorAll('input, textarea, select, [role="textbox"], [contenteditable="true"]');
-          results.inputs = {
-            count: inputs.length,
-            examples: Array.from(inputs).slice(0, 5).map(el => ({
-              ...summarize(el),
-              type: el.getAttribute('type') || el.tagName.toLowerCase(),
-              name: el.getAttribute('name') || '',
-              placeholder: el.getAttribute('placeholder') || ''
-            }))
-          };
-        }
+        // Collect element info (and optionally add badges)
+        elements.forEach((el, idx) => {
+          // Skip if element is hidden
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden') return;
 
-        // Images
-        if (category === 'all' || category === 'images') {
-          const images = document.querySelectorAll('img, [role="img"], svg');
-          results.images = {
-            count: images.length,
-            examples: Array.from(images).slice(0, 3).map(el => ({
-              tag: el.tagName.toLowerCase(),
-              alt: el.getAttribute('alt') || '',
-              src: (el.getAttribute('src') || '').substring(0, 50)
-            }))
-          };
-        }
+          const num = numberedElements.length + 1;
 
-        // Headings
-        if (category === 'all' || category === 'headings') {
-          const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6, [role="heading"]');
-          results.headings = {
-            count: headings.length,
-            examples: Array.from(headings).slice(0, 5).map(summarize)
-          };
-        }
+          // Only create badges if showBadges is true
+          if (showBadges) {
+            const badge = createBadge(num);
 
-        // Interactive elements with click handlers (approximate)
-        if (category === 'all') {
-          const clickable = document.querySelectorAll('[onclick], [data-action], .cursor-pointer, [tabindex="0"]');
-          results.otherClickable = {
-            count: clickable.length,
-            note: 'Elements with onclick, data-action, cursor-pointer class, or tabindex=0'
-          };
-        }
+            // Make element position relative if static
+            const pos = style.position;
+            if (pos === 'static') {
+              el.style.position = 'relative';
+            }
+
+            el.appendChild(badge);
+          }
+          numberedElements.push({ ...summarize(el, num), element: el });
+        });
+
+        // Store elements for highlight_element_by_number to use
+        window.__numberedElements = numberedElements.map(e => e.element);
+
+        results.totalElements = numberedElements.length;
+        results.category = category;
+        results.elements = numberedElements.slice(0, 20).map(({ element, ...rest }) => rest); // Return first 20 for AI context
+        results.focusScope = focusScope ? {
+          tag: focusScope.tagName.toLowerCase(),
+          text: (focusScope.innerText || '').substring(0, 30),
+          hint: 'Showing elements WITHIN focused scope. Say "clear focus" to see all elements.'
+        } : null;
+        results.note = numberedElements.length > 0
+          ? 'Elements numbered on page. Use highlight_element_by_number(N) to highlight or set focus.'
+          : 'No elements found' + (focusScope ? ' within focused area.' : '.');
 
         return JSON.stringify(results, null, 2);
       })()
@@ -2097,7 +2288,8 @@ export default function App() {
   const primeAgentWithPageContext = useCallback(async () => {
     if (!selectorAgentActive) return;
 
-    const pageElements = await handleGetPageElements('all');
+    // Pass false for showBadges - we just need the data, not visual badges
+    const pageElements = await handleGetPageElements('all', false);
     if (pageElements && !pageElements.startsWith('Error')) {
       const webview = webviewRefs.current.get(activeTabId);
       const pageUrl = webview ? await webview.executeJavaScript('window.location.href').catch(() => '') : '';
@@ -2780,6 +2972,7 @@ export default function App() {
     disconnect,
     startVideoStreaming,
     stopVideoStreaming,
+    stopSpeaking,
     volume
   } = useLiveGemini({
     videoRef,
@@ -2803,6 +2996,10 @@ export default function App() {
     onApproveChange: handleVoiceApprove,
     onRejectChange: handleVoiceReject,
     onUndoChange: handleVoiceUndo,
+    onHighlightByNumber: handleHighlightByNumber,
+    onClearFocus: handleClearFocus,
+    onSetViewport: handleSetViewport,
+    onSwitchTab: handleSwitchTab,
     selectedElement: selectedElement,
     // Pass Google API key from settings
     googleApiKey: appSettings.providers.find(p => p.id === 'google')?.apiKey,
@@ -2869,7 +3066,36 @@ export default function App() {
     const result = await window.electronAPI.files.selectFile(filePath);
     if (result.success && result.data) {
       const { path, content } = result.data;
-      setSelectedFiles(prev => [...prev, { path, content }]);
+
+      // Parse line range from path if present: "file.tsx (1426-1431)" or "file.tsx?t=123 (1426-1431)"
+      let lineStart: number | undefined;
+      let lineEnd: number | undefined;
+      let elementType: string | undefined;
+
+      const lineMatch = path.match(/\((\d+)-(\d+)\)$/);
+      if (lineMatch) {
+        lineStart = parseInt(lineMatch[1], 10);
+        lineEnd = parseInt(lineMatch[2], 10);
+      } else {
+        // Try single line format: "(1426)"
+        const singleLineMatch = path.match(/\((\d+)\)$/);
+        if (singleLineMatch) {
+          lineStart = parseInt(singleLineMatch[1], 10);
+        }
+      }
+
+      // Try to detect element type from content (look for function/component names near start)
+      if (content && lineStart) {
+        const lines = content.split('\n');
+        const startLine = lines[0] || '';
+        // Look for common patterns: function X, const X, export function X, etc.
+        const funcMatch = startLine.match(/(?:function|const|export\s+(?:default\s+)?(?:function|const)?)\s+(\w+)/);
+        if (funcMatch) {
+          elementType = funcMatch[1];
+        }
+      }
+
+      setSelectedFiles(prev => [...prev, { path, content, lineStart, lineEnd, elementType }]);
 
       // Replace the @query with the file reference in the input
       // Find the last @ and replace from there to the end (or to the next space)
@@ -5197,6 +5423,21 @@ If you're not sure what the user wants, ask for clarification.
         hasSourceLocation: !!selectedElement?.sourceLocation?.sources?.[0],
       });
 
+      // Check if UI modify but missing requirements
+      if (intent.type === 'ui_modify' && !selectedElement) {
+        console.log('[Instant UI] ui_modify detected but no element selected');
+        const noElementMessage: ChatMessage = {
+          id: `msg-nosel-${Date.now()}`,
+          role: 'assistant',
+          content: `To modify the UI, first select an element using the inspector (crosshair icon) or say "highlight the buttons" to see what's available.`,
+          timestamp: new Date(),
+          model: 'system',
+          intent: 'ui_modify',
+        };
+        setMessages(prev => [...prev, noElementMessage]);
+        return;
+      }
+
       if (intent.type === 'ui_modify' && selectedElement && googleProvider?.apiKey) {
         console.log('[Instant UI] Triggering instant UI update with source patch...');
         console.log('[Instant UI] Selected element:', {
@@ -5531,10 +5772,12 @@ If you're not sure what the user wants, ask for clarification.
           console.log('[Instant UI] NO sourceLocation on selectedElement!');
         }
 
-        // Phase 1: Instant DOM update using selected model
-        setStreamingMessage(prev => prev ? { ...prev, content: `🎯 Analyzing \`<${selectedElement.tagName.toLowerCase()}>\` element...\n\n⚡ Generating CSS changes with ${selectedModel.name}...` } : null);
+        // Phase 1: Instant DOM update using Gemini Flash (always use Google for instant UI since we need the API key anyway)
+        // This generates CSS/text changes based on user request - fast and cheap
+        const geminiModelForUI = 'gemini-2.5-flash';
+        setStreamingMessage(prev => prev ? { ...prev, content: `🎯 Analyzing \`<${selectedElement.tagName.toLowerCase()}>\` element...\n\n⚡ Generating CSS changes with Gemini Flash...` } : null);
 
-        const uiResult = await generateUIUpdate(selectedElement, userMessage.content, googleProvider.apiKey, selectedModel.id);
+        const uiResult = await generateUIUpdate(selectedElement, userMessage.content, googleProvider.apiKey, geminiModelForUI);
         const hasCssChanges = Object.keys(uiResult.cssChanges).length > 0;
         const hasTextChange = !!uiResult.textChange;
         const hasAnyChange = hasCssChanges || hasTextChange;
@@ -6170,37 +6413,57 @@ If you're not sure what the user wants, ask for clarification.
     }
   };
 
-  // Calculate popup position for webview - bottom-right of element with smart edge detection
+  // Calculate popup position for webview - smart positioning that accounts for full popup size
   const getPopupStyle = () => {
     const webview = webviewRefs.current.get(activeTabId);
     if (!selectedElement || !selectedElement.rect || !webview) return { display: 'none' };
 
     const webviewRect = webview.getBoundingClientRect();
     const buttonSize = 48; // Chat button size (matching w-12 h-12)
-    const offset = 4; // Distance from element corner
+    const popupWidth = 320 + 56; // w-80 (320px) + left-14 (56px) for the expanded chat
+    const popupHeight = 150; // Approximate height of expanded chat panel
+    const offset = 8; // Distance from element corner
 
     // Element position relative to viewport
     const elementRect = selectedElement.rect;
-    const elementBottom = webviewRect.top + elementRect.top + elementRect.height;
-    const elementRight = webviewRect.left + elementRect.left + elementRect.width;
+    const elementTop = webviewRect.top + elementRect.top;
+    const elementBottom = elementTop + elementRect.height;
+    const elementLeft = webviewRect.left + elementRect.left;
+    const elementRight = elementLeft + elementRect.width;
 
-    // Default: bottom-right
-    let top = elementBottom + offset;
-    let left = elementRight + offset;
+    // Determine best position based on available space
+    let top: number;
+    let left: number;
+    let expandDirection = 'right'; // Chat expands to the right by default
 
-    // Check if off-screen right
-    if (left + buttonSize > window.innerWidth - 10) {
-      // Position to the left instead
-      left = webviewRect.left + elementRect.left - buttonSize - offset;
+    // Horizontal positioning: prefer right of element, fall back to left
+    if (elementRight + offset + popupWidth < window.innerWidth - 10) {
+      // Enough space on right
+      left = elementRight + offset;
+    } else if (elementLeft - offset - buttonSize > 10) {
+      // Position button to left of element, chat expands right (might overlap element)
+      left = elementLeft - buttonSize - offset;
+    } else {
+      // Fallback: position at element left edge
+      left = Math.max(10, elementLeft);
     }
 
-    // Check if off-screen bottom
-    if (top + buttonSize > window.innerHeight - 10) {
-      // Position above instead
-      top = webviewRect.top + elementRect.top - buttonSize - offset;
+    // Vertical positioning: prefer below element, but go above if near bottom
+    const spaceBelow = window.innerHeight - elementBottom - offset;
+    const spaceAbove = elementTop - offset;
+
+    if (spaceBelow >= popupHeight + 20) {
+      // Plenty of space below
+      top = elementBottom + offset;
+    } else if (spaceAbove >= popupHeight + 20) {
+      // Position above element
+      top = elementTop - popupHeight - offset;
+    } else {
+      // Limited space - position at element center, clamped to screen
+      top = Math.max(10, Math.min(elementTop, window.innerHeight - popupHeight - 10));
     }
 
-    // Final clamp to ensure always visible
+    // Final clamp to ensure button is always visible
     left = Math.max(10, Math.min(left, window.innerWidth - buttonSize - 10));
     top = Math.max(10, Math.min(top, window.innerHeight - buttonSize - 10));
 
@@ -6488,6 +6751,38 @@ If you're not sure what the user wants, ask for clarification.
     setPendingDOMApproval(null);
     setPendingChange(null); // Clear pill toolbar too
   }, [pendingDOMApproval, activeTabId]);
+
+  // Keyboard shortcuts for Accept/Reject pending changes
+  // CMD+Enter = Accept, Escape = Reject
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle if there's a pending change
+      if (!pendingChange && !pendingDOMApproval) return;
+
+      // CMD+Enter (Mac) or Ctrl+Enter (Windows) = Accept
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (pendingDOMApproval) {
+          handleAcceptDOMApproval();
+        } else {
+          handleApproveChange();
+        }
+      }
+
+      // Escape = Reject
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (pendingDOMApproval) {
+          handleRejectDOMApproval();
+        } else {
+          handleRejectChange();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [pendingChange, pendingDOMApproval, handleApproveChange, handleRejectChange, handleAcceptDOMApproval, handleRejectDOMApproval]);
 
   // Handle opening a project from new tab page - triggers setup flow
   const handleOpenProject = useCallback(async (projectPath: string, projectName: string) => {
@@ -7104,7 +7399,14 @@ If you're not sure what the user wants, ask for clarification.
                     <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
 
                     <button
-                        onClick={streamState.isConnected ? disconnect : connect}
+                        onClick={() => {
+                          if (streamState.isConnected) {
+                            stopSpeaking(); // Stop any playing audio immediately
+                            disconnect();   // Then disconnect the session
+                          } else {
+                            connect();
+                          }
+                        }}
                         data-control-id="voice-button"
                         data-control-type="button"
                         className={`flex items-center justify-center w-9 h-9 rounded-full font-medium transition-all ${streamState.isConnected ? 'bg-red-50 text-red-600 ring-1 ring-red-100' : (isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-800')}`}
@@ -7158,93 +7460,80 @@ If you're not sure what the user wants, ask for clarification.
               </div>
             )}
 
-            {/* Popup Chat Button/Input when element selected and sidebar collapsed */}
-            {!isSidebarOpen && selectedElement && (
+            {/* Floating Chat - shows immediately when element selected */}
+            {!isSidebarOpen && selectedElement && showElementChat && (
                 <div
-                    className="absolute z-50 group"
+                    className="absolute z-50"
                     style={getPopupStyle()}
-                    onMouseLeave={() => setShowElementChat(false)}
                 >
-                    {/* Always-visible chat icon bubble - semi-transparent, fully rounded */}
-                    <button
-                        onClick={() => setShowElementChat(!showElementChat)}
-                        className="w-12 h-12 rounded-full shadow-2xl flex items-center justify-center transition-all text-white"
+                    <div
+                        className={`rounded-2xl shadow-2xl w-80 p-3 ${isDarkMode ? 'bg-neutral-800/95 border border-neutral-700' : 'bg-white/95 border border-stone-200'}`}
                         style={{
-                            background: 'rgba(59, 130, 246, 0.8)',
                             backdropFilter: 'blur(12px)',
                             WebkitBackdropFilter: 'blur(12px)',
-                            border: '1px solid rgba(255, 255, 255, 0.3)',
-                            boxShadow: '0 4px 16px rgba(59, 130, 246, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.3) inset'
                         }}
-                        title="Chat about this element (hover to type)"
                     >
-                        <MessageCircle size={20} />
-                    </button>
+                        <div className={`flex flex-col gap-2 mb-2`}>
+                            <div className={`flex items-center gap-2 text-xs ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                                <div className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-mono font-medium">
+                                    {selectedElement.tagName}
+                                </div>
+                                <span className="truncate max-w-[150px]">{selectedElement.text}</span>
+                                <div className="flex-1"></div>
+                                <button onClick={() => {
+                                    setShowElementChat(false);
+                                    setSelectedElement(null);
+                                    // Clear canvas indicators
+                                    const webview = webviewRefs.current.get(activeTabId);
+                                    webview?.send('clear-selection');
+                                }} className={`p-1 rounded hover:bg-black/10 ${isDarkMode ? 'hover:text-neutral-200' : 'hover:text-stone-900'}`} title="Dismiss (Esc)">
+                                    <X size={14} />
+                                </button>
+                            </div>
+                            {selectedElement.sourceLocation && (
+                                <div className={`text-xs font-mono ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                                    {selectedElement.sourceLocation.summary}
+                                </div>
+                            )}
+                        </div>
 
-                    {/* Hidden chat controls - show on hover */}
-                    {showElementChat && (
-                        <div
-                            className={`absolute top-0 left-14 rounded-3xl shadow-2xl w-80 p-3 transition-all ${isDarkMode ? 'bg-neutral-800 border border-neutral-700' : 'bg-white border border-stone-200'}`}
+                        <form
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                processPrompt(popupInput);
+                                setPopupInput('');
+                                setShowElementChat(false);
+                            }}
                         >
-                            <div className={`flex flex-col gap-2 mb-2`}>
-                                <div className={`flex items-center gap-2 text-xs ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
-                                    <div className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-mono font-medium">
-                                        {selectedElement.tagName}
-                                    </div>
-                                    <span className="truncate max-w-[150px]">{selectedElement.text}</span>
-                                    <div className="flex-1"></div>
-                                    <button onClick={() => {
+                            <textarea
+                                value={popupInput}
+                                onChange={(e) => setPopupInput(e.target.value)}
+                                placeholder="What would you like to change?"
+                                className={`w-full text-sm p-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none ${isDarkMode ? 'bg-neutral-700 border-neutral-600 text-neutral-100 placeholder-neutral-400' : 'bg-stone-50 border-stone-200'}`}
+                                rows={2}
+                                autoFocus
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                        e.preventDefault();
+                                        processPrompt(popupInput);
+                                        setPopupInput('');
+                                        setShowElementChat(false);
+                                    }
+                                    if (e.key === 'Escape') {
                                         setShowElementChat(false);
                                         setSelectedElement(null);
-                                        // Clear canvas indicators
                                         const webview = webviewRefs.current.get(activeTabId);
                                         webview?.send('clear-selection');
-                                    }} className={isDarkMode ? 'hover:text-neutral-200' : 'hover:text-stone-900'}>
-                                        <X size={14} />
-                                    </button>
-                                </div>
-                                {selectedElement.sourceLocation && (
-                                    <div className={`text-xs font-mono ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-                                        {selectedElement.sourceLocation.summary}
-                                    </div>
-                                )}
-                            </div>
-
-                            <form
-                                onSubmit={(e) => {
-                                    e.preventDefault();
-                                    processPrompt(popupInput);
-                                    setPopupInput('');
-                                    setShowElementChat(false);
+                                    }
                                 }}
-                            >
-                                <textarea
-                                    value={popupInput}
-                                    onChange={(e) => setPopupInput(e.target.value)}
-                                    placeholder="What would you like to change?"
-                                    className={`w-full text-sm p-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none ${isDarkMode ? 'bg-neutral-700 border-neutral-600 text-neutral-100 placeholder-neutral-400' : 'bg-stone-50 border-stone-200'}`}
-                                    rows={2}
-                                    autoFocus
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && !e.shiftKey) {
-                                            e.preventDefault();
-                                            processPrompt(popupInput);
-                                            setPopupInput('');
-                                            setShowElementChat(false);
-                                        }
-                                        if (e.key === 'Escape') {
-                                            setShowElementChat(false);
-                                        }
-                                    }}
-                                />
-                                <div className="flex justify-end mt-2">
-                                    <button type="submit" disabled={!popupInput.trim()} className={`w-7 h-7 rounded-full flex items-center justify-center disabled:opacity-50 ${isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-700'}`}>
-                                        <ArrowUp size={14} />
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    )}
+                            />
+                            <div className="flex justify-end mt-2">
+                                <button type="submit" disabled={!popupInput.trim()} className={`w-7 h-7 rounded-full flex items-center justify-center disabled:opacity-50 ${isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-700'}`}>
+                                    <ArrowUp size={14} />
+                                </button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             )}
           </div>
@@ -7279,24 +7568,54 @@ If you're not sure what the user wants, ask for clarification.
                   {clusoAgent.isReady ? '● Connected to local model' : '○ Connecting...'}
                 </div>
 
-                {/* Demo buttons */}
-                <div className="grid grid-cols-2 gap-2">
-                  {AVAILABLE_DEMOS.map((demo) => (
-                    <button
-                      key={demo}
-                      onClick={() => clusoAgent.runDemo(demo)}
-                      disabled={clusoAgent.isProcessing || !clusoAgent.isReady}
-                      className={`px-3 py-2 text-sm rounded-lg transition-colors capitalize ${
-                        clusoAgent.isProcessing
-                          ? 'opacity-50 cursor-not-allowed'
-                          : isDarkMode
-                            ? 'bg-neutral-700 hover:bg-neutral-600 text-neutral-200'
-                            : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
-                      }`}
-                    >
-                      {demo.replace('-', ' ')}
-                    </button>
-                  ))}
+                {/* Scripted Two-Voice Demos */}
+                <div className="space-y-2">
+                  <div className={`text-xs font-medium ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                    🎭 Two-Voice Demos (User + App)
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {DEMO_SCRIPTS.map((script) => (
+                      <button
+                        key={script}
+                        onClick={() => clusoAgent.runScriptedDemo(script)}
+                        disabled={clusoAgent.isProcessing || !clusoAgent.isReady}
+                        className={`px-3 py-2 text-sm rounded-lg transition-colors capitalize ${
+                          clusoAgent.isProcessing
+                            ? 'opacity-50 cursor-not-allowed'
+                            : isDarkMode
+                              ? 'bg-purple-600 hover:bg-purple-500 text-white'
+                              : 'bg-purple-100 hover:bg-purple-200 text-purple-700'
+                        }`}
+                      >
+                        {script.replace('-', ' ')}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Quick Agent Commands */}
+                <div className="space-y-2">
+                  <div className={`text-xs font-medium ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                    ⚡ Quick Commands
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {AVAILABLE_DEMOS.map((demo) => (
+                      <button
+                        key={demo}
+                        onClick={() => clusoAgent.runDemo(demo)}
+                        disabled={clusoAgent.isProcessing || !clusoAgent.isReady}
+                        className={`px-3 py-2 text-sm rounded-lg transition-colors capitalize ${
+                          clusoAgent.isProcessing
+                            ? 'opacity-50 cursor-not-allowed'
+                            : isDarkMode
+                              ? 'bg-neutral-700 hover:bg-neutral-600 text-neutral-200'
+                              : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
+                        }`}
+                      >
+                        {demo.replace('-', ' ')}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Custom input */}
@@ -8057,6 +8376,7 @@ If you're not sure what the user wants, ask for clarification.
                     <div className="flex gap-2 items-center shrink-0">
                       <button
                         onClick={handleRejectChange}
+                        title="Reject (Esc)"
                         className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
                           isDarkMode
                             ? 'bg-neutral-700 hover:bg-neutral-600 text-neutral-300'
@@ -8067,6 +8387,7 @@ If you're not sure what the user wants, ask for clarification.
                       </button>
                       <button
                         onClick={handleApproveChange}
+                        title="Accept (⌘+Enter)"
                         className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
                           isDarkMode
                             ? 'bg-blue-600 hover:bg-blue-500 text-white'
@@ -8550,7 +8871,7 @@ If you're not sure what the user wants, ask for clarification.
                           {selectedFiles.map((file, idx) => (
                               <div key={`file-${idx}`} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs ${isDarkMode ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
                                   <Code2 size={12} />
-                                  <span className="font-mono max-w-[120px] truncate">{file.path.split('/').pop()}</span>
+                                  <span className="font-mono max-w-[200px] truncate" title={file.path}>{formatFileDisplay(file)}</span>
                                   <button
                                       onClick={() => setSelectedFiles(prev => prev.filter((_, i) => i !== idx))}
                                       className="hover:opacity-70"
@@ -9240,7 +9561,7 @@ If you're not sure what the user wants, ask for clarification.
               <button
                   onClick={pendingDOMApproval ? handleRejectDOMApproval : handleRejectChange}
                   className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${isDarkMode ? 'hover:bg-red-900/20 text-neutral-400 hover:text-red-400' : 'hover:bg-red-50 text-neutral-600 hover:text-red-600'}`}
-                  title="Discard changes"
+                  title="Reject (Esc)"
               >
                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
               </button>
@@ -9252,7 +9573,7 @@ If you're not sure what the user wants, ask for clarification.
                       ? 'cursor-not-allowed'
                       : (isDarkMode ? 'bg-neutral-100 text-neutral-900 hover:bg-white' : 'bg-neutral-900 text-white hover:bg-neutral-800')
                   }`}
-                  title="Apply changes"
+                  title="Accept (⌘+Enter)"
               >
                   {isGeneratingSourcePatch ? (
                     <Loader2 size={20} className="animate-spin" />

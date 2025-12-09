@@ -1265,7 +1265,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
         <section className="hero">
           <a href="https://calendly.com/jasonkneen/15min" target="_blank" rel="noopener noreferrer" className="hero-badge" style={{ textDecoration: 'none', color: 'inherit' }}>
             <span className="dot"></span>
-            <span>Book a Demo now</span>
+            <span>Book a Demo</span>
           </a>
 
           <h1>
@@ -1419,7 +1419,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                     onChange={(e) => setEmail(e.target.value)}
                     required
                   />
-                  <button type="submit" className="btn btn-primary" disabled={submitState === 'submitting' || submitState === 'submitted'}>
+                  <button style={{ backgroundColor: 'white', color: 'black' }} type="submit" className="btn btn-primary" disabled={submitState === 'submitting' || submitState === 'submitted'}>
                     {getButtonText()}
                   </button>
                 </form>
