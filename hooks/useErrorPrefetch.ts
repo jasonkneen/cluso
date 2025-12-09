@@ -197,9 +197,26 @@ export function useErrorPrefetch(options: UseErrorPrefetchOptions = {}) {
               isSearching: false,
             })
           }
+        } else {
+          // No solution found - still clear the searching state
+          setErrors(prev =>
+            prev.map(e =>
+              e.id === error.id
+                ? { ...e, isSearching: false }
+                : e
+            )
+          )
         }
       } catch (err) {
         console.warn('[useErrorPrefetch] Search failed:', err)
+        // Clear searching state on error
+        setErrors(prev =>
+          prev.map(e =>
+            e.id === error.id
+              ? { ...e, isSearching: false }
+              : e
+          )
+        )
       } finally {
         setIsSearching(false)
       }
@@ -278,7 +295,14 @@ Search: "${query}"`,
 3. Add null/undefined checks
 4. Check browser console for actual error
 Search: "${query}"`,
+
+    unknown: `Unable to categorize this error. General debugging steps:
+1. Check the browser console for more details
+2. Search the error message online
+3. Check if this is a known issue in your dependencies
+4. Try restarting the development server
+Search: "${query}"`,
   }
 
-  return solutions[category] || null
+  return solutions[category] || solutions['unknown']
 }

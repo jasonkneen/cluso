@@ -9820,6 +9820,7 @@ If you're not sure what the user wants, ask for clarification.
       <ErrorSolutionPanel
         errors={errors}
         isVisible={errorPanelVisible}
+        isDarkMode={isThemeDark}
         onToggle={() => setErrorPanelVisible(!errorPanelVisible)}
         onRemoveError={removeError}
         onSearchForSolution={searchForSolution}

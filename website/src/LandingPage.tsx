@@ -1215,7 +1215,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                 required
               />
             </form>
-            <button type="submit" className="btn btn-primary" onClick={handleSubmit} disabled={submitState === 'submitting' || submitState === 'submitted'}>
+            <button style={{ color: 'black', backgroundColor: 'white' }} type="submit" className="btn btn-primary" onClick={handleSubmit} disabled={submitState === 'submitting' || submitState === 'submitted'}>
               {getButtonText()}
             </button>
             <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
@@ -1324,7 +1324,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
             <p className="section-label">How It Works</p>
             <h2 className="section-title">Three simple steps to faster development</h2>
             <p className="section-subtitle">
-              Cluso combines visual element selection with AI-powered code generation
+Cluso combines visual element selection with AI-powered code generation
               to supercharge your frontend workflow.
             </p>
           </div>

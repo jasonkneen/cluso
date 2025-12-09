@@ -4,6 +4,7 @@ import type { DetectedError } from '../hooks/useErrorPrefetch'
 
 interface ErrorSolutionBadgeProps {
   error: DetectedError
+  isDarkMode?: boolean
   onRemove?: (errorId: string) => void
   onSearch?: (errorId: string) => void
 }
@@ -14,6 +15,7 @@ interface ErrorSolutionBadgeProps {
  */
 export const ErrorSolutionBadge: React.FC<ErrorSolutionBadgeProps> = ({
   error,
+  isDarkMode = false,
   onRemove,
   onSearch,
 }) => {
@@ -23,7 +25,7 @@ export const ErrorSolutionBadge: React.FC<ErrorSolutionBadgeProps> = ({
   const isSearching = error.isSearching
 
   return (
-    <div className="error-solution-badge-container">
+    <div className={`error-solution-badge-container ${isDarkMode ? 'dark' : ''}`}>
       {/* Main Badge */}
       <div className={`error-solution-badge ${error.isCritical ? 'critical' : 'warning'}`}>
         {/* Icon */}
@@ -147,15 +149,31 @@ export const ErrorSolutionBadge: React.FC<ErrorSolutionBadgeProps> = ({
           border-color: rgba(239, 68, 68, 0.3);
         }
 
+        .dark .error-solution-badge.critical {
+          background-color: rgba(239, 68, 68, 0.2);
+          color: #f87171;
+          border-color: rgba(239, 68, 68, 0.4);
+        }
+
         .error-solution-badge.warning {
           background-color: rgba(245, 158, 11, 0.1);
           color: #d97706;
           border-color: rgba(245, 158, 11, 0.3);
         }
 
+        .dark .error-solution-badge.warning {
+          background-color: rgba(245, 158, 11, 0.2);
+          color: #fbbf24;
+          border-color: rgba(245, 158, 11, 0.4);
+        }
+
         .error-solution-badge:hover {
           transform: translateY(-1px);
           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .dark .error-solution-badge:hover {
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
         }
 
         .badge-icon {
@@ -191,9 +209,19 @@ export const ErrorSolutionBadge: React.FC<ErrorSolutionBadgeProps> = ({
           background-color: rgba(0, 0, 0, 0.1);
         }
 
+        .dark .badge-toggle:hover,
+        .dark .badge-search:hover {
+          background-color: rgba(255, 255, 255, 0.1);
+        }
+
         .badge-close:hover {
           background-color: rgba(239, 68, 68, 0.2);
           color: #dc2626;
+        }
+
+        .dark .badge-close:hover {
+          background-color: rgba(239, 68, 68, 0.3);
+          color: #f87171;
         }
 
         .error-solution-detail {
@@ -207,6 +235,12 @@ export const ErrorSolutionBadge: React.FC<ErrorSolutionBadgeProps> = ({
           color: rgba(0, 0, 0, 0.7);
         }
 
+        .dark .error-solution-detail {
+          background-color: rgba(0, 0, 0, 0.3);
+          border-color: rgba(255, 255, 255, 0.1);
+          color: rgba(255, 255, 255, 0.8);
+        }
+
         .solution-header {
           display: flex;
           justify-content: space-between;
@@ -216,9 +250,17 @@ export const ErrorSolutionBadge: React.FC<ErrorSolutionBadgeProps> = ({
           border-bottom: 1px solid rgba(0, 0, 0, 0.1);
         }
 
+        .dark .solution-header {
+          border-color: rgba(255, 255, 255, 0.1);
+        }
+
         .solution-source {
           font-weight: 600;
           color: rgba(0, 0, 0, 0.8);
+        }
+
+        .dark .solution-source {
+          color: rgba(255, 255, 255, 0.9);
         }
 
         .solution-text {
@@ -226,6 +268,10 @@ export const ErrorSolutionBadge: React.FC<ErrorSolutionBadgeProps> = ({
           white-space: pre-wrap;
           word-break: break-word;
           color: rgba(0, 0, 0, 0.7);
+        }
+
+        .dark .solution-text {
+          color: rgba(255, 255, 255, 0.8);
         }
 
         .solution-query {
@@ -237,11 +283,19 @@ export const ErrorSolutionBadge: React.FC<ErrorSolutionBadgeProps> = ({
           font-size: 11px;
         }
 
+        .dark .solution-query {
+          background-color: rgba(0, 0, 0, 0.3);
+        }
+
         .query-label {
           display: block;
           font-weight: 600;
           margin-bottom: 4px;
           color: rgba(0, 0, 0, 0.6);
+        }
+
+        .dark .query-label {
+          color: rgba(255, 255, 255, 0.6);
         }
 
         .query-code {
@@ -253,6 +307,11 @@ export const ErrorSolutionBadge: React.FC<ErrorSolutionBadgeProps> = ({
           break: break-all;
         }
 
+        .dark .query-code {
+          background-color: rgba(0, 0, 0, 0.4);
+          color: rgba(255, 255, 255, 0.9);
+        }
+
         .solution-actions {
           display: flex;
           gap: 8px;
@@ -260,6 +319,10 @@ export const ErrorSolutionBadge: React.FC<ErrorSolutionBadgeProps> = ({
           padding-top: 8px;
           border-top: 1px solid rgba(0, 0, 0, 0.1);
           justify-content: flex-end;
+        }
+
+        .dark .solution-actions {
+          border-color: rgba(255, 255, 255, 0.1);
         }
 
         .action-button {
@@ -287,9 +350,18 @@ export const ErrorSolutionBadge: React.FC<ErrorSolutionBadgeProps> = ({
           color: rgba(0, 0, 0, 0.7);
         }
 
+        .dark .action-button.secondary {
+          background-color: rgba(255, 255, 255, 0.1);
+          color: rgba(255, 255, 255, 0.7);
+        }
+
         .action-button.secondary:hover {
           background-color: rgba(0, 0, 0, 0.2);
           transform: translateY(-1px);
+        }
+
+        .dark .action-button.secondary:hover {
+          background-color: rgba(255, 255, 255, 0.2);
         }
 
         @keyframes spin {

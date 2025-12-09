@@ -6,6 +6,7 @@ import type { DetectedError } from '../hooks/useErrorPrefetch'
 interface ErrorSolutionPanelProps {
   errors: DetectedError[]
   isVisible: boolean
+  isDarkMode?: boolean
   onToggle?: () => void
   onRemoveError?: (errorId: string) => void
   onSearchForSolution?: (errorId: string) => void
@@ -18,6 +19,7 @@ interface ErrorSolutionPanelProps {
 export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
   errors,
   isVisible,
+  isDarkMode = false,
   onToggle,
   onRemoveError,
   onSearchForSolution,
@@ -32,7 +34,7 @@ export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
   }
 
   return (
-    <div className="error-solution-panel">
+    <div className={`error-solution-panel ${isDarkMode ? 'dark' : ''}`}>
       {/* Header */}
       <div className="panel-header">
         <div className="header-title">
@@ -94,6 +96,7 @@ export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
             {/* Solution Badge */}
             <ErrorSolutionBadge
               error={error}
+              isDarkMode={isDarkMode}
               onRemove={onRemoveError}
               onSearch={onSearchForSolution}
             />
@@ -137,8 +140,14 @@ export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
           display: flex;
           flex-direction: column;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-          z-index: 50;
+          z-index: 9999;
           animation: slideUp 0.3s ease-out;
+        }
+
+        .error-solution-panel.dark {
+          background: #1f2937;
+          border-color: #374151;
+          box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
         }
 
         @keyframes slideUp {
@@ -162,6 +171,11 @@ export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
           border-radius: 12px 12px 0 0;
         }
 
+        .dark .panel-header {
+          border-color: #374151;
+          background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+        }
+
         .header-title {
           display: flex;
           align-items: center;
@@ -169,6 +183,10 @@ export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
           font-size: 16px;
           font-weight: 600;
           color: #1f2937;
+        }
+
+        .dark .header-title {
+          color: #f3f4f6;
         }
 
         .header-title svg {
@@ -192,6 +210,11 @@ export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
           font-size: 13px;
           font-weight: 600;
           position: relative;
+        }
+
+        .dark .error-badge {
+          background: rgba(239, 68, 68, 0.2);
+          color: #f87171;
         }
 
         .critical-count {
@@ -225,6 +248,11 @@ export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
           border-radius: 4px;
         }
 
+        .dark .solved-indicator {
+          background: rgba(16, 185, 129, 0.2);
+          color: #34d399;
+        }
+
         .action-button {
           display: flex;
           align-items: center;
@@ -238,14 +266,28 @@ export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
           transition: all 0.15s;
         }
 
+        .dark .action-button {
+          color: #9ca3af;
+        }
+
         .action-button:hover {
           background: rgba(0, 0, 0, 0.1);
           color: #1f2937;
         }
 
+        .dark .action-button:hover {
+          background: rgba(255, 255, 255, 0.1);
+          color: #f3f4f6;
+        }
+
         .action-button.clear:hover {
           background: rgba(239, 68, 68, 0.1);
           color: #dc2626;
+        }
+
+        .dark .action-button.clear:hover {
+          background: rgba(239, 68, 68, 0.2);
+          color: #f87171;
         }
 
         .close-button {
@@ -261,9 +303,18 @@ export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
           transition: all 0.15s;
         }
 
+        .dark .close-button {
+          color: #9ca3af;
+        }
+
         .close-button:hover {
           background: rgba(0, 0, 0, 0.1);
           color: #1f2937;
+        }
+
+        .dark .close-button:hover {
+          background: rgba(255, 255, 255, 0.1);
+          color: #f3f4f6;
         }
 
         .error-list {
@@ -288,8 +339,16 @@ export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
           border-radius: 4px;
         }
 
+        .dark .error-list::-webkit-scrollbar-thumb {
+          background: #4b5563;
+        }
+
         .error-list::-webkit-scrollbar-thumb:hover {
           background: #9ca3af;
+        }
+
+        .dark .error-list::-webkit-scrollbar-thumb:hover {
+          background: #6b7280;
         }
 
         .error-item {
@@ -300,9 +359,19 @@ export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
           transition: all 0.15s;
         }
 
+        .dark .error-item {
+          background: #111827;
+          border-color: #374151;
+        }
+
         .error-item:hover {
           background: #ffffff;
           border-color: #d1d5db;
+        }
+
+        .dark .error-item:hover {
+          background: #1f2937;
+          border-color: #4b5563;
         }
 
         .error-header {
@@ -334,9 +403,18 @@ export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
           border-radius: 3px;
         }
 
+        .dark .error-category {
+          color: #9ca3af;
+          background: rgba(255, 255, 255, 0.1);
+        }
+
         .error-time {
           font-size: 11px;
           color: #9ca3af;
+        }
+
+        .dark .error-time {
+          color: #6b7280;
         }
 
         .critical-indicator {
@@ -359,6 +437,10 @@ export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
           margin-bottom: 8px;
         }
 
+        .dark .error-message {
+          background: rgba(0, 0, 0, 0.3);
+        }
+
         .error-message code {
           font-family: "Monaco", "Menlo", monospace;
           font-size: 11px;
@@ -367,11 +449,20 @@ export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
           white-space: pre-wrap;
         }
 
+        .dark .error-message code {
+          color: #d1d5db;
+        }
+
         .panel-footer {
           padding: 12px 16px;
           border-top: 1px solid #e5e7eb;
           background: #f9fafb;
           border-radius: 0 0 12px 12px;
+        }
+
+        .dark .panel-footer {
+          border-color: #374151;
+          background: #111827;
         }
 
         .footer-stats {
@@ -391,10 +482,18 @@ export const ErrorSolutionPanel: React.FC<ErrorSolutionPanelProps> = ({
           font-weight: 500;
         }
 
+        .dark .stat-label {
+          color: #9ca3af;
+        }
+
         .stat-value {
           color: #1f2937;
           font-weight: 600;
           font-size: 14px;
+        }
+
+        .dark .stat-value {
+          color: #f3f4f6;
         }
 
         @media (max-width: 768px) {
