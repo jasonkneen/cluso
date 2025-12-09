@@ -204,11 +204,15 @@ export function createWebAdapter(baseUrl: string): APIAdapter {
     files: {
       async readFile(path: string): Promise<Result<string>> {
         try {
-          const data = await fetchJson<Result<string>>('/api/files/read', {
+          // Server returns { path, content, encoding }, we extract content
+          const data = await fetchJson<Result<{ path: string; content: string; encoding: string }>>('/api/files/read', {
             method: 'POST',
             body: JSON.stringify({ path }),
           })
-          return data
+          if (data.success && data.data) {
+            return { success: true, data: data.data.content }
+          }
+          return { success: false, error: data.error || 'Unknown error' }
         } catch (error) {
           return {
             success: false,

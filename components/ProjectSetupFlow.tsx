@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { CheckCircle2, Circle, Loader2, XCircle, Globe, ChevronRight, AlertCircle, Sparkles } from 'lucide-react'
+import { getAdapter } from '../src/adapters'
 
 interface SetupStep {
   id: string
@@ -33,18 +34,6 @@ interface ProjectSetupFlowProps {
   isDarkMode: boolean
   onComplete: (url: string, port: number) => void
   onCancel: () => void
-}
-
-// Declare electronAPI types
-declare global {
-  interface Window {
-    electronAPI?: {
-      files: {
-        readFile: (path: string) => Promise<{ success: boolean; data?: string; error?: string }>
-        listDirectory: (path: string) => Promise<{ success: boolean; data?: Array<{ name: string; path: string; isDirectory: boolean }>; error?: string }>
-      }
-    }
-  }
 }
 
 // Tech stack detection with colors
@@ -205,11 +194,9 @@ export function ProjectSetupFlow({
   }, [])
 
   const runSetup = useCallback(async () => {
-    const api = window.electronAPI?.files
-    if (!api) {
-      setError('File system access not available')
-      return
-    }
+    // Use adapter pattern - works in both Electron and Web modes
+    const adapter = getAdapter()
+    const api = adapter.files
 
     // Step 1: Scan project folder
     updateStep('scan', { status: 'running' })

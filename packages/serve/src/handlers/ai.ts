@@ -206,8 +206,8 @@ export function getAvailableProviders(): Result<{
   openai: boolean
 }> {
   return success({
-    google: googleProvider !== null,
-    anthropic: anthropicProvider !== null,
-    openai: openaiProvider !== null,
+    google: defaultGoogleProvider !== null,
+    anthropic: defaultAnthropicProvider !== null,
+    openai: defaultOpenaiProvider !== null,
   })
 }

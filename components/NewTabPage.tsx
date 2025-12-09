@@ -1,6 +1,18 @@
-import React, { useState, useEffect } from 'react'
-import { Folder, Clock, X, Plus, Pencil, Check } from 'lucide-react'
+import React, { useState, useEffect, useCallback } from 'react'
+import { Folder, Clock, X, Plus, Pencil, Check, Server } from 'lucide-react'
 import { debugLog } from '../utils/debug'
+
+// Check if running in Electron mode
+const isElectronMode = () => typeof window !== 'undefined' && window.electronAPI?.isElectron === true
+
+// Check if running in web mode (not Electron)
+const isWebMode = () => typeof window !== 'undefined' && !isElectronMode()
+
+// API URL for web mode
+const getApiUrl = () => {
+  // In web mode, the API is at the same origin as the page
+  return window.location.origin
+}
 
 // Cluso logo SVG component
 function ClusoLogo({ className }: { className?: string }) {
@@ -137,6 +149,29 @@ export function NewTabPage({
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([])
   const [editingProject, setEditingProject] = useState<string | null>(null) // path of project being edited
   const [editForm, setEditForm] = useState<{ name: string; path: string; port: string }>({ name: '', path: '', port: '' })
+  const [serverProject, setServerProject] = useState<{ cwd: string; name: string } | null>(null)
+  const [webModeLoading, setWebModeLoading] = useState(false)
+
+  // In web mode, fetch the current project from the server
+  const fetchServerProject = useCallback(async () => {
+    if (!isWebMode()) return
+
+    setWebModeLoading(true)
+    try {
+      const response = await fetch(`${getApiUrl()}/api/files/cwd`)
+      if (response.ok) {
+        const result = await response.json()
+        if (result.success && result.data) {
+          setServerProject(result.data)
+          debugLog.general.log('[WebMode] Server project:', result.data)
+        }
+      }
+    } catch (err) {
+      debugLog.general.error('[WebMode] Failed to fetch server project:', err)
+    } finally {
+      setWebModeLoading(false)
+    }
+  }, [])
 
   // Helper to open project - handles multi-window logic
   const openProjectInWindow = async (path: string, name: string) => {
@@ -171,10 +206,11 @@ export function NewTabPage({
     onOpenProject(path, name)
   }
 
-  // Load recent projects on mount
+  // Load recent projects on mount and fetch server project in web mode
   useEffect(() => {
     setRecentProjects(loadRecentProjects())
-  }, [])
+    fetchServerProject()
+  }, [fetchServerProject])
 
   const handleOpenFolder = async () => {
     if (window.electronAPI?.dialog) {
@@ -289,15 +325,66 @@ export function NewTabPage({
         </div>
       )}
 
-      {/* Open Project Card */}
+      {/* Web Mode: Server Project Card */}
+      {isWebMode() && serverProject && (
+        <button
+          onClick={() => onOpenProject(serverProject.cwd, serverProject.name)}
+          className={`
+            w-72 p-6 rounded-xl border-2 mb-6 text-left
+            transition-all duration-200 group
+            ${isDarkMode
+              ? 'border-green-500/50 bg-green-500/10 hover:bg-green-500/20'
+              : 'border-green-500/50 bg-green-50 hover:bg-green-100'
+            }
+          `}
+        >
+          <div className="flex items-center gap-3">
+            <div className={`
+              w-10 h-10 rounded-lg flex items-center justify-center
+              ${isDarkMode ? 'bg-green-500/20' : 'bg-green-100'}
+            `}>
+              <Server
+                size={20}
+                className={`${isDarkMode ? 'text-green-400' : 'text-green-600'}`}
+              />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className={`block text-sm font-medium ${isDarkMode ? 'text-green-300' : 'text-green-700'}`}>
+                {serverProject.name}
+              </span>
+              <span className={`block text-xs truncate ${isDarkMode ? 'text-green-400/60' : 'text-green-600/60'}`}>
+                {formatPath(serverProject.cwd)}
+              </span>
+            </div>
+          </div>
+          <div className={`mt-3 text-xs ${isDarkMode ? 'text-green-400/80' : 'text-green-600/80'}`}>
+            Click to open server project
+          </div>
+        </button>
+      )}
+
+      {/* Web Mode: Loading */}
+      {isWebMode() && webModeLoading && (
+        <div className={`w-72 p-6 rounded-xl border-2 border-dashed mb-6 text-center ${
+          isDarkMode ? 'border-neutral-700 text-neutral-500' : 'border-stone-200 text-stone-400'
+        }`}>
+          Loading server project...
+        </div>
+      )}
+
+      {/* Open Project Card - In Electron mode this opens folder picker, in web mode shows info */}
       <button
-        onClick={handleOpenFolder}
+        onClick={isElectronMode() ? handleOpenFolder : undefined}
+        disabled={!isElectronMode()}
         className={`
           w-72 p-6 rounded-xl border-2 border-dashed mb-10 text-left
           transition-all duration-200 group
-          ${isDarkMode
-            ? 'border-neutral-700 hover:border-blue-500/50 hover:bg-blue-500/5'
-            : 'border-stone-200 hover:border-blue-500/50 hover:bg-blue-50/50'
+          ${!isElectronMode()
+            ? (isDarkMode ? 'border-neutral-800 opacity-50' : 'border-stone-200 opacity-50')
+            : (isDarkMode
+              ? 'border-neutral-700 hover:border-blue-500/50 hover:bg-blue-500/5'
+              : 'border-stone-200 hover:border-blue-500/50 hover:bg-blue-50/50'
+            )
           }
         `}
       >
@@ -320,7 +407,10 @@ export function NewTabPage({
               {lockedProjectPath ? 'Open Project in New Window' : 'Open Project'}
             </span>
             <span className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-              {lockedProjectPath ? 'Opens in separate window' : 'Select a local folder'}
+              {!isElectronMode()
+                ? 'Use cluso CLI with --cwd to open a project'
+                : (lockedProjectPath ? 'Opens in separate window' : 'Select a local folder')
+              }
             </span>
           </div>
         </div>

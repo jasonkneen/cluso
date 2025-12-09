@@ -218,12 +218,43 @@ export function createFilesRoutes(): Hono {
   })
 
   /**
+   * GET /api/files/cwd
+   * Get current working directory
+   */
+  router.get('/cwd', async (c) => {
+    const cwd = c.get('cwd') as string
+    return c.json(success({ cwd, name: cwd.split('/').pop() || cwd }))
+  })
+
+  /**
    * POST /api/files/list
    * List directory contents with metadata
    *
    * Body: { path?: string }
    */
   router.post('/list', async (c) => {
+    const cwd = c.get('cwd') as string
+
+    try {
+      const body = (await c.req.json()) as { path?: string }
+      const result = await listDirectory(cwd, body.path)
+
+      if (result.success) {
+        return c.json(success(result.data))
+      }
+
+      return c.json(error(result.error, result.code), 400)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return c.json(error(`Invalid request: ${message}`), 400)
+    }
+  })
+
+  /**
+   * POST /api/files/list-directory
+   * Alias for /list (web adapter compatibility)
+   */
+  router.post('/list-directory', async (c) => {
     const cwd = c.get('cwd') as string
 
     try {
@@ -277,6 +308,60 @@ export function createFilesRoutes(): Hono {
    * Body: { path: string }
    */
   router.post('/rmdir', async (c) => {
+    const cwd = c.get('cwd') as string
+
+    try {
+      const body = (await c.req.json()) as { path?: string }
+
+      if (!body.path) {
+        return c.json(error('Missing required field: path'), 400)
+      }
+
+      const result = await deleteDirectory(cwd, body.path)
+
+      if (result.success) {
+        return c.json(success(result.data))
+      }
+
+      return c.json(error(result.error, result.code), 400)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return c.json(error(`Invalid request: ${message}`), 400)
+    }
+  })
+
+  /**
+   * POST /api/files/create-directory
+   * Alias for /mkdir (web adapter compatibility)
+   */
+  router.post('/create-directory', async (c) => {
+    const cwd = c.get('cwd') as string
+
+    try {
+      const body = (await c.req.json()) as { path?: string }
+
+      if (!body.path) {
+        return c.json(error('Missing required field: path'), 400)
+      }
+
+      const result = await createDirectory(cwd, body.path)
+
+      if (result.success) {
+        return c.json(success(result.data))
+      }
+
+      return c.json(error(result.error, result.code), 400)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return c.json(error(`Invalid request: ${message}`), 400)
+    }
+  })
+
+  /**
+   * POST /api/files/delete-directory
+   * Alias for /rmdir (web adapter compatibility)
+   */
+  router.post('/delete-directory', async (c) => {
     const cwd = c.get('cwd') as string
 
     try {
