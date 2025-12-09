@@ -1,5 +1,3 @@
-@reference "tailwindcss";
-
 @import './partials/code.css';
 @import './partials/placeholder.css';
 @import './partials/lists.css';

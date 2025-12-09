@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import Link from "next/link"
+// Link removed - using native anchor tags for Vite compatibility
 import { cn } from "@/lib/utils"
 import { format } from "date-fns"
 import {
@@ -282,13 +282,13 @@ const TodoDetailSheet: React.FC<TodoDetailSheetProps> = ({
                   <div className="flex items-center gap-2 overflow-hidden">
                     <FileIcon className="h-4 w-4 shrink-0" />
                     <div className="overflow-hidden">
-                      <Link
+                      <a
                         href={file.url}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="block truncate text-sm hover:underline">
                         {file.name}
-                      </Link>
+                      </a>
                       <span className="text-muted-foreground text-xs">
                         {formatFileSize(file.size)} •{" "}
                         {format(new Date(file.uploadedAt), "MMM d, yyyy")}

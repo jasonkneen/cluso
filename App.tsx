@@ -7,7 +7,8 @@ import { INJECTION_SCRIPT } from './utils/iframe-injection';
 import { SelectedElement, Message as ChatMessage, ToolUsage } from './types';
 import { TabState, createNewTab } from './types/tab';
 import { TabBar, Tab, TabType } from './components/TabBar';
-import { KanbanTab, TodosTab, NotesTab } from './components/tabs';
+import { Schedule } from './components/schedule';
+import { NotesTab } from './components/schedule/notes';
 import { NewTabPage, addToRecentProjects, getRecentProject } from './components/NewTabPage';
 import { KanbanColumn, TodoItem } from './types/tab';
 import { ProjectSetupFlow } from './components/ProjectSetupFlow';
@@ -6923,12 +6924,9 @@ If you're not sure what the user wants, ask for clarification.
             className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
             style={{ backgroundColor: panelBg, borderColor: panelBorder }}
           >
-            <KanbanTab
-              columns={activeTab.kanbanData?.columns || []}
-              boardTitle={activeTab.kanbanData?.boardTitle || 'New Board'}
-              isDarkMode={isDarkMode}
-              onUpdateColumns={handleUpdateKanbanColumns}
-              onUpdateTitle={handleUpdateKanbanTitle}
+            <Schedule
+              defaultView="kanban"
+              className={isDarkMode ? 'dark' : ''}
             />
           </div>
         ) : activeTab.type === 'todos' ? (
@@ -6936,10 +6934,9 @@ If you're not sure what the user wants, ask for clarification.
             className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
             style={{ backgroundColor: panelBg, borderColor: panelBorder }}
           >
-            <TodosTab
-              items={activeTab.todosData?.items || []}
-              isDarkMode={isDarkMode}
-              onUpdateItems={handleUpdateTodoItems}
+            <Schedule
+              defaultView="tasks"
+              className={isDarkMode ? 'dark' : ''}
             />
           </div>
         ) : activeTab.type === 'notes' ? (
