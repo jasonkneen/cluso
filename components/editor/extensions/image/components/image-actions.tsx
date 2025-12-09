@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -39,23 +39,25 @@ ActionWrapper.displayName = 'ActionWrapper'
 
 export const ActionButton = React.memo(
   React.forwardRef<HTMLButtonElement, ActionButtonProps>(({ icon, tooltip, className, ...props }, ref) => (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          ref={ref}
-          variant="ghost"
-          className={cn(
-            'relative flex h-7 w-7 flex-row rounded-none p-0 text-muted-foreground hover:text-foreground',
-            'bg-transparent hover:bg-transparent',
-            className
-          )}
-          {...props}
-        >
-          {icon}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{tooltip}</TooltipContent>
-    </Tooltip>
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            ref={ref}
+            variant="ghost"
+            className={cn(
+              'relative flex h-7 w-7 flex-row rounded-none p-0 text-muted-foreground hover:text-foreground',
+              'bg-transparent hover:bg-transparent',
+              className
+            )}
+            {...props}
+          >
+            {icon}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{tooltip}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   ))
 )
 

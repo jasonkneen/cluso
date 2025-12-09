@@ -90,10 +90,10 @@ export default function TodoList({ activeTab, onSelectTodo, onAddTodoClick }: To
   }
 
   // Get unique users for the filter dropdown
-  const uniqueUsers = Array.from(new Set(todos.flatMap((todo) => todo.assignedTo)))
+  const uniqueUsers = Array.from(new Set((todos || []).flatMap((todo) => todo.assignedTo)))
 
   // Apply all filters
-  const filteredTodos = todos.filter((todo) => {
+  const filteredTodos = (todos || []).filter((todo) => {
     // Tab filter
     if (activeTab !== "all") return todo.status === activeTab
 
@@ -243,7 +243,7 @@ export default function TodoList({ activeTab, onSelectTodo, onAddTodoClick }: To
     </div>
   )
 
-  const items = todos.map((v) => v.id)
+  const items = (todos || []).map((v) => v.id)
 
   const renderTodoItems = () => {
     if (viewMode === "grid") {
