@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cluso - AI IDE for Front-end Development</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #fafafa;
+      color: #1a1a1a;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 48px;
+      background: white;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+      font-size: 18px;
+    }
+
+    .logo-icon {
+      width: 28px;
+      height: 28px;
+      background: #1a1a1a;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .logo-icon::after {
+      content: '';
+      width: 8px;
+      height: 8px;
+      background: white;
+      border-radius: 50%;
+      margin-left: 4px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn-primary {
+      background: #1a1a1a;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 24px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn-primary:hover {
+      background: #333;
+    }
+
+    .btn-icon {
+      width: 40px;
+      height: 40px;
+      border: 1px solid #e5e5e5;
+      border-radius: 12px;
+      background: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+
+    .btn-icon:hover {
+      border-color: #3b82f6;
+    }
+
+    .btn-icon svg {
+      width: 18px;
+      height: 18px;
+      color: #666;
+    }
+
+    /* Hero Section */
+    .hero {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 80px 24px;
+      text-align: center;
+      background: linear-gradient(180deg, #fff 0%, #fafafa 100%);
+    }
+
+    .hero h1 {
+      font-size: clamp(40px, 8vw, 72px);
+      font-weight: 700;
+      line-height: 1.1;
+      margin-bottom: 24px;
+      letter-spacing: -0.02em;
+    }
+
+    .hero h1 span {
+      color: #666;
+    }
+
+    .hero p {
+      font-size: 18px;
+      color: #666;
+      max-width: 600px;
+      line-height: 1.6;
+      margin-bottom: 40px;
+    }
+
+    .email-form {
+      display: flex;
+      align-items: center;
+      background: white;
+      border: 1px solid #e5e5e5;
+      border-radius: 32px;
+      padding: 6px 6px 6px 20px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+    }
+
+    .email-form svg {
+      width: 20px;
+      height: 20px;
+      color: #999;
+      flex-shrink: 0;
+    }
+
+    .email-form input {
+      flex: 1;
+      border: none;
+      outline: none;
+      padding: 12px;
+      font-size: 15px;
+      background: transparent;
+    }
+
+    .email-form input::placeholder {
+      color: #999;
+    }
+
+    .email-form button {
+      background: #1a1a1a;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 24px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 24px;
+      font-size: 14px;
+      color: #666;
+    }
+
+    .badge-dot {
+      width: 8px;
+      height: 8px;
+      background: #22c55e;
+      border-radius: 50%;
+    }
+
+    /* Footer */
+    footer {
+      background: white;
+      border-top: 1px solid #f0f0f0;
+      padding: 60px 48px;
+    }
+
+    .footer-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1.5fr 1fr 1fr;
+      gap: 80px;
+    }
+
+    .footer-cta h2 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .footer-cta p {
+      color: #666;
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+
+    .footer-form {
+      display: flex;
+      align-items: center;
+      background: #fafafa;
+      border: 1px solid #e5e5e5;
+      border-radius: 32px;
+      padding: 4px 4px 4px 16px;
+      max-width: 360px;
+    }
+
+    .footer-form svg {
+      width: 18px;
+      height: 18px;
+      color: #999;
+    }
+
+    .footer-form input {
+      flex: 1;
+      border: none;
+      outline: none;
+      padding: 10px;
+      font-size: 14px;
+      background: transparent;
+    }
+
+    .footer-form button {
+      background: #1a1a1a;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .yc-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 16px;
+      padding: 8px 12px;
+      background: #fff8f0;
+      border: 1px solid #ffe4cc;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .yc-badge span {
+      background: #ff6600;
+      color: white;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    .footer-links h3 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    .footer-links ul {
+      list-style: none;
+    }
+
+    .footer-links li {
+      margin-bottom: 12px;
+    }
+
+    .footer-links a {
+      color: #666;
+      text-decoration: none;
+      font-size: 14px;
+      transition: color 0.2s;
+    }
+
+    .footer-links a:hover {
+      color: #1a1a1a;
+    }
+
+    .footer-bottom {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 40px;
+      padding-top: 24px;
+      border-top: 1px solid #f0f0f0;
+    }
+
+    .footer-bottom .logo-icon {
+      width: 24px;
+      height: 24px;
+    }
+
+    .footer-bottom .logo-icon::after {
+      width: 6px;
+      height: 6px;
+    }
+
+    .footer-bottom span {
+      font-weight: 600;
+      font-size: 15px;
+    }
+
+    .footer-bottom p {
+      color: #999;
+      font-size: 13px;
+      margin-left: auto;
+    }
+
+    @media (max-width: 768px) {
+      header {
+        padding: 16px 24px;
+      }
+
+      .footer-content {
+        grid-template-columns: 1fr;
+        gap: 40px;
+      }
+
+      footer {
+        padding: 40px 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon"></div>
+      <span>Cluso</span>
+    </div>
+    <div class="header-actions">
+      <button class="btn-primary">Join Waitlist</button>
+      <button class="btn-icon" id="theme-toggle">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <main class="hero">
+    <h1>The AI IDE for<br><span>front-end development</span></h1>
+    <p>Cluso allows you to iterate on your UI at the speed of thought. Use your favorite AI agents directly in the browser.</p>
+
+    <form class="email-form">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <rect width="20" height="16" x="2" y="4" rx="2"/>
+        <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+      </svg>
+      <input type="email" placeholder="Enter your email...">
+      <button type="submit">Join Waitlist</button>
+    </form>
+
+    <div class="badge">
+      <span class="badge-dot"></span>
+      Early access open &bull; No credit card required
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-content">
+      <div class="footer-cta">
+        <h2>Ready to ship faster?</h2>
+        <p>Join the waitlist and be the first to experience the future of frontend development.</p>
+
+        <form class="footer-form">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <rect width="20" height="16" x="2" y="4" rx="2"/>
+            <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+          </svg>
+          <input type="email" placeholder="Enter your email...">
+          <button type="submit">Join Waitlist</button>
+        </form>
+
+        <div class="yc-badge">
+          <span>Y</span>
+          Backed by Y Combinator
+        </div>
+      </div>
+
+      <div class="footer-links">
+        <h3>Product</h3>
+        <ul>
+          <li><a href="#">Features</a></li>
+          <li><a href="#">Pricing</a></li>
+          <li><a href="#">Changelog</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-links">
+        <h3>Company</h3>
+        <ul>
+          <li><a href="#">About</a></li>
+          <li><a href="#">Contact</a></li>
+          <li><a href="#">Twitter</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <div class="logo-icon"></div>
+      <span>Cluso</span>
+      <p>&copy; 2025 Cluso Inc.</p>
+    </div>
+  </footer>
+
+  <script>
+    // Simple interaction for testing
+    document.querySelectorAll('form').forEach(form => {
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const input = form.querySelector('input');
+        if (input.value) {
+          alert('Thanks for joining! Email: ' + input.value);
+          input.value = '';
+        }
+      });
+    });
+
+    // Console log for testing
+    console.log('Cluso test page loaded');
+    console.log('Ready for UI inspection and testing');
+  </script>
+</body>
+</html>

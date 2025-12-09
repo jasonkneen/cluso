@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gemini Live</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              border: 'rgb(var(--border) / <alpha-value>)',
+              input: 'rgb(var(--input, var(--border)) / <alpha-value>)',
+              ring: 'rgb(var(--ring, var(--primary)) / <alpha-value>)',
+              background: 'rgb(var(--background) / <alpha-value>)',
+              foreground: 'rgb(var(--foreground) / <alpha-value>)',
+              primary: {
+                DEFAULT: 'rgb(var(--primary) / <alpha-value>)',
+                foreground: 'rgb(var(--primary-foreground) / <alpha-value>)',
+              },
+              secondary: {
+                DEFAULT: 'rgb(var(--secondary, var(--muted)) / <alpha-value>)',
+                foreground: 'rgb(var(--secondary-foreground, var(--foreground)) / <alpha-value>)',
+              },
+              destructive: {
+                DEFAULT: 'rgb(var(--destructive, 239 68 68) / <alpha-value>)',
+                foreground: 'rgb(var(--destructive-foreground, 255 255 255) / <alpha-value>)',
+              },
+              muted: {
+                DEFAULT: 'rgb(var(--muted) / <alpha-value>)',
+                foreground: 'rgb(var(--muted-foreground) / <alpha-value>)',
+              },
+              accent: {
+                DEFAULT: 'rgb(var(--accent, var(--muted)) / <alpha-value>)',
+                foreground: 'rgb(var(--accent-foreground, var(--foreground)) / <alpha-value>)',
+              },
+              popover: {
+                DEFAULT: 'rgb(var(--popover, var(--background)) / <alpha-value>)',
+                foreground: 'rgb(var(--popover-foreground, var(--foreground)) / <alpha-value>)',
+              },
+              card: {
+                DEFAULT: 'rgb(var(--card, var(--background)) / <alpha-value>)',
+                foreground: 'rgb(var(--card-foreground, var(--foreground)) / <alpha-value>)',
+              },
+            },
+            borderRadius: {
+              lg: 'var(--radius, 0.5rem)',
+              md: 'calc(var(--radius, 0.5rem) - 2px)',
+              sm: 'calc(var(--radius, 0.5rem) - 4px)',
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      /* CSS Variables for shadcn/streamdown components */
+      :root {
+        --background: 250 250 249; /* stone-50 */
+        --foreground: 28 25 23; /* stone-900 */
+        --muted: 245 245 244; /* stone-100 */
+        --muted-foreground: 120 113 108; /* stone-500 */
+        --border: 231 229 228; /* stone-200 */
+        --input: 231 229 228; /* stone-200 */
+        --ring: 28 25 23; /* stone-900 */
+        --primary: 28 25 23; /* stone-900 */
+        --primary-foreground: 250 250 249; /* stone-50 */
+        --secondary: 245 245 244; /* stone-100 */
+        --secondary-foreground: 28 25 23; /* stone-900 */
+        --accent: 245 245 244; /* stone-100 */
+        --accent-foreground: 28 25 23; /* stone-900 */
+        --destructive: 239 68 68; /* red-500 */
+        --destructive-foreground: 255 255 255; /* white */
+        --card: 255 255 255; /* white */
+        --card-foreground: 28 25 23; /* stone-900 */
+        --popover: 255 255 255; /* white */
+        --popover-foreground: 28 25 23; /* stone-900 */
+        --radius: 0.5rem;
+
+        /* Theme color variables (light mode defaults - matches bg-stone-300) */
+        --color-background: #d6d3d1;
+        --color-foreground: #171717;
+        --color-primary: #2563eb;
+        --color-secondary: #7c3aed;
+        --color-accent: #0891b2;
+        --color-border: #e7e5e4;
+        --color-success: #16a34a;
+        --color-error: #dc2626;
+        --color-warning: #d97706;
+        --color-info: #2563eb;
+      }
+
+      .dark {
+        --background: 23 23 23; /* neutral-900 */
+        --foreground: 245 245 245; /* neutral-100 */
+        --muted: 64 64 64; /* neutral-700 */
+        --muted-foreground: 163 163 163; /* neutral-400 */
+        --border: 64 64 64; /* neutral-700 */
+        --input: 64 64 64; /* neutral-700 */
+        --ring: 59 130 246; /* blue-500 */
+        --primary: 59 130 246; /* blue-500 */
+        --primary-foreground: 255 255 255; /* white */
+        --secondary: 64 64 64; /* neutral-700 */
+        --secondary-foreground: 245 245 245; /* neutral-100 */
+        --accent: 64 64 64; /* neutral-700 */
+        --accent-foreground: 245 245 245; /* neutral-100 */
+        --destructive: 239 68 68; /* red-500 */
+        --destructive-foreground: 255 255 255; /* white */
+        --card: 38 38 38; /* neutral-800 */
+        --card-foreground: 245 245 245; /* neutral-100 */
+        --popover: 38 38 38; /* neutral-800 */
+        --popover-foreground: 245 245 245; /* neutral-100 */
+      }
+
+      /* Dark mode theme variables - set on :root when .dark exists anywhere */
+      :root:has(.dark) {
+        --color-background: #171717;
+        --color-foreground: #f5f5f5;
+        --color-primary: #3b82f6;
+        --color-secondary: #8b5cf6;
+        --color-accent: #06b6d4;
+        --color-border: #404040;
+        --color-success: #22c55e;
+        --color-error: #ef4444;
+        --color-warning: #f59e0b;
+        --color-info: #3b82f6;
+      }
+
+      /* When a custom theme is applied, use the theme colors */
+      html[data-theme],
+      html[data-theme] body {
+        background-color: var(--color-background) !important;
+        color: var(--color-foreground) !important;
+      }
+
+      /* Theme-aware UI elements */
+      html[data-theme] .theme-root,
+      html[data-theme] .theme-bg {
+        background-color: var(--color-background) !important;
+      }
+      html[data-theme] .theme-fg {
+        color: var(--color-foreground) !important;
+      }
+      html[data-theme] .theme-primary {
+        color: var(--color-primary) !important;
+      }
+      html[data-theme] .theme-border {
+        border-color: var(--color-border) !important;
+      }
+
+      /* Theme root - background comes from CSS variables */
+      .theme-root {
+        background-color: var(--color-background) !important;
+      }
+
+      /* ============================================================
+         THEME OVERRIDE SYSTEM
+         When a custom theme is active (data-theme attribute set),
+         override Tailwind's hardcoded dark mode colors with theme colors
+         ============================================================ */
+
+      /* Panel backgrounds - override bg-neutral-800 and bg-white patterns */
+      /* bg-neutral-900 = base background (darkest for dark themes) */
+      [data-theme] .bg-neutral-900 {
+        background-color: var(--color-background) !important;
+      }
+      /* bg-neutral-800, bg-white = panel backgrounds (lighter for dark themes) */
+      [data-theme] .bg-neutral-800,
+      [data-theme] .bg-white,
+      [data-theme] .bg-stone-50 {
+        background-color: var(--color-panel, var(--color-background)) !important;
+      }
+
+      /* Text colors - override neutral and stone text colors */
+      [data-theme] .text-neutral-100,
+      [data-theme] .text-neutral-200,
+      [data-theme] .text-white {
+        color: var(--color-foreground) !important;
+      }
+      [data-theme] .text-neutral-400,
+      [data-theme] .text-neutral-500,
+      [data-theme] .text-stone-400,
+      [data-theme] .text-stone-500 {
+        color: var(--color-muted, color-mix(in srgb, var(--color-foreground) 60%, transparent)) !important;
+      }
+      [data-theme] .text-stone-900,
+      [data-theme] .text-stone-800,
+      [data-theme] .text-stone-700 {
+        color: var(--color-foreground) !important;
+      }
+
+      /* Border colors - override neutral and stone border colors */
+      [data-theme] .border-neutral-700,
+      [data-theme] .border-neutral-600,
+      [data-theme] .border-stone-200,
+      [data-theme] .border-stone-100 {
+        border-color: var(--color-border) !important;
+      }
+
+      /* Hover states with theme colors */
+      [data-theme] .hover\:bg-neutral-700:hover,
+      [data-theme] .hover\:bg-neutral-600:hover,
+      [data-theme] .hover\:bg-stone-200:hover,
+      [data-theme] .hover\:bg-stone-100:hover {
+        background-color: color-mix(in srgb, var(--color-foreground) 10%, var(--color-background)) !important;
+      }
+
+      /* Active/selected states */
+      [data-theme] .bg-neutral-700,
+      [data-theme] .bg-neutral-600,
+      [data-theme] .bg-stone-200,
+      [data-theme] .bg-stone-100 {
+        background-color: color-mix(in srgb, var(--color-foreground) 15%, var(--color-background)) !important;
+      }
+
+      /* Primary color accents */
+      [data-theme] .text-blue-500,
+      [data-theme] .text-blue-600 {
+        color: var(--color-primary) !important;
+      }
+      [data-theme] .bg-blue-500,
+      [data-theme] .bg-blue-600 {
+        background-color: var(--color-primary) !important;
+      }
+      [data-theme] .border-blue-500,
+      [data-theme] .border-blue-400 {
+        border-color: var(--color-primary) !important;
+      }
+
+      /* Success/Error/Warning colors from theme */
+      [data-theme] .text-green-500,
+      [data-theme] .text-green-600 {
+        color: var(--color-success) !important;
+      }
+      [data-theme] .text-red-500,
+      [data-theme] .text-red-600 {
+        color: var(--color-error) !important;
+      }
+      [data-theme] .text-amber-500,
+      [data-theme] .text-yellow-500 {
+        color: var(--color-warning) !important;
+      }
+
+      /* Code block styling - theme aware */
+      [data-theme] [data-streamdown="code-block"],
+      .dark [data-streamdown="code-block"] {
+        background-color: var(--color-background, #282c34) !important;
+        border-color: var(--color-border, #3e4451) !important;
+      }
+
+      [data-theme] [data-streamdown="code-block"] pre,
+      .dark [data-streamdown="code-block"] pre {
+        background-color: var(--color-background, #282c34) !important;
+      }
+
+      /* Inline code styling */
+      .dark code:not(pre code) {
+        background-color: rgba(110, 118, 129, 0.4) !important;
+        color: #e5c07b !important;
+      }
+
+      body {
+        margin: 0;
+        background-color: var(--color-background, #d6d3d1);
+        color: var(--color-foreground, #171717);
+        font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        overflow: hidden;
+      }
+
+      /* Dark mode default body colors */
+      .dark body,
+      body.dark {
+        background-color: var(--color-background, #171717);
+        color: var(--color-foreground, #f5f5f5);
+      }
+
+      /* IBM Plex Mono for code blocks */
+      code, pre, [data-streamdown="code-block"] code, [data-streamdown="code-block"] pre {
+        font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+      }
+    </style>
+
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/"
+  }
+}
+</script>
+  <script type="module" crossorigin src="./assets/index-C6AlHXoj.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-CF4Qd9FU.css">
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

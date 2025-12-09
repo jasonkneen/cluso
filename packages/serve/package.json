@@ -1,0 +1,57 @@
+{
+  "name": "cluso",
+  "version": "0.1.0",
+  "description": "AI-powered development assistant - run anywhere with npx",
+  "type": "module",
+  "bin": {
+    "cluso": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "public"
+  ],
+  "scripts": {
+    "build": "tsc && node scripts/add-shebang.js",
+    "dev": "node --import tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "@hono/node-server": "^1.13.0",
+    "ws": "^8.18.0",
+    "commander": "^12.1.0",
+    "open": "^10.1.0",
+    "picocolors": "^1.1.0",
+    "chokidar": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.2",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.12"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jkneen/ai-cluso"
+  },
+  "keywords": [
+    "ai",
+    "development",
+    "assistant",
+    "gemini",
+    "claude",
+    "voice"
+  ],
+  "author": "jkneen",
+  "license": "MIT"
+}

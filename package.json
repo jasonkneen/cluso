@@ -17,6 +17,10 @@
     "electron:build:mac": "npm run build && electron-builder --mac",
     "electron:build:win": "npm run build && electron-builder --win",
     "electron:build:linux": "npm run build && electron-builder --linux",
+    "serve:dev": "npm run build && npm run serve:copy-public && npm -w cluso run dev",
+    "serve:build": "npm run build && npm run serve:copy-public && npm -w cluso run build",
+    "serve:copy-public": "rm -rf packages/serve/public && cp -r dist packages/serve/public",
+    "serve:start": "npm -w cluso run start",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
