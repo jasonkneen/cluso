@@ -7,8 +7,13 @@ import TodoList from "./todo-list"
 import AddTodoSheet from "./add-todo-sheet"
 import TodoDetailSheet from "./todo-detail-sheet"
 import { Todo } from "./types"
+import { tasksData } from "./data"
 
-export default function Tasks({ tasks }: { tasks: Todo[] }) {
+interface TasksProps {
+  tasks?: Todo[]
+}
+
+export default function Tasks({ tasks = tasksData }: TasksProps) {
   const {
     setTodos,
     activeTab,
@@ -21,8 +26,10 @@ export default function Tasks({ tasks }: { tasks: Todo[] }) {
   } = useTodoStore()
 
   useEffect(() => {
-    setTodos(tasks)
-  }, [tasks])
+    if (tasks && tasks.length > 0) {
+      setTodos(tasks)
+    }
+  }, [tasks, setTodos])
 
   // Add state for managing edit mode
   const [editTodoId, setEditTodoId] = React.useState<string | null>(null)
