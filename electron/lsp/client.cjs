@@ -283,7 +283,10 @@ class LSPClient extends EventEmitter {
    * Notify server that a document was opened
    */
   async openDocument(filePath) {
-    if (this.openDocuments.has(filePath)) return
+    // Already tracked as open - just update content instead
+    if (this.openDocuments.has(filePath)) {
+      return this.changeDocument(filePath)
+    }
 
     try {
       const content = await fs.readFile(filePath, 'utf-8')
@@ -302,7 +305,13 @@ class LSPClient extends EventEmitter {
         },
       })
     } catch (err) {
-      console.error(`[LSP:${this.serverID}] Failed to open document:`, err)
+      // If already open on server side, just track it locally
+      if (err.message?.includes('already open')) {
+        this.openDocuments.add(filePath)
+        this.documentVersions.set(filePath, 1)
+      } else {
+        console.error(`[LSP:${this.serverID}] Failed to open document:`, err)
+      }
     }
   }
 

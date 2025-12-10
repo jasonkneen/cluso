@@ -398,11 +398,15 @@ export default function App() {
       return filtered;
     });
 
-    // Clear chat history for the closed tab (especially for project tabs)
+    // Clear chat history and stop file watcher for the closed tab
     if (tabToClose?.projectPath) {
       setMessages([]);
       setSelectedFiles([]);
       setSelectedElement(null);
+      // Stop file watcher for this project
+      window.electronAPI?.fileWatcher?.stop(tabToClose.projectPath).catch((err: Error) => {
+        console.error('[App] Failed to stop file watcher:', err);
+      });
     }
   }, [activeTabId, tabs]);
 
