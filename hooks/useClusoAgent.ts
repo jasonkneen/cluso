@@ -47,13 +47,10 @@ export function useClusoAgent(params: UseClusoAgentParams = {}): UseClusoAgentRe
 
   // Initialize agent with callbacks
   useEffect(() => {
-    // Initialize Gemini TTS with API key from props or environment
+    // Initialize Gemini TTS with API key from props or environment (silent, only once)
     const apiKey = googleApiKey || (import.meta as any).env?.VITE_GOOGLE_API_KEY || (window as any).process?.env?.API_KEY
     if (apiKey) {
       initGeminiTTS(apiKey)
-      console.log('[ClusoAgent] Gemini TTS initialized with API key')
-    } else {
-      console.warn('[ClusoAgent] No API key found, using browser TTS fallback')
     }
 
     const callbacks: ClusoAgentCallbacks = {

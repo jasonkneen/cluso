@@ -25,3 +25,4 @@ dist-ssr
 .beads/issues.jsonl
 /release
 /website/.mgrep-local
+/.vite

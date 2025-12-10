@@ -916,10 +916,12 @@ export async function generateSourcePatch(
       }
     }
 
-    console.log('[Source Patch] Morph Fast Apply failed or returned no changes, falling through to AI SDK (no local Fast Apply). Error:', morphResult.error)
-    // SAFETY: In cloud mode, do not write local patches if Morph fails.
-    return null
-  } else {
+    console.log('[Source Patch] Morph Fast Apply failed or returned no changes, falling through to AI SDK. Error:', morphResult.error)
+    // Continue to AI SDK fallback below
+  }
+
+  // When disableFastApply is true, skip local Fast Apply and go straight to AI SDK
+  if (!params.disableFastApply) {
 
   // Calculate target line within the snippet (1-indexed)
   const targetLineInSnippet = targetLine - fastApplyStartLine

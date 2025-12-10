@@ -28,11 +28,16 @@ export const DEMO_VOICES = {
   app: 'Zephyr' as GeminiVoice,   // Professional voice for "app/AI"
 }
 
-// Initialize with API key
+// Track initialization to avoid repeated setup
+let isInitialized = false
+
+// Initialize with API key (only once)
 export function initGeminiTTS(apiKey: string) {
-  console.log('[GeminiTTS] Initializing with API key:', apiKey ? `${apiKey.substring(0, 8)}...` : 'MISSING')
+  if (isInitialized && client) return true // Already initialized
+  if (!apiKey) return false
+
   client = new GoogleGenAI({ apiKey })
-  console.log('[GeminiTTS] Client created successfully')
+  isInitialized = true
   return true
 }
 

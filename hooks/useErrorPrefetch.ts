@@ -114,6 +114,15 @@ export function useErrorPrefetch(options: UseErrorPrefetchOptions = {}) {
         return String(arg)
       }).join(' ')
 
+      // Suppress known harmless third-party library errors
+      if (
+        message.includes('tippyOptions') ||
+        message.includes('[tiptap') ||
+        message.includes('Duplicate extension')
+      ) {
+        return // Silently ignore these known issues
+      }
+
       handleError(message)
       originalError.apply(console, args)
     }
@@ -131,13 +140,13 @@ export function useErrorPrefetch(options: UseErrorPrefetchOptions = {}) {
         return String(arg)
       }).join(' ')
 
+      // Suppress known harmless third-party library warnings
       if (
-        message.includes('Warning') ||
-        message.includes('deprecated') ||
-        message.includes('React')
+        message.includes('[tiptap warn]') ||
+        message.includes('tippyOptions') ||
+        message.includes('Duplicate extension names')
       ) {
-        // Optionally handle warnings
-        // handleError(message)
+        return // Silently ignore these known issues
       }
 
       originalWarn.apply(console, args)
