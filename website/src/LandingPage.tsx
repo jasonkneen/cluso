@@ -1292,7 +1292,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               onChange={(e) => setEmail(e.target.value)}
               required
             />
-            <button type="submit" className="btn btn-primary" disabled={submitState === 'submitting' || submitState === 'submitted'}>
+            <button
+              type="submit"
+              className="btn"
+              style={{ backgroundColor: 'white', color: 'black' }}
+              disabled={submitState === 'submitting' || submitState === 'submitted'}
+            >
               {getButtonText()}
             </button>
           </form>

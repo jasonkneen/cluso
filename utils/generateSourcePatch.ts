@@ -35,6 +35,9 @@ export interface GenerateSourcePatchParams {
   morphApiKey?: string
 }
 
+const HERO_PLACEHOLDER =
+  'https://images.unsplash.com/photo-1503264116251-35a269479413?auto=format&fit=crop&w=1600&q=80'
+
 /**
  * Use Morph Fast Apply (morph-v3-fast) to merge edits server-side.
  * Falls back to null on any failure so the caller can continue with other strategies.
@@ -783,9 +786,27 @@ export async function generateSourcePatch(
 
   // === FAST PATH: Try direct string manipulation first ===
 
+  // Heuristic: if user asked to replace an image/hero banner but no srcChange was provided,
+  // inject a placeholder hero image so we still generate a patch.
+  let effectiveSrcChange = srcChange
+  const wantsHeroImage =
+    element.tagName?.toLowerCase() === 'img' &&
+    userRequest &&
+    /(?:replace|swap).*hero\s+banner|hero\s+image|new\s+banner/i.test(userRequest)
+
+  if (!effectiveSrcChange && wantsHeroImage) {
+    console.log('[Source Patch] Applying hero placeholder image heuristic')
+    effectiveSrcChange = {
+      oldSrc: (element as any)?.src || '',
+      newSrc: HERO_PLACEHOLDER,
+    }
+  }
+
+  const hasEffectiveSrcChange = effectiveSrcChange && effectiveSrcChange.newSrc
+
   // Fast path for src changes
-  if (hasSrcChange && !hasCssChanges && !hasTextChange) {
-    const patchedContent = tryFastPathSrcChange(originalContent, source.line, srcChange.newSrc)
+  if (hasEffectiveSrcChange && !hasCssChanges && !hasTextChange) {
+    const patchedContent = tryFastPathSrcChange(originalContent, source.line, effectiveSrcChange!.newSrc)
     if (patchedContent && patchedContent !== originalContent) {
       console.log('[Source Patch] FAST PATH SUCCESS - replaced img src directly')
       return {
@@ -896,7 +917,8 @@ export async function generateSourcePatch(
     }
 
     console.log('[Source Patch] Morph Fast Apply failed or returned no changes, falling through to AI SDK (no local Fast Apply). Error:', morphResult.error)
-    // Do not return; continue to AI SDK path below. Local Fast Apply remains disabled.
+    // SAFETY: In cloud mode, do not write local patches if Morph fails.
+    return null
   } else {
 
   // Calculate target line within the snippet (1-indexed)
