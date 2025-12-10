@@ -36,6 +36,7 @@ import {
   Cloud,
 } from 'lucide-react'
 import { debugLog } from '../utils/debug'
+import { apiClient } from '../services/apiClient'
 import { FastApplySettings } from './FastApplySettings'
 import { CodeIndexSettings } from './CodeIndexSettings'
 import { useTheme } from '../hooks/useTheme'
@@ -595,16 +596,16 @@ export function SettingsDialog({
 
       if (id === 'google') {
         // Verify Google AI API key
-        const response = await fetch(
+        await apiClient.get(
           `https://generativelanguage.googleapis.com/v1beta/models?key=${provider.apiKey}`
         )
-        isValid = response.ok
+        isValid = true
       } else if (id === 'openai') {
         // Verify OpenAI API key
-        const response = await fetch('https://api.openai.com/v1/models', {
-          headers: { 'Authorization': `Bearer ${provider.apiKey}` }
+        await apiClient.get('https://api.openai.com/v1/models', {
+          'Authorization': `Bearer ${provider.apiKey}`
         })
-        isValid = response.ok
+        isValid = true
       } else if (id === 'anthropic') {
         // Anthropic doesn't have a simple verify endpoint, so we'll just check format
         isValid = provider.apiKey.startsWith('sk-ant-')

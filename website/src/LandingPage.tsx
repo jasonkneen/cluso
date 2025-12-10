@@ -1319,8 +1319,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
             />
           </div>
         </section>
-
-        {/* Comparison Matrix */}
+{/* Comparison Matrix */}
         <FeatureComparison />
 
         {/* Features Section */}
@@ -1332,7 +1331,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
               <a
                 href="#downloads"
                 className="btn btn-large"
-                style={{ backgroundColor: 'red', color: 'black', borderColor: 'red' }}
+                style={{ display: 'inline', backgroundColor: 'white', color: 'black', borderColor: 'white' }}
               >
                 Download Now
               </a>

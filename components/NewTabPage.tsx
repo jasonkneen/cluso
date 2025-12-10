@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Folder, Clock, X, Plus, Pencil, Check, Server } from 'lucide-react'
 import { debugLog } from '../utils/debug'
+import { apiClient } from '../services/apiClient'
 
 // Check if running in Electron mode
 const isElectronMode = () => typeof window !== 'undefined' && window.electronAPI?.isElectron === true
@@ -158,13 +159,10 @@ export function NewTabPage({
 
     setWebModeLoading(true)
     try {
-      const response = await fetch(`${getApiUrl()}/api/files/cwd`)
-      if (response.ok) {
-        const result = await response.json()
-        if (result.success && result.data) {
-          setServerProject(result.data)
-          debugLog.general.log('[WebMode] Server project:', result.data)
-        }
+      const result = await apiClient.get('/api/files/cwd')
+      if (result.success && result.data) {
+        setServerProject(result.data)
+        debugLog.general.log('[WebMode] Server project:', result.data)
       }
     } catch (err) {
       debugLog.general.error('[WebMode] Failed to fetch server project:', err)

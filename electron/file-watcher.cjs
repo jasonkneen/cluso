@@ -139,6 +139,24 @@ async function startWatching(projectPath) {
     '**/yarn.lock',
     '**/pnpm-lock.yaml',
     '**/bun.lockb',
+    // Additional patterns to prevent EMFILE
+    '**/data/**',
+    '**/workspaces/**',
+    '**/.cache/**',
+    '**/tmp/**',
+    '**/temp/**',
+    '**/vendor/**',
+    '**/__pycache__/**',
+    '**/.pytest_cache/**',
+    '**/.venv/**',
+    '**/venv/**',
+    '**/env/**',
+    '**/.beads/**',
+    '**/.crush/**',
+    '**/release/**',
+    '**/out/**',
+    '**/*.db',
+    '**/*.sqlite',
   ]
 
   // Try to read .gitignore for additional patterns
@@ -162,19 +180,16 @@ async function startWatching(projectPath) {
     // No .gitignore or couldn't read it - that's fine
   }
 
-  const ignored = [...defaultIgnored, ...gitignorePatterns]
+  // Use regex for ignore - most reliable with chokidar
+  const ignoreRegex = /(node_modules|\.git|\.next|\.nuxt|dist|build|coverage|\.cache|release|out|\.db$|\.sqlite$|\.log$|\.map$|\.lock$)/
 
   const watcher = chokidar.watch(projectPath, {
-    ignored,
+    ignored: ignoreRegex,
     persistent: true,
-    ignoreInitial: true, // Don't emit events for existing files
-    awaitWriteFinish: {
-      stabilityThreshold: 100, // Wait for file to be fully written
-      pollInterval: 50,
-    },
-    // Only watch specific extensions to reduce noise
-    // Comment out to watch all files
-    // depth: 10, // Limit depth to prevent runaway watching
+    ignoreInitial: true,
+    usePolling: false,
+    depth: 3,
+    ignorePermissionErrors: true,
   })
 
   // Track ready state
