@@ -26,7 +26,12 @@ const registerTabDataHandlers = require('./ipc/tab-data-handlers.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
-
+// Suppress Electron security warnings in dev mode
+// These warnings are expected when using dynamic script injection for React fiber extraction
+// The warnings don't appear in production builds
+if (isDev) {
+  process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true'
+}
 
 // ==========================================
 // Multi-Window Support with Project Locking

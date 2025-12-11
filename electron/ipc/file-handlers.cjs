@@ -194,6 +194,58 @@ function registerFileHandlers() {
     }
   })
 
+  // Find files by name (searches recursively, case-insensitive)
+  // Used by source patch to find component definition files when only filename is known
+  ipcMain.handle('files:findFiles', async (event, searchDir, filename) => {
+    try {
+      console.log('[Files] findFiles called:', { searchDir, filename })
+      const results = []
+      const searchLower = filename.toLowerCase()
+
+      async function searchDirectory(dir, depth = 0) {
+        if (depth > 10 || results.length >= 20) return
+
+        try {
+          const entries = await fs.readdir(dir, { withFileTypes: true })
+          for (const entry of entries) {
+            if (results.length >= 20) break
+
+            // Skip common non-source directories
+            if (entry.name === 'node_modules' ||
+                entry.name === '.git' ||
+                entry.name === 'dist' ||
+                entry.name === 'build' ||
+                entry.name === '.next' ||
+                entry.name === 'coverage') {
+              continue
+            }
+
+            const fullPath = path.join(dir, entry.name)
+
+            if (entry.isDirectory()) {
+              await searchDirectory(fullPath, depth + 1)
+            } else if (entry.isFile()) {
+              // Case-insensitive filename match
+              if (entry.name.toLowerCase() === searchLower) {
+                results.push(fullPath)
+                console.log('[Files] Found match:', fullPath)
+              }
+            }
+          }
+        } catch (err) {
+          // Skip directories we can't read
+        }
+      }
+
+      await searchDirectory(searchDir)
+      console.log('[Files] findFiles found', results.length, 'matches')
+      return { success: true, data: results }
+    } catch (error) {
+      console.error('[Files] findFiles error:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
   ipcMain.handle('files:copyFile', async (event, srcPath, destPath) => {
     try {
       await fs.copyFile(srcPath, destPath)
@@ -510,6 +562,94 @@ function registerFileHandlers() {
       return await mgrep.resync(projectPath)
     } catch (err) {
       return { success: false, error: err.message }
+    }
+  })
+
+  // Lint code snippet using ESLint
+  ipcMain.handle('files:lintCode', async (event, code, filePath) => {
+    try {
+      // Create a temp file with the code to lint
+      const os = require('os')
+      const tempDir = os.tmpdir()
+      const ext = filePath?.endsWith('.tsx') ? '.tsx' : filePath?.endsWith('.ts') ? '.ts' : '.jsx'
+      const tempFile = path.join(tempDir, `cluso-lint-${Date.now()}${ext}`)
+
+      await fs.writeFile(tempFile, code, 'utf-8')
+
+      // Try to run ESLint on the temp file
+      const { exec } = require('child_process')
+      const { promisify } = require('util')
+      const execAsync = promisify(exec)
+
+      try {
+        // Use project's ESLint if available, otherwise fall back to global
+        const eslintPath = filePath
+          ? path.join(path.dirname(filePath), 'node_modules', '.bin', 'eslint')
+          : 'eslint'
+
+        const { stdout, stderr } = await execAsync(
+          `${eslintPath} --format=json "${tempFile}"`,
+          { timeout: 5000 }
+        )
+
+        const results = JSON.parse(stdout)
+        const errors = []
+
+        for (const result of results) {
+          for (const msg of result.messages || []) {
+            if (msg.severity === 2) { // Only errors, not warnings
+              errors.push(`Line ${msg.line}: ${msg.message} (${msg.ruleId})`)
+            }
+          }
+        }
+
+        // Clean up temp file
+        await fs.unlink(tempFile).catch(() => {})
+
+        return {
+          success: true,
+          data: {
+            valid: errors.length === 0,
+            errors: errors.length > 0 ? errors : undefined
+          }
+        }
+      } catch (execError) {
+        // Clean up temp file
+        await fs.unlink(tempFile).catch(() => {})
+
+        // ESLint returns exit code 1 when there are errors
+        if (execError.stdout) {
+          try {
+            const results = JSON.parse(execError.stdout)
+            const errors = []
+
+            for (const result of results) {
+              for (const msg of result.messages || []) {
+                if (msg.severity === 2) {
+                  errors.push(`Line ${msg.line}: ${msg.message} (${msg.ruleId})`)
+                }
+              }
+            }
+
+            return {
+              success: true,
+              data: {
+                valid: errors.length === 0,
+                errors: errors.length > 0 ? errors : undefined
+              }
+            }
+          } catch (parseErr) {
+            // Couldn't parse ESLint output
+          }
+        }
+
+        // ESLint not available or other error - just skip linting
+        console.log('[Files] ESLint not available:', execError.message?.substring(0, 100))
+        return { success: true, data: { valid: true } }
+      }
+    } catch (error) {
+      console.error('[Files] lintCode error:', error.message)
+      return { success: false, error: error.message }
     }
   })
 }

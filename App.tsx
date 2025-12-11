@@ -7423,6 +7423,11 @@ If you're not sure what the user wants, ask for clarification.
 
                     <button
                         onClick={() => {
+                          // Prevent action while connecting (race condition fix)
+                          if (streamState.isStreaming && !streamState.isConnected) {
+                            console.log('[Voice] Ignoring click - connection in progress');
+                            return;
+                          }
                           if (streamState.isConnected) {
                             stopSpeaking(); // Stop any playing audio immediately
                             disconnect();   // Then disconnect the session
@@ -7430,12 +7435,27 @@ If you're not sure what the user wants, ask for clarification.
                             connect();
                           }
                         }}
+                        disabled={streamState.isStreaming && !streamState.isConnected}
                         data-control-id="voice-button"
                         data-control-type="button"
-                        className={`flex items-center justify-center w-9 h-9 rounded-full font-medium transition-all ${streamState.isConnected ? 'bg-red-50 text-red-600 ring-1 ring-red-100' : (isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-800')}`}
-                        title={streamState.isConnected ? 'End voice session' : 'Start voice session'}
+                        className={`flex items-center justify-center w-9 h-9 rounded-full font-medium transition-all ${
+                          streamState.isStreaming && !streamState.isConnected
+                            ? 'bg-yellow-100 text-yellow-600 ring-1 ring-yellow-200 cursor-wait'
+                            : streamState.isConnected
+                              ? 'bg-red-50 text-red-600 ring-1 ring-red-100'
+                              : (isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-800')
+                        }`}
+                        title={
+                          streamState.isStreaming && !streamState.isConnected
+                            ? 'Connecting...'
+                            : streamState.isConnected
+                              ? 'End voice session'
+                              : 'Start voice session'
+                        }
                     >
-                        {streamState.isConnected ? (
+                        {streamState.isStreaming && !streamState.isConnected ? (
+                            <Loader2 size={16} className="animate-spin" />
+                        ) : streamState.isConnected ? (
                             <span className="relative flex h-2 w-2">
                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                                 <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>

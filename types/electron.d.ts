@@ -110,6 +110,8 @@ interface ElectronFilesAPI {
   // Search operations
   searchInFiles: (pattern: string, dirPath?: string, options?: SearchOptions) => Promise<GitResult<SearchMatch[]>>
   glob: (pattern: string, dirPath?: string) => Promise<GitResult<GlobMatch[]>>
+  findFiles: (searchDir: string, filename: string) => Promise<GitResult<string[]>>
+  lintCode: (code: string, filePath?: string) => Promise<GitResult<{ valid: boolean; errors?: string[] }>>
   // Utility operations
   exists: (path: string) => Promise<FileExistsResult>
   stat: (path: string) => Promise<GitResult<FileStat>>

@@ -562,12 +562,15 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
     isStreaming: false,
     error: null,
   });
-  
+
   const [volume, setVolume] = useState(0);
 
   // Using any for session promise type as LiveSession is not exported
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const aiRef = useRef<GoogleGenAI | null>(null);
+
+  // Track connection state to prevent race conditions
+  const isConnectingRef = useRef(false);
 
   // Helper to safely interact with session (handles errors silently)
   const withSession = useCallback((fn: (session: any) => void) => {
@@ -642,9 +645,20 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
 
     setStreamState(prev => ({ ...prev, isConnected: false, isStreaming: false }));
     setVolume(0);
+    // Reset connecting flag on cleanup
+    if (isConnectingRef.current) {
+      isConnectingRef.current = false;
+    }
   }, []);
 
   const connect = useCallback(async () => {
+    // Prevent concurrent connection attempts
+    if (isConnectingRef.current || sessionPromiseRef.current) {
+      console.log('[useLiveGemini] Connection already in progress, ignoring duplicate connect call');
+      return;
+    }
+    isConnectingRef.current = true;
+
     try {
       setStreamState({ isConnected: false, isStreaming: true, error: null });
 
@@ -937,9 +951,14 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
 
       sessionPromiseRef.current = sessionPromise;
 
+      // Connection attempt complete (session created), reset connecting flag
+      // Note: isConnected is set to true in the onopen callback
+      isConnectingRef.current = false;
+
     } catch (error: unknown) {
       debugLog.liveGemini.error(error);
       setStreamState(prev => ({ ...prev, error: error instanceof Error ? error.message : "Failed to connect" }));
+      isConnectingRef.current = false; // Reset flag on error
       cleanup();
     }
   }, [cleanup, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onApproveChange, onRejectChange, onUndoChange, selectedElement, googleApiKey, selectedModelId]);

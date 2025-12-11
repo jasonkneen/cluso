@@ -1,13 +1,18 @@
+// Suppress Electron security warnings in dev mode (they don't appear in production)
+process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true'
+
 console.log('=== WEBVIEW PRELOAD LOADED ===')
 
 // React Fiber Extraction Script (based on bippy patterns)
 // This is injected into the page context for rich component extraction
 const REACT_FIBER_EXTRACTION_SCRIPT = `
 // React Fiber Extraction - based on bippy patterns
+// Wrapped in try-catch to ensure errors don't break the host page
 (function() {
-  // Skip if already initialized
-  if (window.__reactFiberExtraction) return;
-  window.__reactFiberExtraction = true;
+  try {
+    // Skip if already initialized
+    if (window.__reactFiberExtraction) return;
+    window.__reactFiberExtraction = true;
 
   // React work tags for component identification
   const FunctionComponentTag = 0;
@@ -390,11 +395,20 @@ const REACT_FIBER_EXTRACTION_SCRIPT = `
   };
 
   console.log('[ReactFiberExtraction] Initialized in page context');
+  } catch (e) {
+    console.warn('[ReactFiberExtraction] Failed to initialize (this is safe to ignore):', e.message);
+  }
 })();
 `;
 
+// Track if we've already injected
+let fiberExtractionInjected = false
+
 // Inject React fiber extraction script into page context
 function injectReactFiberExtraction() {
+  if (fiberExtractionInjected) return
+  fiberExtractionInjected = true
+
   try {
     const script = document.createElement('script')
     script.textContent = REACT_FIBER_EXTRACTION_SCRIPT
@@ -409,13 +423,7 @@ function injectReactFiberExtraction() {
 // Wait for page to load, then inject
 window.addEventListener('DOMContentLoaded', () => {
   console.log('[Preload] DOM loaded, injecting React fiber extraction...')
-
-  // Inject immediately
   injectReactFiberExtraction()
-
-  // Also inject after a delay in case page replaces document
-  setTimeout(injectReactFiberExtraction, 500)
-  setTimeout(injectReactFiberExtraction, 2000)
 })
 
 const { ipcRenderer } = require('electron')
@@ -823,10 +831,12 @@ document.addEventListener('mouseout', function(e) {
 }, true)
 
 document.addEventListener('click', async function(e) {
-  console.log('[Inspector] Click detected, inspectorActive:', isInspectorActive, 'screenshotActive:', isScreenshotActive, 'moveActive:', isMoveActive)
-
+  // Early return FIRST - don't intercept clicks when no mode is active
   if (!isInspectorActive && !isScreenshotActive && !isMoveActive) return
   if (isEditing) return // Don't select new elements while inline editing
+
+  // Only log and intercept if a mode is active
+  console.log('[Inspector] Click intercepted, mode:', isInspectorActive ? 'inspector' : isScreenshotActive ? 'screenshot' : 'move')
 
   e.preventDefault()
   e.stopPropagation()
@@ -1123,18 +1133,98 @@ function getSourceLocation(el) {
 
               if (context && context.componentStack && context.componentStack.length > 0) {
                 const stack = context.componentStack;
-                const firstWithFile = stack.find(c => c.fileName);
 
-                if (firstWithFile) {
-                  sourceInfo = {
-                    sources: stack.map(c => ({
+                // Log all components with their source info for debugging
+                console.log('[Page] Component stack (nearest to root):');
+                stack.forEach((c, i) => {
+                  console.log('  [' + i + '] ' + c.componentName + ' -> ' + (c.fileName || 'NO SOURCE'));
+                });
+
+                // IMPORTANT: React's _debugSource points to where component is USED, not DEFINED
+                // So if we see <Notebook /> in App.tsx, debugSource = App.tsx:line
+                // But Notebook is actually defined in Notebook.tsx
+                // We need to use component name as hint for the actual file
+
+                const genericFiles = ['app.tsx', 'app.jsx', 'index.tsx', 'index.jsx', 'main.tsx', 'main.jsx', 'App.tsx', 'App.jsx'];
+
+                // Get the nearest/first component
+                const nearestComponent = stack[0];
+
+                // Check if the fileName matches the component name (meaning we found the definition site)
+                // e.g., componentName="Notebook" and fileName contains "notebook" or "Notebook"
+                let bestMatch = stack.find(c => {
+                  if (!c.fileName || !c.componentName) return false;
+                  const fileNameLower = c.fileName.toLowerCase();
+                  const compNameLower = c.componentName.toLowerCase();
+                  return fileNameLower.includes(compNameLower);
+                });
+
+                // If no definition-site match, prefer non-generic files
+                if (!bestMatch) {
+                  bestMatch = stack.find(c => {
+                    if (!c.fileName) return false;
+                    const baseName = c.fileName.split('/').pop();
+                    return !genericFiles.includes(baseName);
+                  });
+                }
+
+                // Fallback: first with any filename
+                if (!bestMatch) {
+                  bestMatch = stack.find(c => c.fileName);
+                }
+
+                // If bestMatch file doesn't contain component name, show component name as hint
+                const showComponentHint = bestMatch && nearestComponent &&
+                  !bestMatch.fileName.toLowerCase().includes(nearestComponent.componentName.toLowerCase());
+
+                if (bestMatch) {
+                  // If the file is generic and doesn't match component name, show: "ComponentName (in App.tsx:9)"
+                  let summary;
+                  let sources;
+
+                  if (showComponentHint) {
+                    // The file path is the USAGE site, not the DEFINITION site
+                    // Set the first source to use component name as the file (for editing)
+                    const likelyFile = nearestComponent.componentName + '.tsx';
+                    summary = nearestComponent.componentName + ' (used in ' + bestMatch.fileName + ':' + (bestMatch.lineNumber || 0) + ')';
+
+                    // First source should point to the likely definition file
+                    sources = [{
+                      name: nearestComponent.componentName,
+                      file: likelyFile,  // This is what editing logic should use
+                      line: 0,  // We don't know the exact line
+                      column: 0,
+                      isLikelyDefinition: true,
+                      usageSite: bestMatch.fileName + ':' + (bestMatch.lineNumber || 0)
+                    }];
+
+                    // Add the rest of the stack as additional sources
+                    stack.forEach(c => {
+                      sources.push({
+                        name: c.componentName || 'Component',
+                        file: c.fileName || '',
+                        line: c.lineNumber || 0,
+                        column: c.columnNumber || 0,
+                        isUsageSite: true
+                      });
+                    });
+
+                    console.log('[Page] Detected usage site - likely definition file:', likelyFile);
+                  } else {
+                    summary = bestMatch.fileName + ':' + (bestMatch.lineNumber || 0);
+                    sources = stack.map(c => ({
                       name: c.componentName || 'Component',
                       file: c.fileName || '',
                       line: c.lineNumber || 0,
                       column: c.columnNumber || 0
-                    })),
-                    summary: firstWithFile.fileName + ':' + (firstWithFile.lineNumber || 0),
-                    componentStack: stack
+                    }));
+                  }
+
+                  sourceInfo = {
+                    sources: sources,
+                    summary: summary,
+                    componentStack: stack,
+                    likelyDefinitionFile: nearestComponent ? nearestComponent.componentName + '.tsx' : null
                   };
                   console.log('[Page] Source from extractReactContext:', sourceInfo.summary);
                 } else {

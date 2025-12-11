@@ -117,6 +117,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Search operations
     searchInFiles: (pattern, dirPath, options) => ipcRenderer.invoke('files:searchInFiles', pattern, dirPath, options),
     glob: (pattern, dirPath) => ipcRenderer.invoke('files:glob', pattern, dirPath),
+    findFiles: (searchDir, filename) => ipcRenderer.invoke('files:findFiles', searchDir, filename),
+    lintCode: (code, filePath) => ipcRenderer.invoke('files:lintCode', code, filePath),
     // Utility operations
     exists: (path) => ipcRenderer.invoke('files:exists', path),
     stat: (path) => ipcRenderer.invoke('files:stat', path),

@@ -39,6 +39,118 @@ const HERO_PLACEHOLDER =
   'https://images.unsplash.com/photo-1503264116251-35a269479413?auto=format&fit=crop&w=1600&q=80'
 
 /**
+ * Lint code using Electron's IPC (uses ESLint in main process)
+ * Returns { valid: true } or { valid: false, errors: string[] }
+ */
+async function lintCodeSnippet(code: string, filePath?: string): Promise<{ valid: boolean; errors?: string[] }> {
+  // Try Electron IPC first (uses ESLint in main process)
+  if (window.electronAPI?.files?.lintCode) {
+    try {
+      const result = await window.electronAPI.files.lintCode(code, filePath)
+      if (result.success) {
+        return { valid: result.data?.valid ?? true, errors: result.data?.errors }
+      }
+      // If linting failed to run, log but don't block
+      console.log('[Source Patch] Lint IPC call failed:', result.error)
+    } catch (error) {
+      console.log('[Source Patch] Lint exception:', error)
+    }
+  }
+
+  // Fallback: skip linting if not available
+  return { valid: true }
+}
+
+/**
+ * Validates JSX structure for obvious syntax errors
+ * Returns { valid: true } or { valid: false, error: string }
+ */
+function validateJsxStructure(code: string): { valid: boolean; error?: string } {
+  const lines = code.split('\n')
+
+  // Check 1: Orphaned props after closing tags
+  // Pattern: `/>` or `</...>` followed by lines with prop-like patterns `propName={...}` or `propName="..."`
+  for (let i = 0; i < lines.length - 1; i++) {
+    const line = lines[i].trim()
+    const nextLine = lines[i + 1]?.trim() || ''
+
+    // Check if current line ends a tag
+    const endsTag = /\/>$/.test(line) || /<\/\w+>$/.test(line) || /^\s*\);\s*$/.test(line) || /^\s*\}\s*$/.test(line)
+
+    if (endsTag) {
+      // Check if next non-empty line looks like an orphaned prop
+      let j = i + 1
+      while (j < lines.length && lines[j].trim() === '') j++
+      const nextNonEmpty = lines[j]?.trim() || ''
+
+      // Orphaned prop pattern: starts with prop-like syntax without a tag
+      const orphanedPropPattern = /^\w+\s*=\s*[\{'"]/
+      const startsWithTag = /^<\w+/.test(nextNonEmpty)
+      const isClosingBrace = /^[}\])];?$/.test(nextNonEmpty)
+      const isExportReturn = /^(export|return|const|let|var|function|import)/.test(nextNonEmpty)
+
+      if (orphanedPropPattern.test(nextNonEmpty) && !startsWithTag && !isClosingBrace && !isExportReturn) {
+        return {
+          valid: false,
+          error: `Orphaned prop after closing tag at line ${i + 1}: "${nextNonEmpty.substring(0, 50)}"`
+        }
+      }
+    }
+  }
+
+  // Check 2: Mismatched JSX brackets - basic count check
+  let openBraces = 0
+  let openParens = 0
+  let openAngles = 0 // For JSX tags
+  let inString = false
+  let stringChar = ''
+
+  for (const char of code) {
+    // Track string state (simplified - doesn't handle template literals perfectly)
+    if ((char === '"' || char === "'" || char === '`') && !inString) {
+      inString = true
+      stringChar = char
+    } else if (char === stringChar && inString) {
+      inString = false
+      stringChar = ''
+    }
+
+    if (!inString) {
+      if (char === '{') openBraces++
+      if (char === '}') openBraces--
+      if (char === '(') openParens++
+      if (char === ')') openParens--
+    }
+
+    // Early exit on severe imbalance
+    if (openBraces < -5 || openParens < -5) {
+      return { valid: false, error: `Severely mismatched brackets: braces=${openBraces}, parens=${openParens}` }
+    }
+  }
+
+  // Allow slight imbalance (snippet may not include full scope) but catch severe issues
+  if (Math.abs(openBraces) > 10) {
+    return { valid: false, error: `Mismatched braces: ${openBraces} unclosed` }
+  }
+  if (Math.abs(openParens) > 10) {
+    return { valid: false, error: `Mismatched parentheses: ${openParens} unclosed` }
+  }
+
+  // Check 3: Detect obviously truncated/malformed output
+  const lastLine = lines[lines.length - 1]?.trim() || ''
+  const truncatedPatterns = [
+    /^[a-zA-Z_$][a-zA-Z0-9_$]*=$/, // Ends with prop=
+    /^\.\.\.$/, // Ends with ...
+    /^\/\/.*TODO/i, // Ends with TODO comment
+  ]
+  if (truncatedPatterns.some(p => p.test(lastLine))) {
+    return { valid: false, error: `Output appears truncated: "${lastLine}"` }
+  }
+
+  return { valid: true }
+}
+
+/**
  * Use Morph Fast Apply (morph-v3-fast) to merge edits server-side.
  * Falls back to null on any failure so the caller can continue with other strategies.
  */
@@ -171,11 +283,13 @@ async function selectMorphModel(input: string, apiKeyOverride?: string): Promise
 
 /**
  * Resolves source map paths to filesystem paths
+ * Supports searching for component files when only filename is provided
+ * Search order (fast to slow): glob → findFiles
  */
-function resolveFilePath(
+async function resolveFilePath(
   filePath: string,
   projectPath?: string
-): { resolved: string | null; error?: string } {
+): Promise<{ resolved: string | null; error?: string; searchedPaths?: string[] }> {
   // Path needs resolution if it's not already an absolute filesystem path
   const isAbsoluteFilesystemPath =
     filePath.startsWith('/Users/') ||
@@ -202,7 +316,72 @@ function resolveFilePath(
 
   if (!isAbsoluteFilesystemPath) {
     if (projectPath) {
-      return { resolved: `${projectPath}/${relativePath}` }
+      const directPath = `${projectPath}/${relativePath}`
+
+      // Check if it's just a filename (no directory) - need to search for it
+      const isJustFilename = !relativePath.includes('/')
+
+      if (isJustFilename) {
+        console.log('[Source Patch] Path is just filename, searching for:', relativePath)
+
+        // FAST PATH 1: Use glob (ripgrep-based, very fast)
+        if (window.electronAPI?.files?.glob) {
+          console.log('[Source Patch] Trying glob search...')
+          const globResult = await window.electronAPI.files.glob(`**/${relativePath}`, projectPath)
+
+          if (globResult.success && globResult.data && globResult.data.length > 0) {
+            // Filter out node_modules, .git, dist, build
+            const validPaths = globResult.data
+              .map((g: { path: string }) => g.path)
+              .filter((p: string) =>
+                !p.includes('node_modules') &&
+                !p.includes('.git') &&
+                !p.includes('/dist/') &&
+                !p.includes('/build/')
+              )
+
+            // Prefer paths in src/components or src/ directories
+            const preferred = validPaths.find(
+              (p: string) => p.includes('/src/components/') || p.includes('/components/')
+            ) || validPaths.find(
+              (p: string) => p.includes('/src/')
+            ) || validPaths[0]
+
+            if (preferred) {
+              console.log('[Source Patch] Found file via glob:', preferred)
+              return { resolved: preferred, searchedPaths: validPaths }
+            }
+          }
+          console.log('[Source Patch] Glob found no matches')
+        }
+
+        // SLOW PATH: Use recursive findFiles as fallback
+        if (window.electronAPI?.files?.findFiles) {
+          console.log('[Source Patch] Trying findFiles search...')
+          const searchResult = await window.electronAPI.files.findFiles(projectPath, relativePath)
+
+          if (searchResult.success && searchResult.data && searchResult.data.length > 0) {
+            const validPaths = searchResult.data.filter(
+              (p: string) => !p.includes('node_modules') && !p.includes('.git')
+            )
+
+            const preferred = validPaths.find(
+              (p: string) => p.includes('/src/components/') || p.includes('/components/')
+            ) || validPaths.find(
+              (p: string) => p.includes('/src/')
+            ) || validPaths[0]
+
+            if (preferred) {
+              console.log('[Source Patch] Found file via findFiles:', preferred)
+              return { resolved: preferred, searchedPaths: validPaths }
+            }
+          }
+        }
+
+        console.log('[Source Patch] All file searches failed, trying direct path')
+      }
+
+      return { resolved: directPath }
     }
     return { resolved: null, error: 'No projectPath provided for relative path' }
   }
@@ -492,6 +671,22 @@ async function tryFastApply(
     return { success: false, error: 'Model output did not include the targeted element' }
   }
 
+  // Validate JSX structure
+  const jsxValidationResult = validateJsxStructure(fastResult.code)
+  if (!jsxValidationResult.valid) {
+    console.log('[Source Patch] Fast Apply returned BROKEN JSX - rejecting')
+    console.log('[Source Patch] Validation error:', jsxValidationResult.error)
+    return { success: false, error: `Broken JSX: ${jsxValidationResult.error}` }
+  }
+
+  // Lint the generated code (best effort - don't block if linting unavailable)
+  const lintResult = await lintCodeSnippet(fastResult.code)
+  if (!lintResult.valid && lintResult.errors && lintResult.errors.length > 0) {
+    console.log('[Source Patch] Fast Apply returned code with lint errors - rejecting')
+    console.log('[Source Patch] Lint errors:', lintResult.errors.slice(0, 5))
+    return { success: false, error: `Lint errors: ${lintResult.errors[0]}` }
+  }
+
   return {
     success: true,
     code: fastResult.code,
@@ -597,7 +792,15 @@ ${hasCssChanges ? '5' : '3'}. Output ONLY the modified snippet (lines ${startLin
 ${hasCssChanges ? '6' : '4'}. Preserve exact indentation and formatting
 ${hasCssChanges ? '7' : '5'}. CRITICAL: Do NOT duplicate elements - modify in-place`
 
-  const systemPrompt = `You are a React/TypeScript code modifier. Given a code snippet and requested changes, output ONLY the modified snippet. Do not include explanations, markdown code blocks, or any other text - just the raw code.`
+  const systemPrompt = `You are a React/TypeScript code modifier. Given a code snippet and requested changes, output ONLY the modified snippet.
+
+CRITICAL RULES:
+1. Output ONLY valid JSX/TSX code - no explanations, no markdown code blocks
+2. NEVER output orphaned props (props that aren't inside a tag)
+3. NEVER close a tag and then output props - props MUST be inside the opening tag
+4. Maintain proper JSX structure: all props between < and > or />
+5. If you cannot make the change, output the original code unchanged
+6. The output must be syntactically valid TypeScript/JSX`
 
   const userPrompt = `Source file: ${sourceFile}
 ${lineNumberReliable ? `Target line in original file: ${targetLine}` : '(Line number from source map may be inaccurate - search by element characteristics)'}
@@ -677,6 +880,23 @@ Output the modified code snippet:`
       return null
     }
 
+    // Validate JSX structure - check for obvious syntax errors
+    const jsxValidationResult = validateJsxStructure(patchedSnippet)
+    if (!jsxValidationResult.valid) {
+      console.log('[Source Patch] AI returned BROKEN JSX - aborting')
+      console.log('[Source Patch] Validation error:', jsxValidationResult.error)
+      console.log('[Source Patch] Snippet preview:', patchedSnippet.substring(0, 300))
+      return null
+    }
+
+    // Lint the generated code for additional validation
+    const lintResult = await lintCodeSnippet(patchedSnippet, sourceFile)
+    if (!lintResult.valid && lintResult.errors && lintResult.errors.length > 0) {
+      console.log('[Source Patch] AI returned code with lint errors - aborting')
+      console.log('[Source Patch] Lint errors:', lintResult.errors.slice(0, 5))
+      return null
+    }
+
     return patchedSnippet
   } catch (error) {
     console.error('[Source Patch] EXCEPTION during AI SDK generation:', error)
@@ -727,8 +947,11 @@ export async function generateSourcePatch(
   let filePath = source.file
   console.log('[Source Patch] Original source file:', filePath, 'line:', source.line)
 
-  // Resolve path
-  const { resolved, error: pathError } = resolveFilePath(filePath, projectPath)
+  // Resolve path (now async to support file searching)
+  const { resolved, error: pathError, searchedPaths } = await resolveFilePath(filePath, projectPath)
+  if (searchedPaths && searchedPaths.length > 1) {
+    console.log('[Source Patch] Multiple files found:', searchedPaths)
+  }
 
   if (!resolved) {
     // Try getCwd fallback
@@ -899,19 +1122,33 @@ export async function generateSourcePatch(
     )
 
     if (morphResult.success && morphResult.code) {
-      const patchedLines = morphResult.code.split('\n')
-      const beforeLines = lines.slice(0, fastApplyStartLine)
-      const afterLines = lines.slice(fastApplyEndLine)
-      const fullPatchedContent = [...beforeLines, ...patchedLines, ...afterLines].join('\n')
+      // Validate JSX structure before accepting
+      const jsxValidationResult = validateJsxStructure(morphResult.code)
+      if (!jsxValidationResult.valid) {
+        console.log('[Source Patch] Morph Fast Apply returned BROKEN JSX - rejecting')
+        console.log('[Source Patch] Validation error:', jsxValidationResult.error)
+      } else {
+        // Lint the generated code
+        const lintResult = await lintCodeSnippet(morphResult.code, filePath)
+        if (!lintResult.valid && lintResult.errors && lintResult.errors.length > 0) {
+          console.log('[Source Patch] Morph Fast Apply returned code with lint errors - rejecting')
+          console.log('[Source Patch] Lint errors:', lintResult.errors.slice(0, 5))
+        } else {
+          const patchedLines = morphResult.code.split('\n')
+          const beforeLines = lines.slice(0, fastApplyStartLine)
+          const afterLines = lines.slice(fastApplyEndLine)
+          const fullPatchedContent = [...beforeLines, ...patchedLines, ...afterLines].join('\n')
 
-      if (fullPatchedContent !== originalContent) {
-        console.log('[Source Patch] Morph Fast Apply produced a patch')
-        return {
-          filePath,
-          originalContent,
-          patchedContent: fullPatchedContent,
-          lineNumber: source.line,
-          generatedBy: 'fast-apply',
+          if (fullPatchedContent !== originalContent) {
+            console.log('[Source Patch] Morph Fast Apply produced a patch')
+            return {
+              filePath,
+              originalContent,
+              patchedContent: fullPatchedContent,
+              lineNumber: source.line,
+              generatedBy: 'fast-apply',
+            }
+          }
         }
       }
     }
