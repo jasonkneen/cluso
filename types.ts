@@ -49,6 +49,8 @@ export interface ComponentSource {
 export interface ElementSourceInfo {
   sources: ComponentSource[];
   summary: string; // e.g., "App.tsx (45-120)"
+  isRSC?: boolean; // True if source info came from RSC payload (Server Components)
+  componentStack?: ReactComponentInfo[];
 }
 
 /**

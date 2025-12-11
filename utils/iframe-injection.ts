@@ -1,4 +1,4 @@
-import { REACT_FIBER_EXTRACTION_SCRIPT } from './react-fiber-extraction'
+import { REACT_FIBER_EXTRACTION_SCRIPT, RSC_EXTRACTION_SCRIPT } from './react-fiber-extraction'
 
 // The parent origin is set dynamically when the inspector is activated
 // This prevents broadcasting messages to arbitrary windows
@@ -103,6 +103,9 @@ export const INJECTION_SCRIPT = `
   // --- React Fiber Extraction (based on bippy patterns) ---
   ${REACT_FIBER_EXTRACTION_SCRIPT}
 
+  // --- RSC (React Server Components) Extraction ---
+  ${RSC_EXTRACTION_SCRIPT}
+
   (function() {
     let currentSelected = null;
     let isInspectorActive = false;
@@ -201,22 +204,55 @@ export const INJECTION_SCRIPT = `
       if (window.extractReactContext) {
         try {
           const reactContext = window.extractReactContext(el);
-          return {
-            ...basicInfo,
-            // React component info
-            componentStack: reactContext.componentStack || [],
-            componentName: reactContext.componentStack?.[0]?.componentName || null,
-            fileName: reactContext.componentStack?.[0]?.fileName || null,
-            lineNumber: reactContext.componentStack?.[0]?.lineNumber || null,
-            columnNumber: reactContext.componentStack?.[0]?.columnNumber || null,
-            // Full context string (like react-grab format)
-            fullContext: window.formatElementContext ? window.formatElementContext(el) : null,
-            xpath: reactContext.xpath,
-            attributes: reactContext.attributes,
-            hasFiber: reactContext.hasFiber
-          };
+
+          // If we got a fiber with component info, use it
+          if (reactContext.hasFiber && reactContext.componentStack?.length > 0) {
+            return {
+              ...basicInfo,
+              // React component info
+              componentStack: reactContext.componentStack || [],
+              componentName: reactContext.componentStack?.[0]?.componentName || null,
+              fileName: reactContext.componentStack?.[0]?.fileName || null,
+              lineNumber: reactContext.componentStack?.[0]?.lineNumber || null,
+              columnNumber: reactContext.componentStack?.[0]?.columnNumber || null,
+              // Full context string (like react-grab format)
+              fullContext: window.formatElementContext ? window.formatElementContext(el) : null,
+              xpath: reactContext.xpath,
+              attributes: reactContext.attributes,
+              hasFiber: true,
+              isRSC: false
+            };
+          }
         } catch (e) {
           console.warn('[Inspector] Failed to extract React context:', e);
+        }
+      }
+
+      // Fallback: Try RSC extraction for Server Components (Next.js App Router)
+      if (window.getRSCSourceForElement) {
+        try {
+          const rscSource = window.getRSCSourceForElement(el);
+          if (rscSource && rscSource.sources?.length > 0) {
+            return {
+              ...basicInfo,
+              componentStack: rscSource.componentStack || [],
+              componentName: rscSource.sources[0]?.name || null,
+              fileName: rscSource.sources[0]?.file || null,
+              lineNumber: rscSource.sources[0]?.line || null,
+              columnNumber: rscSource.sources[0]?.column || null,
+              fullContext: rscSource.summary || null,
+              xpath: window.getXPath ? window.getXPath(el) : null,
+              attributes: Array.from(el.attributes || []).reduce((acc, attr) => {
+                acc[attr.name] = attr.value;
+                return acc;
+              }, {}),
+              hasFiber: false,
+              isRSC: true,
+              rscMatched: rscSource.matched || false
+            };
+          }
+        } catch (e) {
+          console.warn('[Inspector] Failed to extract RSC source:', e);
         }
       }
 

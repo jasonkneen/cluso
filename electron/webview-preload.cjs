@@ -1217,34 +1217,246 @@ function getSourceLocation(el) {
 
           // FALLBACK 4: For Next.js Server Components, try to find source info from RSC payload
           // RSC payloads contain component mappings in script tags like:
-          // 13:[[\"RootLayout\",\"webpack-internal:///(rsc)/./app/layout.tsx\",27,87,26,1,false]]
+          // self.__next_f.push([1,"13:[[\"RootLayout\",\"webpack-internal:///(rsc)/./app/layout.tsx\",27,87,26,1,false]]"])
           if (!sourceInfo) {
             try {
-              // Get nearest data attribute that might indicate component
-              let current = el;
-              let depth = 0;
-              while (current && depth < 10 && !sourceInfo) {
-                // Check for any attributes that might give us hints
-                const attrs = Array.from(current.attributes || []);
-                for (const attr of attrs) {
-                  // Look for data-* attributes that might indicate component
-                  if (attr.name.startsWith('data-') && attr.value) {
-                    // Just log for now to help debug
-                    if (attr.name !== 'data-source-id' && attr.name !== 'data-source-info') {
-                      console.log('[Page] Found data attr:', attr.name, '=', attr.value.slice(0, 50));
+              console.log('[RSC] Attempting RSC payload extraction...');
+
+              // Parse RSC payloads from __next_f
+              const rscComponents = [];
+
+              if (window.__next_f && Array.isArray(window.__next_f)) {
+                console.log('[RSC] Found __next_f with', window.__next_f.length, 'entries');
+
+                for (const entry of window.__next_f) {
+                  if (!Array.isArray(entry) || entry.length < 2) continue;
+
+                  const payload = entry[1];
+                  if (typeof payload !== 'string') continue;
+
+                  // Parse component array patterns: [[\"Name\",\"file\",line,col,...]]
+                  // The format is: id:[["ComponentName","webpack-internal:///(rsc)/./path.tsx",line,col,endLine,endCol,isClient]]
+                  const componentRegex = /\\[\\[?\\"([A-Z][a-zA-Z0-9_]*)\\",\\"([^"]+)\\",(\\d+),(\\d+)/g;
+                  let match;
+
+                  while ((match = componentRegex.exec(payload)) !== null) {
+                    const [, componentName, filePath, line, col] = match;
+
+                    // Skip internal Next.js components
+                    if (componentName.startsWith('_') ||
+                        componentName === 'html' ||
+                        componentName === 'body' ||
+                        filePath.includes('node_modules')) {
+                      continue;
+                    }
+
+                    // Normalize the file path
+                    let normalizedPath = filePath;
+                    const prefixes = [
+                      'webpack-internal:///(rsc)/',
+                      'webpack-internal:///(ssr)/',
+                      'webpack-internal:///(app-pages-browser)/',
+                      'webpack://',
+                      'rsc://React/Server/',
+                    ];
+                    for (const prefix of prefixes) {
+                      if (normalizedPath.startsWith(prefix)) {
+                        normalizedPath = normalizedPath.slice(prefix.length);
+                      }
+                    }
+
+                    // Remove query params
+                    const queryIndex = normalizedPath.indexOf('?');
+                    if (queryIndex !== -1) {
+                      normalizedPath = normalizedPath.slice(0, queryIndex);
+                    }
+
+                    rscComponents.push({
+                      name: componentName,
+                      file: normalizedPath,
+                      line: parseInt(line, 10),
+                      column: parseInt(col, 10)
+                    });
+                  }
+                }
+              }
+
+              // Also try parsing script tags with RSC payloads
+              if (rscComponents.length === 0) {
+                const scripts = document.querySelectorAll('script');
+                for (const script of scripts) {
+                  const text = script.textContent || '';
+
+                  // Look for self.__next_f.push patterns
+                  if (text.includes('__next_f.push')) {
+                    const componentRegex = /\\[\\[?\\"([A-Z][a-zA-Z0-9_]*)\\",\\"([^"]+)\\",(\\d+),(\\d+)/g;
+                    let match;
+
+                    while ((match = componentRegex.exec(text)) !== null) {
+                      const [, componentName, filePath, line, col] = match;
+
+                      if (componentName.startsWith('_') ||
+                          componentName === 'html' ||
+                          componentName === 'body' ||
+                          filePath.includes('node_modules')) {
+                        continue;
+                      }
+
+                      let normalizedPath = filePath;
+                      const prefixes = [
+                        'webpack-internal:///(rsc)/',
+                        'webpack-internal:///(ssr)/',
+                        'webpack-internal:///(app-pages-browser)/',
+                        'webpack://',
+                        'rsc://React/Server/',
+                      ];
+                      for (const prefix of prefixes) {
+                        if (normalizedPath.startsWith(prefix)) {
+                          normalizedPath = normalizedPath.slice(prefix.length);
+                        }
+                      }
+
+                      const queryIndex = normalizedPath.indexOf('?');
+                      if (queryIndex !== -1) {
+                        normalizedPath = normalizedPath.slice(0, queryIndex);
+                      }
+
+                      rscComponents.push({
+                        name: componentName,
+                        file: normalizedPath,
+                        line: parseInt(line, 10),
+                        column: parseInt(col, 10)
+                      });
                     }
                   }
                 }
-                current = current.parentElement;
-                depth++;
               }
 
-              // Note: This app uses Next.js Server Components which don't have React fibers
-              // The HTML is rendered on the server, so fiber extraction won't work
-              // For full component source info, the app would need to integrate bippy or similar
-              console.log('[Page] Note: Server Component detected - no fiber available');
+              console.log('[RSC] Found', rscComponents.length, 'component mappings');
+
+              if (rscComponents.length > 0) {
+                // Try to match element to a component based on:
+                // 1. Element's data attributes
+                // 2. Element's class names that might match component names
+                // 3. Element's tag/role structure
+
+                // Get element context for matching
+                const tagName = el.tagName.toLowerCase();
+                const className = el.className || '';
+                const classNames = typeof className === 'string' ? className.split(/\\s+/) : [];
+
+                // Check for data attributes
+                let matchedComponent = null;
+                let current = el;
+                let depth = 0;
+
+                while (current && depth < 10 && !matchedComponent) {
+                  const attrs = Array.from(current.attributes || []);
+
+                  for (const attr of attrs) {
+                    // Check for common React/Next.js patterns in data attributes
+                    if (attr.name.startsWith('data-') && attr.value) {
+                      const attrValue = attr.value.toLowerCase();
+
+                      // Try to find a component whose name matches the data attribute
+                      for (const comp of rscComponents) {
+                        const compNameLower = comp.name.toLowerCase();
+                        if (attrValue.includes(compNameLower) ||
+                            attr.name.toLowerCase().includes(compNameLower)) {
+                          matchedComponent = comp;
+                          console.log('[RSC] Matched via data attr:', attr.name, '->', comp.name);
+                          break;
+                        }
+                      }
+                      if (matchedComponent) break;
+                    }
+                  }
+
+                  // Try matching by class name
+                  if (!matchedComponent) {
+                    const currentClassNames = typeof current.className === 'string'
+                      ? current.className.split(/\\s+/)
+                      : [];
+
+                    for (const cls of currentClassNames) {
+                      // Convert class name to potential component name (kebab-case to PascalCase)
+                      const potentialName = cls
+                        .split('-')
+                        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+                        .join('');
+
+                      for (const comp of rscComponents) {
+                        if (comp.name === potentialName ||
+                            comp.name.toLowerCase() === cls.toLowerCase()) {
+                          matchedComponent = comp;
+                          console.log('[RSC] Matched via class:', cls, '->', comp.name);
+                          break;
+                        }
+                      }
+                      if (matchedComponent) break;
+                    }
+                  }
+
+                  current = current.parentElement;
+                  depth++;
+                }
+
+                // If no direct match, provide the component hierarchy from RSC
+                if (!matchedComponent && rscComponents.length > 0) {
+                  // Return the component stack - most specific components first
+                  // Filter to only user-defined components
+                  const userComponents = rscComponents.filter(c =>
+                    !c.name.startsWith('_') &&
+                    c.file &&
+                    c.file.includes('/') &&
+                    !c.file.includes('node_modules')
+                  );
+
+                  if (userComponents.length > 0) {
+                    // Get unique components by name (first occurrence = most specific)
+                    const seen = new Set();
+                    const uniqueComponents = [];
+                    for (const comp of userComponents) {
+                      if (!seen.has(comp.name)) {
+                        seen.add(comp.name);
+                        uniqueComponents.push(comp);
+                      }
+                    }
+
+                    sourceInfo = {
+                      sources: uniqueComponents.slice(0, 5).map(c => ({
+                        name: c.name,
+                        file: c.file,
+                        line: c.line,
+                        column: c.column
+                      })),
+                      summary: uniqueComponents[0].file + ':' + uniqueComponents[0].line,
+                      componentStack: uniqueComponents.slice(0, 5),
+                      isRSC: true
+                    };
+                    console.log('[RSC] Source from RSC payload (hierarchy):', sourceInfo.summary);
+                  }
+                }
+
+                if (matchedComponent) {
+                  sourceInfo = {
+                    sources: [{
+                      name: matchedComponent.name,
+                      file: matchedComponent.file,
+                      line: matchedComponent.line,
+                      column: matchedComponent.column
+                    }],
+                    summary: matchedComponent.file + ':' + matchedComponent.line,
+                    componentStack: [matchedComponent],
+                    isRSC: true
+                  };
+                  console.log('[RSC] Source from RSC payload (matched):', sourceInfo.summary);
+                }
+              } else {
+                console.log('[RSC] No RSC payload found - this may be a non-Next.js app or production build');
+              }
             } catch (e) {
-              console.log('[Page] RSC fallback error:', e.message);
+              console.log('[RSC] RSC fallback error:', e.message);
             }
           }
 

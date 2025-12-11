@@ -405,6 +405,207 @@ export const REACT_FIBER_EXTRACTION_SCRIPT = `
 `;
 
 /**
+ * RSC (React Server Components) Payload Extraction Script
+ * For Next.js 13+ apps with App Router that use Server Components
+ *
+ * This extracts component-to-source mappings from the RSC payloads
+ * that Next.js includes in inline scripts.
+ */
+export const RSC_EXTRACTION_SCRIPT = `
+(function() {
+  // Skip if already initialized
+  if (window.__rscExtraction) return;
+  window.__rscExtraction = true;
+
+  /**
+   * Parse RSC payloads and extract component source mappings
+   * Returns an array of { name, file, line, column } objects
+   */
+  window.extractRSCComponents = function() {
+    const components = [];
+    const prefixes = [
+      'webpack-internal:///(rsc)/',
+      'webpack-internal:///(ssr)/',
+      'webpack-internal:///(app-pages-browser)/',
+      'webpack://',
+      'rsc://React/Server/',
+    ];
+
+    // Helper to normalize file path
+    function normalizeFilePath(filePath) {
+      let normalized = filePath;
+      for (const prefix of prefixes) {
+        if (normalized.startsWith(prefix)) {
+          normalized = normalized.slice(prefix.length);
+        }
+      }
+      const queryIndex = normalized.indexOf('?');
+      if (queryIndex !== -1) {
+        normalized = normalized.slice(0, queryIndex);
+      }
+      return normalized;
+    }
+
+    // Parse component regex pattern
+    const componentRegex = /\\[\\[?\\"([A-Z][a-zA-Z0-9_]*)\\",\\"([^"]+)\\",(\\d+),(\\d+)/g;
+
+    // Method 1: Parse from window.__next_f
+    if (window.__next_f && Array.isArray(window.__next_f)) {
+      for (const entry of window.__next_f) {
+        if (!Array.isArray(entry) || entry.length < 2) continue;
+        const payload = entry[1];
+        if (typeof payload !== 'string') continue;
+
+        let match;
+        while ((match = componentRegex.exec(payload)) !== null) {
+          const [, componentName, filePath, line, col] = match;
+          if (componentName.startsWith('_') ||
+              componentName === 'html' ||
+              componentName === 'body' ||
+              filePath.includes('node_modules')) {
+            continue;
+          }
+          components.push({
+            name: componentName,
+            file: normalizeFilePath(filePath),
+            line: parseInt(line, 10),
+            column: parseInt(col, 10)
+          });
+        }
+      }
+    }
+
+    // Method 2: Parse from script tags if __next_f didn't work
+    if (components.length === 0) {
+      const scripts = document.querySelectorAll('script');
+      for (const script of scripts) {
+        const text = script.textContent || '';
+        if (!text.includes('__next_f.push')) continue;
+
+        let match;
+        while ((match = componentRegex.exec(text)) !== null) {
+          const [, componentName, filePath, line, col] = match;
+          if (componentName.startsWith('_') ||
+              componentName === 'html' ||
+              componentName === 'body' ||
+              filePath.includes('node_modules')) {
+            continue;
+          }
+          components.push({
+            name: componentName,
+            file: normalizeFilePath(filePath),
+            line: parseInt(line, 10),
+            column: parseInt(col, 10)
+          });
+        }
+      }
+    }
+
+    return components;
+  };
+
+  /**
+   * Try to find RSC source info for an element
+   * Uses class names, data attributes, and structure to match
+   */
+  window.getRSCSourceForElement = function(element) {
+    const rscComponents = window.extractRSCComponents();
+    if (rscComponents.length === 0) return null;
+
+    let matchedComponent = null;
+    let current = element;
+    let depth = 0;
+
+    while (current && depth < 10 && !matchedComponent) {
+      // Check data attributes
+      const attrs = Array.from(current.attributes || []);
+      for (const attr of attrs) {
+        if (attr.name.startsWith('data-') && attr.value) {
+          const attrValue = attr.value.toLowerCase();
+          for (const comp of rscComponents) {
+            const compNameLower = comp.name.toLowerCase();
+            if (attrValue.includes(compNameLower) ||
+                attr.name.toLowerCase().includes(compNameLower)) {
+              matchedComponent = comp;
+              break;
+            }
+          }
+          if (matchedComponent) break;
+        }
+      }
+
+      // Check class names
+      if (!matchedComponent) {
+        const classNames = typeof current.className === 'string'
+          ? current.className.split(/\\s+/)
+          : [];
+        for (const cls of classNames) {
+          const potentialName = cls
+            .split('-')
+            .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+            .join('');
+          for (const comp of rscComponents) {
+            if (comp.name === potentialName ||
+                comp.name.toLowerCase() === cls.toLowerCase()) {
+              matchedComponent = comp;
+              break;
+            }
+          }
+          if (matchedComponent) break;
+        }
+      }
+
+      current = current.parentElement;
+      depth++;
+    }
+
+    // If no direct match, return the component hierarchy
+    if (!matchedComponent && rscComponents.length > 0) {
+      const userComponents = rscComponents.filter(c =>
+        !c.name.startsWith('_') &&
+        c.file &&
+        c.file.includes('/') &&
+        !c.file.includes('node_modules')
+      );
+
+      if (userComponents.length > 0) {
+        const seen = new Set();
+        const uniqueComponents = [];
+        for (const comp of userComponents) {
+          if (!seen.has(comp.name)) {
+            seen.add(comp.name);
+            uniqueComponents.push(comp);
+          }
+        }
+
+        return {
+          sources: uniqueComponents.slice(0, 5),
+          summary: uniqueComponents[0].file + ':' + uniqueComponents[0].line,
+          componentStack: uniqueComponents.slice(0, 5),
+          isRSC: true,
+          matched: false
+        };
+      }
+    }
+
+    if (matchedComponent) {
+      return {
+        sources: [matchedComponent],
+        summary: matchedComponent.file + ':' + matchedComponent.line,
+        componentStack: [matchedComponent],
+        isRSC: true,
+        matched: true
+      };
+    }
+
+    return null;
+  };
+
+  console.log('[RSCExtraction] Initialized');
+})();
+`;
+
+/**
  * Create a function that can be called to inject the extraction script
  * into a webview or iframe
  */
