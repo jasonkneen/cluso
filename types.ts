@@ -51,6 +51,18 @@ export interface ElementSourceInfo {
   summary: string; // e.g., "App.tsx (45-120)"
 }
 
+/**
+ * React component info extracted from React fiber
+ * Based on bippy/react-grab patterns
+ */
+export interface ReactComponentInfo {
+  componentName: string | null;
+  fileName: string | null;
+  lineNumber: number | null;
+  columnNumber: number | null;
+  isServer?: boolean;
+}
+
 export interface SelectedElement {
   tagName: string;
   text?: string;
@@ -89,6 +101,14 @@ export interface SelectedElement {
     width: number;
     height: number;
   };
+  // React fiber extraction (bippy-based) - rich component context
+  componentStack?: ReactComponentInfo[];
+  componentName?: string | null;
+  fileName?: string | null;
+  lineNumber?: number | null;
+  columnNumber?: number | null;
+  fullContext?: string | null; // Formatted like react-grab output
+  hasFiber?: boolean;
 }
 
 export interface PatchApprovalState {

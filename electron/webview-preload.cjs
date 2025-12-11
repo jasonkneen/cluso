@@ -1,34 +1,421 @@
 console.log('=== WEBVIEW PRELOAD LOADED ===')
 
-// Import bippy for source location tracking
-// Note: We need to access it from the page context, not the isolated preload context
-let bippyApi = null
+// React Fiber Extraction Script (based on bippy patterns)
+// This is injected into the page context for rich component extraction
+const REACT_FIBER_EXTRACTION_SCRIPT = `
+// React Fiber Extraction - based on bippy patterns
+(function() {
+  // Skip if already initialized
+  if (window.__reactFiberExtraction) return;
+  window.__reactFiberExtraction = true;
 
-// Wait for page to load, then access bippy from page context
-window.addEventListener('DOMContentLoaded', () => {
-  console.log('[Preload] DOM loaded, checking for source location API...')
+  // React work tags for component identification
+  const FunctionComponentTag = 0;
+  const ClassComponentTag = 1;
+  const HostComponentTag = 5;
+  const ForwardRefTag = 11;
+  const MemoComponentTag = 14;
+  const SimpleMemoComponentTag = 15;
 
-  // Try to access the page's window object via executeJavaScript
-  setTimeout(() => {
-    try {
-      // Check if source location API is available in page context
-      const script = document.createElement('script')
-      script.textContent = `
-        (function() {
-          if (window.__SOURCE_LOCATION__) {
-            console.log('[Page] Source location API found!');
-            window.__PRELOAD_SOURCE_READY__ = true;
-          } else {
-            console.warn('[Page] Source location API not found');
-          }
-        })();
-      `
-      document.documentElement.appendChild(script)
-      script.remove()
-    } catch (e) {
-      console.error('[Preload] Failed to check source API:', e)
+  // Internal Next.js component names to skip
+  const INTERNAL_COMPONENT_NAMES = new Set([
+    'InnerLayoutRouter', 'RedirectErrorBoundary', 'RedirectBoundary',
+    'HTTPAccessFallbackErrorBoundary', 'HTTPAccessFallbackBoundary',
+    'LoadingBoundary', 'ErrorBoundary', 'InnerScrollAndFocusHandler',
+    'ScrollAndFocusHandler', 'RenderFromTemplateContext', 'OuterLayoutRouter',
+    'body', 'html', 'DevRootHTTPAccessFallbackBoundary',
+    'AppDevOverlayErrorBoundary', 'AppDevOverlay', 'HotReload', 'Router',
+    'ErrorBoundaryHandler', 'AppRouter', 'ServerRoot', 'SegmentStateProvider',
+    'RootErrorBoundary', 'LoadableComponent', 'MotionDOMComponent'
+  ]);
+
+  /**
+   * Get React fiber from a DOM element (or its ancestors)
+   */
+  function getFiberFromElement(element, walkUp = true) {
+    if (!element || typeof element !== 'object') return null;
+
+    // Try to find fiber on this element first
+    const fiber = getFiberDirect(element);
+    if (fiber) return fiber;
+
+    // If not found and walkUp is true, try parent elements
+    if (walkUp && element.parentElement) {
+      let parent = element.parentElement;
+      let depth = 0;
+      while (parent && depth < 10) {
+        const parentFiber = getFiberDirect(parent);
+        if (parentFiber) {
+          console.log('[Fiber] Found fiber on ancestor at depth:', depth + 1);
+          return parentFiber;
+        }
+        parent = parent.parentElement;
+        depth++;
+      }
     }
-  }, 500)
+
+    // Log what keys the element actually has for debugging
+    const keys = Object.getOwnPropertyNames(element);
+    const reactKeys = keys.filter(k => k.includes('react') || k.includes('React') || k.startsWith('__'));
+    if (reactKeys.length > 0) {
+      console.log('[Fiber] Element has special keys but no fiber:', reactKeys);
+    } else {
+      // Log ALL keys that start with __ to help debug
+      const specialKeys = keys.filter(k => k.startsWith('__'));
+      if (specialKeys.length > 0) {
+        console.log('[Fiber] Element __ keys:', specialKeys);
+      } else {
+        console.log('[Fiber] No React keys found on element or ancestors');
+        // Also log if devtools hook has renderers
+        if (window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
+          const hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+          console.log('[Fiber] DevTools hook exists, renderers:', hook.renderers?.size || 0);
+          if (hook.renderers && hook.renderers.size > 0) {
+            for (const [id, renderer] of hook.renderers) {
+              console.log('[Fiber] Renderer', id, ':', Object.keys(renderer).join(', '));
+            }
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Get React fiber directly from a single element (no walking)
+   */
+  function getFiberDirect(element) {
+    if (!element || typeof element !== 'object') return null;
+
+    // Get all own property keys including non-enumerable
+    const keys = Object.getOwnPropertyNames(element);
+
+    // Check for React 16+ fiber keys
+    for (const key of keys) {
+      if (key.startsWith('__reactFiber$') ||
+          key.startsWith('__reactInternalInstance$') ||
+          key.startsWith('__reactContainer$')) {
+        const fiber = element[key];
+        if (fiber) {
+          console.log('[Fiber] Found fiber via key:', key);
+          return fiber;
+        }
+      }
+    }
+
+    // Also check enumerable properties (some React versions)
+    for (const key in element) {
+      if (Object.prototype.hasOwnProperty.call(element, key)) {
+        if (key.startsWith('__reactFiber') ||
+            key.startsWith('__reactInternalInstance') ||
+            key.startsWith('__reactContainer') ||
+            key.startsWith('__reactProps')) {
+          const fiber = element[key];
+          if (fiber && typeof fiber === 'object') {
+            console.log('[Fiber] Found fiber via enumerable key:', key);
+            return fiber;
+          }
+        }
+      }
+    }
+
+    // Check for _reactRootContainer (React 16/17)
+    if ('_reactRootContainer' in element) {
+      const fiber = element._reactRootContainer?._internalRoot?.current?.child;
+      if (fiber) {
+        console.log('[Fiber] Found fiber via _reactRootContainer');
+        return fiber;
+      }
+    }
+
+    // Try React DevTools hook as last resort
+    if (window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
+      const hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+      if (hook.renderers && hook.renderers.size > 0) {
+        for (const [id, renderer] of hook.renderers) {
+          if (renderer.findFiberByHostInstance) {
+            const fiber = renderer.findFiberByHostInstance(element);
+            if (fiber) {
+              console.log('[Fiber] Found fiber via DevTools hook, renderer:', id);
+              return fiber;
+            }
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Get display name from a React component type
+   */
+  function getDisplayName(type) {
+    if (!type) return null;
+    if (typeof type === 'string') return type;
+    if (typeof type === 'function') {
+      return type.displayName || type.name || null;
+    }
+    if (typeof type === 'object') {
+      // Handle memo/forwardRef wrapped components
+      if (type.displayName) return type.displayName;
+      if (type.type) return getDisplayName(type.type);
+      if (type.render) return getDisplayName(type.render);
+    }
+    return null;
+  }
+
+  /**
+   * Check if this is a user-defined component (not internal/framework)
+   */
+  function isUserComponent(name) {
+    if (!name) return false;
+    if (name.startsWith('_')) return false;
+    if (INTERNAL_COMPONENT_NAMES.has(name)) return false;
+    if (!name[0] || name[0] !== name[0].toUpperCase()) return false;
+    if (name.startsWith('Primitive.')) return false;
+    if (name.includes('Provider') && name.includes('Context')) return false;
+    return true;
+  }
+
+  /**
+   * Check if a fiber is a composite (user) component
+   */
+  function isCompositeFiber(fiber) {
+    const tag = fiber.tag;
+    return tag === FunctionComponentTag ||
+           tag === ClassComponentTag ||
+           tag === ForwardRefTag ||
+           tag === MemoComponentTag ||
+           tag === SimpleMemoComponentTag;
+  }
+
+  /**
+   * Normalize file path - strip webpack/vite prefixes
+   */
+  function normalizeFileName(fileName) {
+    if (!fileName) return '';
+
+    let normalized = fileName;
+
+    // Strip common prefixes
+    const prefixes = [
+      'webpack-internal:///',
+      'webpack://',
+      'file:///',
+      'http://localhost:3000/',
+      'http://localhost:3001/',
+      'http://localhost:3002/',
+      'http://localhost:4000/',
+      'http://localhost:5173/',
+      'rsc://React/Server/',
+      '/_next/static/',
+    ];
+
+    for (const prefix of prefixes) {
+      if (normalized.startsWith(prefix)) {
+        normalized = normalized.slice(prefix.length);
+      }
+    }
+
+    // Remove query parameters
+    const queryIndex = normalized.indexOf('?');
+    if (queryIndex !== -1) {
+      normalized = normalized.slice(0, queryIndex);
+    }
+
+    // Clean up leading slashes
+    normalized = normalized.replace(/^\\/+/, '/');
+
+    return normalized;
+  }
+
+  /**
+   * Check if this is a source file (not node_modules, not bundled)
+   */
+  function isSourceFile(fileName) {
+    if (!fileName) return false;
+    const normalized = normalizeFileName(fileName);
+    if (!normalized) return false;
+
+    // Skip node_modules
+    if (normalized.includes('node_modules')) return false;
+
+    // Skip webpack/vite internals
+    if (normalized.includes('webpack/') || normalized.includes('.vite/')) return false;
+
+    // Must have a source extension
+    if (!/\\.(jsx?|tsx?|vue|svelte)$/i.test(normalized)) return false;
+
+    return true;
+  }
+
+  /**
+   * Extract source info from fiber's _debugSource (React 17-18)
+   */
+  function getDebugSource(fiber) {
+    const debugSource = fiber._debugSource;
+    if (!debugSource) return null;
+    if (typeof debugSource !== 'object') return null;
+
+    return {
+      fileName: debugSource.fileName || null,
+      lineNumber: debugSource.lineNumber || null,
+      columnNumber: debugSource.columnNumber || null
+    };
+  }
+
+  /**
+   * Parse stack trace from React 19's _debugStack
+   */
+  function parseDebugStack(stack) {
+    if (!stack || typeof stack !== 'string') return [];
+
+    const frames = [];
+    const lines = stack.split('\\n');
+
+    for (const line of lines) {
+      // Match patterns like: "at ComponentName (file:line:col)"
+      const match = line.match(/at\\s+([\\w$<>]+)?\\s*\\(?([^)]+):(\\d+):(\\d+)\\)?/);
+      if (match) {
+        frames.push({
+          functionName: match[1] || null,
+          fileName: match[2],
+          lineNumber: parseInt(match[3], 10),
+          columnNumber: parseInt(match[4], 10)
+        });
+      }
+    }
+
+    return frames;
+  }
+
+  /**
+   * Get component stack by traversing fiber tree upward
+   */
+  function getComponentStack(fiber, maxDepth = 10) {
+    const stack = [];
+    let current = fiber;
+    let depth = 0;
+
+    while (current && depth < maxDepth) {
+      if (isCompositeFiber(current)) {
+        const name = getDisplayName(current.type);
+
+        if (name && isUserComponent(name)) {
+          const info = {
+            componentName: name,
+            fileName: null,
+            lineNumber: null,
+            columnNumber: null
+          };
+
+          // Try _debugSource first (React 17-18)
+          const debugSource = getDebugSource(current);
+          if (debugSource && isSourceFile(debugSource.fileName)) {
+            info.fileName = normalizeFileName(debugSource.fileName);
+            info.lineNumber = debugSource.lineNumber;
+            info.columnNumber = debugSource.columnNumber;
+          }
+
+          // Try _debugStack (React 19)
+          if (!info.fileName && current._debugStack) {
+            const stackError = current._debugStack;
+            if (stackError instanceof Error && stackError.stack) {
+              const frames = parseDebugStack(stackError.stack);
+              for (const frame of frames) {
+                if (isSourceFile(frame.fileName)) {
+                  info.fileName = normalizeFileName(frame.fileName);
+                  info.lineNumber = frame.lineNumber;
+                  info.columnNumber = frame.columnNumber;
+                  break;
+                }
+              }
+            }
+          }
+
+          // Try owner stack (React 19+)
+          if (!info.fileName && current._debugOwner) {
+            const ownerSource = getDebugSource(current._debugOwner);
+            if (ownerSource && isSourceFile(ownerSource.fileName)) {
+              info.fileName = normalizeFileName(ownerSource.fileName);
+              info.lineNumber = ownerSource.lineNumber;
+              info.columnNumber = ownerSource.columnNumber;
+            }
+          }
+
+          stack.push(info);
+        }
+      }
+
+      current = current.return;
+      depth++;
+    }
+
+    return stack;
+  }
+
+  /**
+   * Main extraction function - gets full context for an element
+   */
+  window.extractReactContext = function(element) {
+    const fiber = getFiberFromElement(element);
+    const componentStack = fiber ? getComponentStack(fiber) : [];
+
+    return {
+      componentStack: componentStack,
+      hasFiber: !!fiber
+    };
+  };
+
+  /**
+   * Get nearest React component name for an element
+   */
+  window.getNearestComponentName = function(element) {
+    const fiber = getFiberFromElement(element);
+    if (!fiber) return null;
+
+    let current = fiber;
+    while (current) {
+      if (isCompositeFiber(current)) {
+        const name = getDisplayName(current.type);
+        if (name && isUserComponent(name)) {
+          return name;
+        }
+      }
+      current = current.return;
+    }
+    return null;
+  };
+
+  console.log('[ReactFiberExtraction] Initialized in page context');
+})();
+`;
+
+// Inject React fiber extraction script into page context
+function injectReactFiberExtraction() {
+  try {
+    const script = document.createElement('script')
+    script.textContent = REACT_FIBER_EXTRACTION_SCRIPT
+    document.documentElement.appendChild(script)
+    script.remove()
+    console.log('[Preload] React fiber extraction script injected')
+  } catch (e) {
+    console.error('[Preload] Failed to inject fiber extraction:', e)
+  }
+}
+
+// Wait for page to load, then inject
+window.addEventListener('DOMContentLoaded', () => {
+  console.log('[Preload] DOM loaded, injecting React fiber extraction...')
+
+  // Inject immediately
+  injectReactFiberExtraction()
+
+  // Also inject after a delay in case page replaces document
+  setTimeout(injectReactFiberExtraction, 500)
+  setTimeout(injectReactFiberExtraction, 2000)
 })
 
 const { ipcRenderer } = require('electron')
@@ -661,17 +1048,15 @@ function createNumberBadge(number) {
 }
 
 // Get source location from page context (async)
-// This tries multiple approaches:
-// 1. Custom __SOURCE_LOCATION__ API (if app has bippy installed)
-// 2. React's internal _debugSource (works in dev mode for any React app)
-// 3. React DevTools hook fiber data
+// Uses bippy's __SOURCE_LOCATION__ API if available (from the target app),
+// otherwise falls back to our injected extractReactContext
 function getSourceLocation(el) {
   return new Promise((resolve) => {
     try {
       const uniqueId = `source-${Date.now()}-${Math.random().toString(36).substring(7)}`
       el.setAttribute('data-source-id', uniqueId)
 
-      // Inject script into page context
+      // Inject script into page context - handles async APIs properly
       const script = document.createElement('script')
       script.textContent = `
         (async function() {
@@ -680,196 +1065,201 @@ function getSourceLocation(el) {
 
           let sourceInfo = null;
 
-          // Approach 1: Custom SOURCE_LOCATION API (bippy-based)
-          if (window.__SOURCE_LOCATION__ && !sourceInfo) {
+          // Debug: Log what APIs are available
+          const reactRootDiv = document.getElementById('__next') || document.getElementById('root') || document.getElementById('app');
+          const rootKeys = reactRootDiv ? Object.getOwnPropertyNames(reactRootDiv).filter(k => k.startsWith('__')) : [];
+
+          console.log('[Page] Available APIs:', {
+            hasSourceLocation: !!window.__SOURCE_LOCATION__,
+            sourceLocationMethods: window.__SOURCE_LOCATION__ ? Object.keys(window.__SOURCE_LOCATION__) : [],
+            hasExtractReactContext: !!window.extractReactContext,
+            hasDevToolsHook: !!window.__REACT_DEVTOOLS_GLOBAL_HOOK__,
+            hasNearestComponentName: !!window.getNearestComponentName,
+            rootElement: reactRootDiv ? reactRootDiv.id : 'none',
+            rootSpecialKeys: rootKeys
+          });
+
+          // Debug: Check if React root has fiber
+          if (reactRootDiv) {
+            const keys = Object.getOwnPropertyNames(reactRootDiv);
+            console.log('[Page] React root element total keys:', keys.length);
+            const specialKeys = keys.filter(k => k.includes('react') || k.includes('React') || k.startsWith('__'));
+            console.log('[Page] React root special keys:', specialKeys);
+          }
+
+          // Check for React DevTools hook state
+          if (window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
+            const hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            console.log('[Page] DevTools hook found:', {
+              hasRenderers: !!hook.renderers,
+              renderersSize: hook.renderers?.size || 0,
+              hookKeys: Object.keys(hook)
+            });
+          } else {
+            console.log('[Page] No __REACT_DEVTOOLS_GLOBAL_HOOK__ found');
+          }
+
+          // PRIMARY: Use app's built-in __SOURCE_LOCATION__ API (bippy-based)
+          // This is the most reliable when the target app has bippy integrated
+          if (window.__SOURCE_LOCATION__ && window.__SOURCE_LOCATION__.getElementSourceLocation) {
             try {
-              sourceInfo = await window.__SOURCE_LOCATION__.getElementSourceLocation(el);
-              if (sourceInfo) {
-                console.log('[Page] Source from bippy API:', sourceInfo.summary);
+              console.log('[Page] Trying __SOURCE_LOCATION__ API...');
+              const result = await window.__SOURCE_LOCATION__.getElementSourceLocation(el);
+              console.log('[Page] __SOURCE_LOCATION__ raw result:', result);
+              if (result && result.sources && result.sources.length > 0) {
+                sourceInfo = result;
+                console.log('[Page] Source from __SOURCE_LOCATION__:', sourceInfo.summary);
               }
             } catch (e) {
-              console.log('[Page] bippy API error:', e.message);
+              console.log('[Page] __SOURCE_LOCATION__ error:', e.message);
             }
           }
 
-          // Approach 2: React 19 _debugStack (stack trace based)
-          // React 19 removed _debugSource and uses stack traces instead
-          if (!sourceInfo) {
+          // FALLBACK 1: Use our injected extractReactContext
+          if (!sourceInfo && window.extractReactContext) {
             try {
-              for (const key of Object.keys(el)) {
-                if (key.startsWith('__reactFiber$') || key.startsWith('__reactInternalInstance$')) {
-                  let fiber = el[key];
-                  console.log('[Page] Found fiber:', key);
+              const context = window.extractReactContext(el);
+              console.log('[Page] extractReactContext result:', JSON.stringify(context, null, 2));
 
-                  // Walk up to find component with stack info
-                  let depth = 0;
-                  while (fiber && depth < 20 && !sourceInfo) {
-                    depth++;
+              if (context && context.componentStack && context.componentStack.length > 0) {
+                const stack = context.componentStack;
+                const firstWithFile = stack.find(c => c.fileName);
 
-                    // React 19: check _debugStack (Error object with stack trace)
-                    if (fiber._debugStack) {
-                      const stack = fiber._debugStack.stack || String(fiber._debugStack);
-                      console.log('[Page] Found _debugStack at depth', depth);
+                if (firstWithFile) {
+                  sourceInfo = {
+                    sources: stack.map(c => ({
+                      name: c.componentName || 'Component',
+                      file: c.fileName || '',
+                      line: c.lineNumber || 0,
+                      column: c.columnNumber || 0
+                    })),
+                    summary: firstWithFile.fileName + ':' + (firstWithFile.lineNumber || 0),
+                    componentStack: stack
+                  };
+                  console.log('[Page] Source from extractReactContext:', sourceInfo.summary);
+                } else {
+                  // Have component names but no file paths (production build)
+                  sourceInfo = {
+                    sources: stack.map(c => ({
+                      name: c.componentName || 'Component',
+                      file: '',
+                      line: 0,
+                      column: 0
+                    })),
+                    summary: stack.map(c => c.componentName).join(' > '),
+                    componentStack: stack
+                  };
+                  console.log('[Page] Component hierarchy (no source):', sourceInfo.summary);
+                }
+              }
+            } catch (e) {
+              console.log('[Page] extractReactContext error:', e.message);
+            }
+          }
 
-                      // Parse stack trace to extract source location
-                      // Format: "    at ComponentName (http://localhost:4000/src/File.tsx:123:45)"
-                      // Or: "    at http://localhost:4000/src/File.tsx:123:45"
-                      const lines = stack.split('\\n');
-                      for (const line of lines) {
-                        // Match: ComponentName (url:line:col) or just (url:line:col)
-                        const match = line.match(/at\\s+(?:([\\w$]+)\\s+)?\\(?(?:https?:\\/\\/[^/]+)?(\\/[^:]+):([0-9]+):([0-9]+)\\)?/);
-                        if (match) {
-                          const [, name, file, lineNum, col] = match;
-                          // Skip node_modules
-                          if (file && !file.includes('node_modules')) {
-                            console.log('[Page] Parsed stack:', { name, file, lineNum, col });
-                            sourceInfo = {
-                              sources: [{
-                                name: name || fiber.type?.name || 'Component',
-                                file: file,
-                                line: parseInt(lineNum, 10),
-                                column: parseInt(col, 10)
-                              }],
-                              summary: file + ':' + lineNum
-                            };
-                            break;
-                          }
+          // FALLBACK 2: Try bippy's direct functions if available
+          if (!sourceInfo && window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
+            try {
+              const hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+              if (hook.renderers && hook.renderers.size > 0) {
+                for (const [id, renderer] of hook.renderers) {
+                  if (renderer.findFiberByHostInstance) {
+                    const fiber = renderer.findFiberByHostInstance(el);
+                    if (fiber) {
+                      console.log('[Page] Found fiber via DevTools hook');
+                      // Walk up to find component with debug source
+                      let current = fiber;
+                      let depth = 0;
+                      while (current && depth < 20) {
+                        if (current._debugSource) {
+                          const src = current._debugSource;
+                          const name = current.type?.displayName || current.type?.name || 'Component';
+                          sourceInfo = {
+                            sources: [{
+                              name: name,
+                              file: src.fileName || '',
+                              line: src.lineNumber || 0,
+                              column: src.columnNumber || 0
+                            }],
+                            summary: (src.fileName || name) + ':' + (src.lineNumber || 0)
+                          };
+                          console.log('[Page] Source from DevTools fiber:', sourceInfo.summary);
+                          break;
                         }
+                        current = current.return;
+                        depth++;
                       }
                       if (sourceInfo) break;
                     }
-
-                    // React 18 style: _debugSource
-                    if (fiber._debugSource) {
-                      const src = fiber._debugSource;
-                      console.log('[Page] Found _debugSource at depth', depth, ':', src);
-                      sourceInfo = {
-                        sources: [{
-                          name: fiber.type?.name || fiber.type?.displayName || 'Component',
-                          file: src.fileName || src.filename || '',
-                          line: src.lineNumber || src.line || 0,
-                          column: src.columnNumber || src.column || 0
-                        }],
-                        summary: (src.fileName || src.filename || 'unknown') + ':' + (src.lineNumber || src.line || 0)
-                      };
-                      break;
-                    }
-
-                    fiber = fiber.return;
                   }
-                  if (sourceInfo) break;
                 }
               }
             } catch (e) {
-              console.log('[Page] React fiber approach error:', e.message);
+              console.log('[Page] DevTools hook error:', e.message);
             }
           }
 
-          // Approach 3: Inspect ALL fiber properties for source info
+          // FALLBACK 3: Get component name from fiber even without full extraction
           if (!sourceInfo) {
             try {
-              for (const key of Object.keys(el)) {
-                if (key.startsWith('__reactFiber$')) {
-                  let fiber = el[key];
-                  let depth = 0;
-                  while (fiber && depth < 15) {
-                    depth++;
-                    // Log ALL keys on fiber that might have source info
-                    const allKeys = Object.keys(fiber);
-                    const interestingKeys = allKeys.filter(k =>
-                      k.toLowerCase().includes('debug') ||
-                      k.toLowerCase().includes('source') ||
-                      k.toLowerCase().includes('stack') ||
-                      k.toLowerCase().includes('file') ||
-                      k.toLowerCase().includes('owner')
-                    );
-                    if (interestingKeys.length > 0) {
-                      console.log('[Page] Fiber depth', depth, 'interesting keys:', interestingKeys);
-                      // Log the values
-                      for (const ik of interestingKeys) {
-                        const val = fiber[ik];
-                        if (val && typeof val === 'object') {
-                          console.log('[Page]  -', ik, ':', JSON.stringify(val).substring(0, 200));
-                        } else if (val) {
-                          console.log('[Page]  -', ik, ':', String(val).substring(0, 200));
-                        }
-                      }
-                    }
-
-                    // Check for _debugOwner which might have source
-                    if (fiber._debugOwner && fiber._debugOwner._debugSource) {
-                      const src = fiber._debugOwner._debugSource;
-                      sourceInfo = {
-                        sources: [{
-                          name: fiber._debugOwner.type?.name || 'Component',
-                          file: src.fileName || '',
-                          line: src.lineNumber || 0,
-                          column: src.columnNumber || 0
-                        }],
-                        summary: (src.fileName || 'unknown') + ':' + (src.lineNumber || 0)
-                      };
-                      console.log('[Page] Source from _debugOwner:', sourceInfo.summary);
-                      break;
-                    }
-                    fiber = fiber.return;
-                  }
-                  if (sourceInfo) break;
-                }
-              }
-            } catch (e) {
-              console.log('[Page] Fallback fiber error:', e.message);
-            }
-          }
-
-          // Approach 4: Get component name even without source (production React builds)
-          if (!sourceInfo) {
-            try {
-              const componentNames = [];
-              for (const key of Object.keys(el)) {
-                if (key.startsWith('__reactFiber$') || key.startsWith('__reactInternalInstance$')) {
-                  let fiber = el[key];
-                  // Walk up the tree to find named components
-                  while (fiber && componentNames.length < 5) {
-                    const type = fiber.type;
-                    if (type) {
-                      const name = type.displayName || type.name || (typeof type === 'string' ? type : null);
-                      if (name && name !== 'Fragment' && !name.startsWith('_') && !componentNames.includes(name)) {
-                        componentNames.push(name);
-                      }
-                    }
-                    fiber = fiber.return;
-                  }
-                  break;
-                }
-              }
-              if (componentNames.length > 0) {
+              const name = window.getNearestComponentName ? window.getNearestComponentName(el) : null;
+              if (name) {
                 sourceInfo = {
-                  sources: componentNames.map(name => ({
-                    name: name,
-                    file: '',
-                    line: 0,
-                    column: 0
-                  })),
-                  summary: componentNames.join(' > ')
+                  sources: [{ name: name, file: '', line: 0, column: 0 }],
+                  summary: name
                 };
-                console.log('[Page] Component hierarchy (no source):', sourceInfo.summary);
+                console.log('[Page] Component name only:', name);
               }
             } catch (e) {
-              console.log('[Page] Component name fallback error:', e.message);
+              console.log('[Page] getNearestComponentName error:', e.message);
+            }
+          }
+
+          // FALLBACK 4: For Next.js Server Components, try to find source info from RSC payload
+          // RSC payloads contain component mappings in script tags like:
+          // 13:[[\"RootLayout\",\"webpack-internal:///(rsc)/./app/layout.tsx\",27,87,26,1,false]]
+          if (!sourceInfo) {
+            try {
+              // Get nearest data attribute that might indicate component
+              let current = el;
+              let depth = 0;
+              while (current && depth < 10 && !sourceInfo) {
+                // Check for any attributes that might give us hints
+                const attrs = Array.from(current.attributes || []);
+                for (const attr of attrs) {
+                  // Look for data-* attributes that might indicate component
+                  if (attr.name.startsWith('data-') && attr.value) {
+                    // Just log for now to help debug
+                    if (attr.name !== 'data-source-id' && attr.name !== 'data-source-info') {
+                      console.log('[Page] Found data attr:', attr.name, '=', attr.value.slice(0, 50));
+                    }
+                  }
+                }
+                current = current.parentElement;
+                depth++;
+              }
+
+              // Note: This app uses Next.js Server Components which don't have React fibers
+              // The HTML is rendered on the server, so fiber extraction won't work
+              // For full component source info, the app would need to integrate bippy or similar
+              console.log('[Page] Note: Server Component detected - no fiber available');
+            } catch (e) {
+              console.log('[Page] RSC fallback error:', e.message);
             }
           }
 
           if (sourceInfo) {
             el.setAttribute('data-source-info', JSON.stringify(sourceInfo));
+            console.log('[Page] Final source info:', sourceInfo.summary);
           } else {
-            console.log('[Page] No source location found for element');
+            console.log('[Page] No source location found');
           }
         })();
       `
       document.documentElement.appendChild(script)
       script.remove()
 
-      // Wait for async operations
+      // Wait for the async script to execute
       setTimeout(() => {
         const sourceInfoAttr = el.getAttribute('data-source-info')
         el.removeAttribute('data-source-id')
@@ -881,7 +1271,7 @@ function getSourceLocation(el) {
         } else {
           resolve(null)
         }
-      }, 500)
+      }, 300) // Increased timeout for async operations
     } catch (err) {
       console.error('[Preload] Failed to get source location:', err)
       resolve(null)

@@ -1,3 +1,4 @@
+import { REACT_FIBER_EXTRACTION_SCRIPT } from './react-fiber-extraction'
 
 // The parent origin is set dynamically when the inspector is activated
 // This prevents broadcasting messages to arbitrary windows
@@ -99,6 +100,9 @@ export const INJECTION_SCRIPT = `
   }
 </style>
 <script>
+  // --- React Fiber Extraction (based on bippy patterns) ---
+  ${REACT_FIBER_EXTRACTION_SCRIPT}
+
   (function() {
     let currentSelected = null;
     let isInspectorActive = false;
@@ -184,13 +188,39 @@ export const INJECTION_SCRIPT = `
       return badge;
     }
 
+    // Enhanced element summary with React component info
     function getElementSummary(el) {
-      return {
+      const basicInfo = {
         tagName: el.tagName.toLowerCase(),
         id: el.id,
         className: el.className,
         text: el.innerText ? el.innerText.substring(0, 100) : '',
       };
+
+      // Try to get React fiber info if available
+      if (window.extractReactContext) {
+        try {
+          const reactContext = window.extractReactContext(el);
+          return {
+            ...basicInfo,
+            // React component info
+            componentStack: reactContext.componentStack || [],
+            componentName: reactContext.componentStack?.[0]?.componentName || null,
+            fileName: reactContext.componentStack?.[0]?.fileName || null,
+            lineNumber: reactContext.componentStack?.[0]?.lineNumber || null,
+            columnNumber: reactContext.componentStack?.[0]?.columnNumber || null,
+            // Full context string (like react-grab format)
+            fullContext: window.formatElementContext ? window.formatElementContext(el) : null,
+            xpath: reactContext.xpath,
+            attributes: reactContext.attributes,
+            hasFiber: reactContext.hasFiber
+          };
+        } catch (e) {
+          console.warn('[Inspector] Failed to extract React context:', e);
+        }
+      }
+
+      return basicInfo;
     }
 
     // Get XPath of element
