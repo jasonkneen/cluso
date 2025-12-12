@@ -90,6 +90,7 @@
     "date-fns": "^4.1.0",
     "diff-match-patch": "^1.0.5",
     "electron-updater": "^6.6.2",
+    "elkjs": "^0.11.0",
     "glob": "^13.0.0",
     "lowlight": "^3.3.0",
     "lucide-react": "^0.556.0",

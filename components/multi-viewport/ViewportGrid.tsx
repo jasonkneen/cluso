@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import { DeviceNode } from './nodes/DeviceNode'
 import { InternalNode, getInternalWindowConfig } from './nodes/InternalNode'
 import { ConnectionLines } from './canvas/ConnectionLines'
+import { calculateLayout, calculateFitView, LayoutDirection } from './canvas/elkLayout'
 import { Viewport, WindowType, DEVICE_PRESETS, getPresetById, getPresetsByType } from './types'
 
 const STORAGE_KEY = 'cluso-multi-viewport-config'
@@ -30,6 +31,8 @@ interface ViewportGridProps {
     viewportCount: number
     addDevice: (type: 'mobile' | 'tablet' | 'desktop') => void
     addInternalWindow: (type: 'kanban' | 'todo' | 'notes') => void
+    autoLayout: (direction?: LayoutDirection) => void
+    fitView: () => void
   } | null>
   onViewportCountChange?: (count: number) => void
 }
@@ -130,18 +133,6 @@ export function ViewportGrid({
     }
     saveViewports(viewports)
   }, [viewports])
-
-  // Expose controls to parent via ref and notify count changes
-  useEffect(() => {
-    if (controlsRef) {
-      controlsRef.current = {
-        viewportCount: viewports.length,
-        addDevice,
-        addInternalWindow: (type) => addInternalWindow(type),
-      }
-    }
-    onViewportCountChange?.(viewports.length)
-  }, [viewports.length, controlsRef, onViewportCountChange])
 
   // Bring node to front - use ref to avoid stale closure
   const bringToFront = useCallback((id: string) => {
@@ -361,6 +352,78 @@ export function ViewportGrid({
     setScale(1)
     setPan({ x: 0, y: 0 })
   }, [])
+
+  // Auto-layout using ELK
+  const autoLayout = useCallback(async (direction: LayoutDirection = 'RIGHT') => {
+    if (viewports.length === 0) return
+
+    const nodes = viewports.map(v => ({
+      id: v.id,
+      width: v.displayWidth ?? 400,
+      height: v.displayHeight ?? 300,
+      linkedToId: v.linkedToViewportId,
+    }))
+
+    const results = await calculateLayout(nodes, {
+      direction,
+      spacing: 80,
+      nodeSpacing: 40,
+    })
+
+    if (results.length > 0) {
+      // Add offset to position nodes nicely
+      const offsetX = 50
+      const offsetY = 50
+
+      setViewports(prev => prev.map(v => {
+        const result = results.find(r => r.id === v.id)
+        if (result) {
+          return { ...v, x: result.x + offsetX, y: result.y + offsetY }
+        }
+        return v
+      }))
+    }
+  }, [viewports])
+
+  // Fit all nodes in view
+  const fitView = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas || viewports.length === 0) return
+
+    const rect = canvas.getBoundingClientRect()
+    const nodes = viewports.map(v => ({
+      x: v.x ?? 0,
+      y: v.y ?? 0,
+      width: v.displayWidth ?? 400,
+      height: v.displayHeight ?? 300,
+    }))
+
+    const { scale: newScale, panX, panY } = calculateFitView(
+      nodes,
+      rect.width,
+      rect.height,
+      60, // padding
+      MIN_SCALE,
+      MAX_SCALE
+    )
+
+    setScale(newScale)
+    setPan({ x: panX, y: panY })
+  }, [viewports])
+
+  // Expose controls to parent via ref and notify count changes
+  useEffect(() => {
+    if (controlsRef) {
+      controlsRef.current = {
+        viewportCount: viewports.length,
+        addDevice,
+        addInternalWindow: (type) => addInternalWindow(type),
+        autoLayout,
+        fitView,
+      }
+    }
+    onViewportCountChange?.(viewports.length)
+  }, [viewports.length, controlsRef, onViewportCountChange, addDevice, addInternalWindow, autoLayout, fitView])
 
   return (
     <div

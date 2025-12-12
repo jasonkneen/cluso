@@ -111,6 +111,8 @@ import {
   KanbanSquare,
   ListTodo,
   StickyNote,
+  Maximize,
+  AlignHorizontalSpaceAround,
 } from 'lucide-react';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
@@ -1498,6 +1500,8 @@ export default function App() {
     viewportCount: number
     addDevice: (type: 'mobile' | 'tablet' | 'desktop') => void
     addInternalWindow: (type: 'kanban' | 'todo' | 'notes') => void
+    autoLayout: (direction?: 'RIGHT' | 'DOWN' | 'LEFT' | 'UP') => void
+    fitView: () => void
   } | null>(null)
 
   // Zoom options for device preview
@@ -7533,6 +7537,24 @@ If you're not sure what the user wants, ask for clarification.
                           title="Add Notes"
                         >
                           <StickyNote size={16} />
+                        </button>
+
+                        <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
+
+                        {/* Layout controls */}
+                        <button
+                          onClick={() => viewportControlsRef.current?.autoLayout('RIGHT')}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
+                          title="Auto Arrange"
+                        >
+                          <AlignHorizontalSpaceAround size={16} />
+                        </button>
+                        <button
+                          onClick={() => viewportControlsRef.current?.fitView()}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
+                          title="Fit View"
+                        >
+                          <Maximize size={16} />
                         </button>
 
                         <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
