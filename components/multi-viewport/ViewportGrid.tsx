@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 import { DeviceNode } from './nodes/DeviceNode'
 import { InternalNode, getInternalWindowConfig } from './nodes/InternalNode'
 import { ConnectionLines } from './canvas/ConnectionLines'
-import { calculateLayout, calculateFitView, LayoutDirection } from './canvas/elkLayout'
+import { calculateLayout, calculateFitView, LayoutDirection, LayoutAlgorithm } from './canvas/elkLayout'
 import { Viewport, WindowType, DEVICE_PRESETS, getPresetById, getPresetsByType } from './types'
 
 const STORAGE_KEY = 'cluso-multi-viewport-config'
@@ -35,6 +35,13 @@ interface ViewportGridProps {
     fitView: () => void
   } | null>
   onViewportCountChange?: (count: number) => void
+  // Node style - 'standard' (with title bar) or 'chromeless' (floating toolbar)
+  nodeStyle?: 'standard' | 'chromeless'
+  // ELK Layout settings
+  elkAlgorithm?: LayoutAlgorithm
+  elkDirection?: LayoutDirection
+  elkSpacing?: number
+  elkNodeSpacing?: number
 }
 
 // Load/save viewports
@@ -97,6 +104,11 @@ export function ViewportGrid({
   renderNotes,
   controlsRef,
   onViewportCountChange,
+  nodeStyle = 'standard',
+  elkAlgorithm = 'layered',
+  elkDirection = 'RIGHT',
+  elkSpacing = 120,
+  elkNodeSpacing = 60,
 }: ViewportGridProps) {
   const [viewports, setViewports] = useState<Viewport[]>(loadViewports)
   const [expandedViewportId, setExpandedViewportId] = useState<string | null>(null)
@@ -354,7 +366,7 @@ export function ViewportGrid({
   }, [])
 
   // Auto-layout using ELK
-  const autoLayout = useCallback(async (direction: LayoutDirection = 'RIGHT') => {
+  const autoLayout = useCallback(async (direction?: LayoutDirection) => {
     if (viewports.length === 0) return
 
     const nodes = viewports.map(v => ({
@@ -365,9 +377,10 @@ export function ViewportGrid({
     }))
 
     const results = await calculateLayout(nodes, {
-      direction,
-      spacing: 80,
-      nodeSpacing: 40,
+      algorithm: elkAlgorithm,
+      direction: direction ?? elkDirection,
+      spacing: elkSpacing,
+      nodeSpacing: elkNodeSpacing,
     })
 
     if (results.length > 0) {
@@ -383,7 +396,7 @@ export function ViewportGrid({
         return v
       }))
     }
-  }, [viewports])
+  }, [viewports, elkAlgorithm, elkDirection, elkSpacing, elkNodeSpacing])
 
   // Fit all nodes in view
   const fitView = useCallback(() => {
@@ -491,6 +504,8 @@ export function ViewportGrid({
                   onNavigate={primaryViewportId === viewport.id ? handlePrimaryNavigate : undefined}
                   onExpand={() => setExpandedViewportId(viewport.id)}
                   onAddLinked={(type) => addInternalWindow(type, viewport.id)}
+                  chromeless={nodeStyle === 'chromeless'}
+                  canvasScale={scale}
                 />
               )
             } else {
@@ -520,6 +535,8 @@ export function ViewportGrid({
                   onResize={(w, h) => updateViewport(viewport.id, { displayWidth: w, displayHeight: h })}
                   onRemove={() => removeViewport(viewport.id)}
                   onFocus={() => bringToFront(viewport.id)}
+                  chromeless={nodeStyle === 'chromeless'}
+                  canvasScale={scale}
                 >
                   {renderContent()}
                 </InternalNode>

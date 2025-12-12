@@ -103,13 +103,25 @@ export interface LegacyConnection {
 export type Connection = MCPServerConnection | LegacyConnection
 
 export type FontSize = 'small' | 'medium' | 'large'
+export type NodeStyle = 'standard' | 'chromeless'
 export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error'
+
+// ELK Layout options
+export type ElkAlgorithm = 'layered' | 'box' | 'force' | 'stress' | 'mrtree'
+export type ElkDirection = 'RIGHT' | 'DOWN' | 'LEFT' | 'UP'
 
 export interface AppSettings {
   autoConnect: boolean
   sendAnalytics: boolean
   fontSize: FontSize
   showLineNumbers: boolean
+  // Node rendering style on canvas
+  nodeStyle: NodeStyle
+  // ELK Layout settings
+  elkAlgorithm: ElkAlgorithm
+  elkDirection: ElkDirection
+  elkSpacing: number
+  elkNodeSpacing: number
   // Display calibration (for "Actual" device preview zoom)
   displayPpi?: number
   // Window appearance (Electron)
@@ -133,6 +145,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sendAnalytics: false,
   fontSize: 'medium',
   showLineNumbers: true,
+  nodeStyle: 'standard',
+  elkAlgorithm: 'layered',
+  elkDirection: 'RIGHT',
+  elkSpacing: 120,
+  elkNodeSpacing: 60,
   displayPpi: undefined,
   transparencyEnabled: false,
   windowOpacity: 0.92,
@@ -1253,6 +1270,182 @@ export function SettingsDialog({
                   />
                 </button>
               </label>
+            </div>
+
+            <div className={`border-t ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`} />
+
+            <div>
+              <h3 className={`text-sm font-medium mb-3 ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                Canvas Nodes
+              </h3>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => updateSettings({ nodeStyle: 'standard' })}
+                  className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-xl border transition-all ${
+                    settings.nodeStyle === 'standard'
+                      ? isDarkMode
+                        ? 'border-blue-500 bg-blue-500/10 ring-2 ring-blue-500/20'
+                        : 'border-blue-500 bg-blue-50 ring-2 ring-blue-500/20'
+                      : isDarkMode
+                        ? 'border-neutral-700 hover:border-neutral-600'
+                        : 'border-stone-200 hover:border-stone-300'
+                  }`}
+                >
+                  {/* Standard node preview */}
+                  <div className={`w-12 h-10 rounded border-2 ${
+                    settings.nodeStyle === 'standard'
+                      ? 'border-blue-500'
+                      : isDarkMode ? 'border-neutral-500' : 'border-stone-400'
+                  }`}>
+                    <div className={`h-2 rounded-t-sm ${
+                      isDarkMode ? 'bg-neutral-600' : 'bg-stone-300'
+                    }`} />
+                  </div>
+                  <span className={`text-sm font-medium ${
+                    settings.nodeStyle === 'standard'
+                      ? isDarkMode ? 'text-blue-400' : 'text-blue-600'
+                      : isDarkMode ? 'text-neutral-400' : 'text-stone-400'
+                  }`}>
+                    Standard
+                  </span>
+                </button>
+                <button
+                  onClick={() => updateSettings({ nodeStyle: 'chromeless' })}
+                  className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-xl border transition-all ${
+                    settings.nodeStyle === 'chromeless'
+                      ? isDarkMode
+                        ? 'border-blue-500 bg-blue-500/10 ring-2 ring-blue-500/20'
+                        : 'border-blue-500 bg-blue-50 ring-2 ring-blue-500/20'
+                      : isDarkMode
+                        ? 'border-neutral-700 hover:border-neutral-600'
+                        : 'border-stone-200 hover:border-stone-300'
+                  }`}
+                >
+                  {/* Chromeless node preview */}
+                  <div className={`w-12 h-10 rounded border-2 border-dashed ${
+                    settings.nodeStyle === 'chromeless'
+                      ? 'border-blue-500'
+                      : isDarkMode ? 'border-neutral-500' : 'border-stone-400'
+                  }`} />
+                  <span className={`text-sm font-medium ${
+                    settings.nodeStyle === 'chromeless'
+                      ? isDarkMode ? 'text-blue-400' : 'text-blue-600'
+                      : isDarkMode ? 'text-neutral-400' : 'text-stone-400'
+                  }`}>
+                    Chromeless
+                  </span>
+                </button>
+              </div>
+              <p className={`text-xs mt-2 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                Chromeless hides the title bar and shows a floating toolbar on hover
+              </p>
+            </div>
+
+            {/* ELK Layout Settings */}
+            <div className={`p-4 rounded-xl ${isDarkMode ? 'bg-neutral-800/50' : 'bg-stone-50'}`}>
+              <h3 className={`text-sm font-medium mb-3 ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                Auto-Layout (ELK)
+              </h3>
+
+              {/* Algorithm */}
+              <div className="mb-4">
+                <label className={`text-xs font-medium mb-2 block ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                  Algorithm
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    { value: 'layered', label: 'Layered', desc: 'Hierarchical' },
+                    { value: 'box', label: 'Box', desc: 'Packed' },
+                    { value: 'force', label: 'Force', desc: 'Physics-based' },
+                    { value: 'stress', label: 'Stress', desc: 'Optimized' },
+                    { value: 'mrtree', label: 'Tree', desc: 'Tree structure' },
+                  ] as const).map(alg => (
+                    <button
+                      key={alg.value}
+                      onClick={() => updateSettings({ elkAlgorithm: alg.value })}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        settings.elkAlgorithm === alg.value
+                          ? isDarkMode
+                            ? 'bg-blue-500/20 text-blue-400 ring-1 ring-blue-500/50'
+                            : 'bg-blue-100 text-blue-600 ring-1 ring-blue-500/30'
+                          : isDarkMode
+                            ? 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+                            : 'bg-stone-200 text-stone-600 hover:bg-stone-300'
+                      }`}
+                      title={alg.desc}
+                    >
+                      {alg.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Direction */}
+              <div className="mb-4">
+                <label className={`text-xs font-medium mb-2 block ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                  Direction
+                </label>
+                <div className="flex gap-2">
+                  {([
+                    { value: 'RIGHT', label: '→', title: 'Left to Right' },
+                    { value: 'DOWN', label: '↓', title: 'Top to Bottom' },
+                    { value: 'LEFT', label: '←', title: 'Right to Left' },
+                    { value: 'UP', label: '↑', title: 'Bottom to Top' },
+                  ] as const).map(dir => (
+                    <button
+                      key={dir.value}
+                      onClick={() => updateSettings({ elkDirection: dir.value })}
+                      className={`w-10 h-10 rounded-lg text-lg font-medium transition-all ${
+                        settings.elkDirection === dir.value
+                          ? isDarkMode
+                            ? 'bg-blue-500/20 text-blue-400 ring-1 ring-blue-500/50'
+                            : 'bg-blue-100 text-blue-600 ring-1 ring-blue-500/30'
+                          : isDarkMode
+                            ? 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+                            : 'bg-stone-200 text-stone-600 hover:bg-stone-300'
+                      }`}
+                      title={dir.title}
+                    >
+                      {dir.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Spacing */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={`text-xs font-medium mb-2 block ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                    Layer Spacing: {settings.elkSpacing}px
+                  </label>
+                  <input
+                    type="range"
+                    min="40"
+                    max="200"
+                    step="10"
+                    value={settings.elkSpacing}
+                    onChange={(e) => updateSettings({ elkSpacing: parseInt(e.target.value) })}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <label className={`text-xs font-medium mb-2 block ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+                    Node Spacing: {settings.elkNodeSpacing}px
+                  </label>
+                  <input
+                    type="range"
+                    min="20"
+                    max="150"
+                    step="10"
+                    value={settings.elkNodeSpacing}
+                    onChange={(e) => updateSettings({ elkNodeSpacing: parseInt(e.target.value) })}
+                    className="w-full"
+                  />
+                </div>
+              </div>
+              <p className={`text-xs mt-2 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                Controls how nodes are arranged when using auto-layout
+              </p>
             </div>
           </div>
         )

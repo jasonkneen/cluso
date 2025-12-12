@@ -36,6 +36,10 @@ export interface InternalNodeProps {
   onFocus: () => void
   // Render content
   children: React.ReactNode
+  // Chromeless mode
+  chromeless?: boolean
+  // Canvas scale for fixed-size toolbar
+  canvasScale?: number
 }
 
 export const InternalNode = memo(function InternalNode({
@@ -53,6 +57,8 @@ export const InternalNode = memo(function InternalNode({
   onRemove,
   onFocus,
   children,
+  chromeless,
+  canvasScale,
 }: InternalNodeProps) {
   const config = WINDOW_CONFIG[windowType]
   const Icon = config.icon
@@ -84,6 +90,8 @@ export const InternalNode = memo(function InternalNode({
       onResize={onResize}
       onRemove={onRemove}
       onFocus={onFocus}
+      chromeless={chromeless}
+      canvasScale={canvasScale}
     >
       <div className={cn(
         "w-full h-full overflow-auto",

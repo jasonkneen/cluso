@@ -17,11 +17,72 @@ export interface LayoutResult {
 
 // ELK layout options for different arrangements
 export type LayoutDirection = 'RIGHT' | 'DOWN' | 'LEFT' | 'UP'
+export type LayoutAlgorithm = 'layered' | 'box' | 'force' | 'stress' | 'mrtree'
 
 export interface LayoutOptions {
+  algorithm?: LayoutAlgorithm
   direction?: LayoutDirection
   spacing?: number
   nodeSpacing?: number
+}
+
+// Get algorithm-specific options
+function getAlgorithmOptions(
+  algorithm: LayoutAlgorithm,
+  direction: LayoutDirection,
+  spacing: number,
+  nodeSpacing: number
+): Record<string, string> {
+  const baseOptions: Record<string, string> = {
+    'elk.spacing.nodeNode': String(nodeSpacing),
+  }
+
+  switch (algorithm) {
+    case 'layered':
+      return {
+        ...baseOptions,
+        'elk.algorithm': 'layered',
+        'elk.direction': direction,
+        'elk.layered.spacing.nodeNodeBetweenLayers': String(spacing),
+        'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+        'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+      }
+    case 'box':
+      return {
+        ...baseOptions,
+        'elk.algorithm': 'box',
+        'elk.box.packingMode': 'SIMPLE',
+        'elk.spacing.componentComponent': String(spacing),
+      }
+    case 'force':
+      return {
+        ...baseOptions,
+        'elk.algorithm': 'force',
+        'elk.force.iterations': '300',
+        'elk.spacing.componentComponent': String(spacing),
+      }
+    case 'stress':
+      return {
+        ...baseOptions,
+        'elk.algorithm': 'stress',
+        'elk.stress.desiredEdgeLength': String(spacing),
+        'elk.spacing.componentComponent': String(spacing),
+      }
+    case 'mrtree':
+      return {
+        ...baseOptions,
+        'elk.algorithm': 'mrtree',
+        'elk.direction': direction,
+        'elk.spacing.nodeNode': String(nodeSpacing),
+        'elk.mrtree.weighting': 'CONSTRAINT',
+      }
+    default:
+      return {
+        ...baseOptions,
+        'elk.algorithm': 'layered',
+        'elk.direction': direction,
+      }
+  }
 }
 
 export async function calculateLayout(
@@ -29,22 +90,16 @@ export async function calculateLayout(
   options: LayoutOptions = {}
 ): Promise<LayoutResult[]> {
   const {
+    algorithm = 'layered',
     direction = 'RIGHT',
-    spacing = 80,
-    nodeSpacing = 40,
+    spacing = 120,
+    nodeSpacing = 60,
   } = options
 
   // Build ELK graph
   const graph = {
     id: 'root',
-    layoutOptions: {
-      'elk.algorithm': 'layered',
-      'elk.direction': direction,
-      'elk.spacing.nodeNode': String(nodeSpacing),
-      'elk.layered.spacing.nodeNodeBetweenLayers': String(spacing),
-      'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
-      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-    },
+    layoutOptions: getAlgorithmOptions(algorithm, direction, spacing, nodeSpacing),
     children: nodes.map(node => ({
       id: node.id,
       width: node.width,

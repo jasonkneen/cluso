@@ -52,6 +52,10 @@ export interface DeviceNodeProps {
   onNavigate?: (url: string) => void
   onExpand?: () => void
   onAddLinked?: (type: 'kanban' | 'todo' | 'notes') => void
+  // Chromeless mode
+  chromeless?: boolean
+  // Canvas scale for fixed-size toolbar
+  canvasScale?: number
 }
 
 export const DeviceNode = memo(function DeviceNode({
@@ -84,6 +88,8 @@ export const DeviceNode = memo(function DeviceNode({
   onNavigate,
   onExpand,
   onAddLinked,
+  chromeless,
+  canvasScale,
 }: DeviceNodeProps) {
   const webviewRef = useRef<WebviewElement | null>(null)
   const [isWebviewReady, setIsWebviewReady] = useState(false)
@@ -199,25 +205,23 @@ export const DeviceNode = memo(function DeviceNode({
   }, [isInspectorActive, isScreenshotActive, isMoveActive, isWebviewReady])
 
   // Calculate scale to fit device in container
-  const contentHeight = height - 32 // Account for titlebar
-  const padding = 12
+  // In chromeless mode: edge-to-edge, no padding, no titlebar offset
+  const contentHeight = chromeless ? height : height - 32 // Account for titlebar in standard mode
+  const padding = chromeless ? 0 : 12
   const availableWidth = width - padding * 2
   const availableHeight = contentHeight - padding * 2
   const scaleX = availableWidth / deviceWidth
   const scaleY = availableHeight / deviceHeight
-  const scale = Math.min(scaleX, scaleY, 1)
+  const scale = chromeless ? Math.min(scaleX, scaleY) : Math.min(scaleX, scaleY, 1)
   const scaledWidth = deviceWidth * scale
   const scaledHeight = deviceHeight * scale
 
-  // Title bar extras
-  const titleBarExtra = (
-    <div className="flex items-center gap-0.5">
-      <span className={cn(
-        "text-[10px] px-1 py-0.5 rounded",
-        isDarkMode ? "bg-neutral-700 text-neutral-400" : "bg-stone-200 text-stone-500"
-      )}>
-        {deviceWidth}×{deviceHeight}
-      </span>
+  // Size label for chromeless mode
+  const sizeLabel = `${deviceWidth}×${deviceHeight}`
+
+  // Toolbar controls for chromeless mode (just the buttons, no size)
+  const toolbarControls = (
+    <>
       <button
         onClick={(e) => { e.stopPropagation(); onSetPrimary() }}
         className={cn(
@@ -254,6 +258,19 @@ export const DeviceNode = memo(function DeviceNode({
           <Maximize2 size={10} />
         </button>
       )}
+    </>
+  )
+
+  // Title bar extras for standard mode (includes size badge)
+  const titleBarExtra = (
+    <div className="flex items-center gap-0.5">
+      <span className={cn(
+        "text-[10px] px-1 py-0.5 rounded",
+        isDarkMode ? "bg-neutral-700 text-neutral-400" : "bg-stone-200 text-stone-500"
+      )}>
+        {sizeLabel}
+      </span>
+      {toolbarControls}
     </div>
   )
 
@@ -269,53 +286,89 @@ export const DeviceNode = memo(function DeviceNode({
       title={preset.name}
       icon={<DeviceIcon size={12} className={isDarkMode ? "text-neutral-400" : "text-stone-500"} />}
       titleBarExtra={titleBarExtra}
+      sizeLabel={sizeLabel}
+      toolbarControls={toolbarControls}
       onMove={onMove}
       onResize={onResize}
       onRemove={onRemove}
       onFocus={onFocus}
       showLinkHandle={!!onAddLinked}
       onAddLinked={onAddLinked}
+      chromeless={chromeless}
+      canvasScale={canvasScale}
+      lockedAspectRatio={chromeless ? deviceWidth / deviceHeight : undefined}
     >
-      <div className={cn(
-        "w-full h-full flex items-center justify-center",
-        isDarkMode ? "bg-neutral-900" : "bg-stone-100"
-      )}>
-        <div
-          className="rounded-md shadow-lg ring-1 ring-neutral-600 overflow-hidden"
-          style={{ width: scaledWidth, height: scaledHeight }}
-        >
-          {isElectron && webviewPreloadPath ? (
-            <webview
-              ref={setupWebview as React.Ref<HTMLElement>}
-              src={url || 'about:blank'}
-              preload={`file://${webviewPreloadPath}`}
-              style={{
-                width: deviceWidth,
-                height: deviceHeight,
-                transform: `scale(${scale})`,
-                transformOrigin: 'top left',
-              }}
-              // @ts-expect-error - webview is Electron-specific
-              allowpopups="true"
-              nodeintegration="true"
-              webpreferences="contextIsolation=no"
-            />
-          ) : (
-            <iframe
-              src={url}
-              style={{
-                width: deviceWidth,
-                height: deviceHeight,
-                transform: `scale(${scale})`,
-                transformOrigin: 'top left',
-                border: 'none',
-              }}
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
-              title={preset.name}
-            />
-          )}
+      {chromeless ? (
+        // Chromeless: edge-to-edge, no scaling, fills entire node
+        isElectron && webviewPreloadPath ? (
+          <webview
+            ref={setupWebview as React.Ref<HTMLElement>}
+            src={url || 'about:blank'}
+            preload={`file://${webviewPreloadPath}`}
+            style={{
+              width: '100%',
+              height: '100%',
+            }}
+            // @ts-expect-error - webview is Electron-specific
+            allowpopups="true"
+            nodeintegration="true"
+            webpreferences="contextIsolation=no"
+          />
+        ) : (
+          <iframe
+            src={url}
+            style={{
+              width: '100%',
+              height: '100%',
+              border: 'none',
+            }}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
+            title={preset.name}
+          />
+        )
+      ) : (
+        // Standard: centered with device frame preview
+        <div className={cn(
+          "w-full h-full flex items-center justify-center",
+          isDarkMode ? "bg-neutral-900" : "bg-stone-100"
+        )}>
+          <div
+            className="rounded-md shadow-lg ring-1 ring-neutral-600 overflow-hidden"
+            style={{ width: scaledWidth, height: scaledHeight }}
+          >
+            {isElectron && webviewPreloadPath ? (
+              <webview
+                ref={setupWebview as React.Ref<HTMLElement>}
+                src={url || 'about:blank'}
+                preload={`file://${webviewPreloadPath}`}
+                style={{
+                  width: deviceWidth,
+                  height: deviceHeight,
+                  transform: `scale(${scale})`,
+                  transformOrigin: 'top left',
+                }}
+                // @ts-expect-error - webview is Electron-specific
+                allowpopups="true"
+                nodeintegration="true"
+                webpreferences="contextIsolation=no"
+              />
+            ) : (
+              <iframe
+                src={url}
+                style={{
+                  width: deviceWidth,
+                  height: deviceHeight,
+                  transform: `scale(${scale})`,
+                  transformOrigin: 'top left',
+                  border: 'none',
+                }}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
+                title={preset.name}
+              />
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </BaseNode>
   )
 })

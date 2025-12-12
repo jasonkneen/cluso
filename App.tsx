@@ -7402,6 +7402,7 @@ If you're not sure what the user wants, ask for clarification.
                     onUpdateContent={handleUpdateNotesContent}
                   />
                 )}
+                nodeStyle={appSettings.nodeStyle || 'standard'}
               />
             </div>
 
