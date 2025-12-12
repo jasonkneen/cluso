@@ -107,6 +107,7 @@ import {
   MessageSquare,
   Hammer,
   Bot,
+  LayoutGrid,
 } from 'lucide-react';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
@@ -114,6 +115,7 @@ import { generateSourcePatch, SourcePatch } from './utils/generateSourcePatch';
 import { useErrorPrefetch } from './hooks/useErrorPrefetch';
 import { ErrorSolutionPanel } from './components/ErrorSolutionPanel';
 import { fileService } from './services/FileService';
+import { ViewportGrid } from './components/multi-viewport';
 
 // --- Helper Functions ---
 
@@ -1482,6 +1484,9 @@ export default function App() {
   const [customHeight, setCustomHeight] = useState<number>(667)
   const [isCustomDevice, setIsCustomDevice] = useState(false)
   const [isDeviceSelectorOpen, setIsDeviceSelectorOpen] = useState(false)
+
+  // Multi-viewport mode (shows multiple device viewports simultaneously)
+  const [isMultiViewportMode, setIsMultiViewportMode] = useState(false)
 
   // Zoom options for device preview
   type ZoomLevel = 'fit' | 'actual' | '50' | '75' | '100' | '125' | '150'
@@ -7034,6 +7039,14 @@ If you're not sure what the user wants, ask for clarification.
             >
               <Smartphone size={14} />
             </button>
+            {/* Multi-Viewport Toggle */}
+            <button
+              onClick={() => setIsMultiViewportMode(!isMultiViewportMode)}
+              className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${isMultiViewportMode ? (isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white shadow-sm') : (isDarkMode ? 'text-neutral-400 hover:text-neutral-200' : 'text-stone-400 hover:text-stone-600')}`}
+              title="Multi-Viewport Mode"
+            >
+              <LayoutGrid size={14} />
+            </button>
           </div>
 
           {/* URL Bar */}
@@ -7141,7 +7154,7 @@ If you're not sure what the user wants, ask for clarification.
 
         {/* Browser Content */}
         <div data-browser-content className={`flex-1 relative overflow-hidden flex flex-col ${isConsolePanelOpen ? '' : ''}`}>
-          <div className={`flex-1 relative overflow-hidden flex flex-col justify-center items-center ${viewportSize === 'desktop' ? '' : 'py-4 gap-3'} ${isDarkMode ? 'bg-neutral-900' : 'bg-stone-200'}`}>
+          <div className={`flex-1 relative overflow-hidden flex flex-col ${isMultiViewportMode ? '' : 'justify-center items-center'} ${viewportSize === 'desktop' && !isMultiViewportMode ? '' : 'py-4 gap-3'} ${isDarkMode ? 'bg-neutral-900' : 'bg-stone-200'}`}>
 
             {/* Device Selector & Zoom - only show in mobile/tablet mode */}
             {viewportSize !== 'desktop' && (
@@ -7300,7 +7313,49 @@ If you're not sure what the user wants, ask for clarification.
               </div>
             )}
 
-            {isElectron && webviewPreloadPath ? (
+            {/* Multi-Viewport Mode */}
+            {isMultiViewportMode ? (
+              <ViewportGrid
+                url={activeTab.url || ''}
+                isDarkMode={isDarkMode}
+                isElectron={isElectron}
+                webviewPreloadPath={webviewPreloadPath}
+                isInspectorActive={isInspectorActive}
+                isScreenshotActive={isScreenshotActive}
+                isMoveActive={isMoveActive}
+                onInspectorHover={(element, rect, _viewportId) => {
+                  setHoveredElement({
+                    element: element as SelectedElement,
+                    rect: rect as { top: number; left: number; width: number; height: number }
+                  })
+                }}
+                onInspectorSelect={(element, rect, _viewportId) => {
+                  const data = { element: element as SelectedElement, rect: rect as SelectedElement['rect'], x: 0, y: 0 }
+                  setSelectedElement({
+                    ...data.element,
+                    x: data.x,
+                    y: data.y,
+                    rect: data.rect
+                  })
+                  setHoveredElement(null)
+                }}
+                onScreenshotSelect={(element, rect, _viewportId) => {
+                  setScreenshotElement(element as SelectedElement)
+                  setIsScreenshotActive(false)
+                  // Note: Screenshot capture for multi-viewport would need webview reference
+                  // For now, just set the element
+                }}
+                onConsoleLog={(level, message, _viewportId) => {
+                  const logType = (level.toLowerCase() === 'warning' ? 'warn' : level.toLowerCase()) as 'log' | 'warn' | 'error' | 'info'
+                  setConsoleLogs(prev => [...prev.slice(-99), {
+                    type: logType,
+                    message: message,
+                    timestamp: new Date()
+                  }])
+                }}
+                onClose={() => setIsMultiViewportMode(false)}
+              />
+            ) : isElectron && webviewPreloadPath ? (
               /* Render a webview for each tab - only active one is visible */
               <>
                 {tabs.filter(tab => tab.url).map(tab => (
