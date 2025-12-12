@@ -33,6 +33,8 @@ import { SteeringQuestions } from './components/SteeringQuestions';
 import { generateTurnId } from './utils/turnUtils';
 import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler';
 import { PatchApprovalDialog } from './components/PatchApprovalDialog';
+import { LayersPanel } from './components/LayersPanel';
+import type { TreeNode } from './components/ComponentTree';
 
 import { getElectronAPI } from './hooks/useElectronAPI';
 import type { MCPServerConfig } from './types/mcp';
@@ -114,6 +116,7 @@ import {
   Maximize,
   AlignHorizontalSpaceAround,
   Ghost,
+  Layers,
 } from 'lucide-react';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
@@ -832,6 +835,15 @@ export default function App() {
   const [isFloatingToolbarVisible, setIsFloatingToolbarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(420);
   const [isResizing, setIsResizing] = useState(false);
+
+  // Left panel (Layers) state
+  const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(false);
+  const [leftPanelWidth, setLeftPanelWidth] = useState(280);
+  const [isLeftResizing, setIsLeftResizing] = useState(false);
+  const [layersTreeData, setLayersTreeData] = useState<import('./components/ComponentTree').TreeNode | null>(null);
+  const [selectedTreeNodeId, setSelectedTreeNodeId] = useState<string | null>(null);
+  const [isLayersLoading, setIsLayersLoading] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
@@ -2302,6 +2314,221 @@ export default function App() {
     }
   }, [isWebviewReady, activeTabId]);
 
+  // Layers panel handlers
+  const handleRefreshLayers = useCallback(async () => {
+    if (!isWebviewReady) return;
+    setIsLayersLoading(true);
+    try {
+      const webview = webviewRefs.current.get(activeTabId);
+      if (!webview) {
+        setIsLayersLoading(false);
+        return;
+      }
+
+      // Get page elements and build tree structure with proper DOM nesting
+      const scanCode = `
+        (function() {
+          let elementNumber = 0;
+          const elementMap = new Map(); // Store elements by number for highlighting
+
+          // Important selectors - elements we want to show in tree
+          const importantTags = new Set(['button', 'a', 'input', 'textarea', 'select', 'img', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'form', 'nav', 'header', 'footer', 'main', 'section', 'article', 'aside', 'ul', 'ol', 'table']);
+          const containerTags = new Set(['div', 'span', 'li', 'p', 'label', 'td', 'tr', 'th']);
+
+          function getElementType(el) {
+            const tagName = el.tagName.toLowerCase();
+            if (tagName === 'button' || el.getAttribute('role') === 'button') return 'button';
+            if (tagName === 'a') return 'link';
+            if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') return 'input';
+            if (tagName === 'img') return 'image';
+            if (['h1','h2','h3','h4','h5','h6','p'].includes(tagName)) return 'text';
+            if (['ul','ol','li'].includes(tagName)) return 'list';
+            if (['nav','header','footer','main','section','article','aside','form'].includes(tagName)) return 'frame';
+            return 'component';
+          }
+
+          function getElementName(el) {
+            const tagName = el.tagName.toLowerCase();
+            const text = el.innerText?.substring(0, 30)?.trim();
+            const ariaLabel = el.getAttribute('aria-label');
+            const placeholder = el.getAttribute('placeholder');
+            const id = el.id;
+            const className = el.className?.split?.(' ')?.[0];
+
+            if (ariaLabel) return ariaLabel.substring(0, 30);
+            if (text && text.length < 30 && !text.includes('\\n')) return text;
+            if (placeholder) return placeholder.substring(0, 30);
+            if (id) return '#' + id;
+            if (className && typeof className === 'string') return '.' + className;
+            return '<' + tagName + '>';
+          }
+
+          function isElementVisible(el) {
+            const style = window.getComputedStyle(el);
+            return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+          }
+
+          function shouldInclude(el) {
+            if (!isElementVisible(el)) return false;
+            const tagName = el.tagName.toLowerCase();
+
+            // Always include important tags
+            if (importantTags.has(tagName)) return true;
+            if (el.getAttribute('role') === 'button') return true;
+
+            // Include containers only if they have meaningful attributes
+            if (containerTags.has(tagName)) {
+              const hasId = !!el.id;
+              const hasMeaningfulClass = el.className && typeof el.className === 'string' &&
+                el.className.split(' ').some(c => c.length > 2 && !c.includes('__') && !c.includes('css-'));
+              const hasRole = !!el.getAttribute('role');
+              const hasAriaLabel = !!el.getAttribute('aria-label');
+              const hasDirectText = el.childNodes.length > 0 &&
+                Array.from(el.childNodes).some(n => n.nodeType === 3 && n.textContent?.trim());
+
+              if (hasId || hasRole || hasAriaLabel) return true;
+              if (hasMeaningfulClass && (hasDirectText || el.children.length > 0)) return true;
+              if (['p', 'li', 'label', 'td', 'th'].includes(tagName) && hasDirectText) return true;
+            }
+
+            return false;
+          }
+
+          function buildTree(el, maxDepth = 10) {
+            if (maxDepth <= 0) return null;
+
+            const children = [];
+            for (const child of el.children) {
+              if (shouldInclude(child)) {
+                elementNumber++;
+                const node = {
+                  id: 'element-' + elementNumber,
+                  name: getElementName(child),
+                  type: getElementType(child),
+                  tagName: child.tagName.toLowerCase(),
+                  elementNumber,
+                  children: []
+                };
+                elementMap.set(elementNumber, child);
+
+                // Recursively build children
+                const childTree = buildTree(child, maxDepth - 1);
+                if (childTree && childTree.length > 0) {
+                  node.children = childTree;
+                } else {
+                  delete node.children;
+                }
+                children.push(node);
+              } else {
+                // Skip this element but check its children
+                const nested = buildTree(child, maxDepth);
+                if (nested) children.push(...nested);
+              }
+            }
+            return children.length > 0 ? children : null;
+          }
+
+          // Build from body
+          const tree = buildTree(document.body, 12);
+
+          // Store element map for highlighting
+          window.__layersElements = elementMap;
+
+          return tree || [];
+        })()
+      `;
+
+      const elements = await webview.executeJavaScript(scanCode);
+
+      // Build tree with nested structure
+      const treeData: TreeNode = {
+        id: 'root',
+        name: 'Page',
+        type: 'page',
+        children: elements.slice(0, 200), // Limit for performance
+      };
+
+      setLayersTreeData(treeData);
+    } catch (err) {
+      console.error('[Layers] Refresh error:', err);
+    }
+    setIsLayersLoading(false);
+  }, [isWebviewReady, activeTabId]);
+
+  const handleTreeNodeSelect = useCallback(async (node: TreeNode) => {
+    setSelectedTreeNodeId(node.id);
+    if (node.elementNumber) {
+      // Highlight in webview
+      const webview = webviewRefs.current.get(activeTabId);
+      if (!webview) return;
+
+      const highlightCode = `
+        (function() {
+          const elementMap = window.__layersElements;
+          if (!elementMap || !(elementMap instanceof Map)) return { success: false };
+
+          const element = elementMap.get(${node.elementNumber});
+          if (!element) return { success: false };
+
+          // Clear previous highlights
+          document.querySelectorAll('.layers-highlight').forEach(el => {
+            el.classList.remove('layers-highlight');
+            el.style.outline = '';
+            el.style.outlineOffset = '';
+          });
+
+          // Add highlight
+          element.classList.add('layers-highlight');
+          element.style.outline = '3px solid #3b82f6';
+          element.style.outlineOffset = '2px';
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+          return { success: true };
+        })()
+      `;
+
+      try {
+        await webview.executeJavaScript(highlightCode);
+      } catch (err) {
+        console.error('[Layers] Highlight error:', err);
+      }
+    }
+  }, [activeTabId]);
+
+  // Left panel resize handlers
+  const handleLeftResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsLeftResizing(true);
+    const startX = e.clientX;
+    const startWidth = leftPanelWidth;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const newWidth = Math.max(200, Math.min(400, startWidth + deltaX));
+      setLeftPanelWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsLeftResizing(false);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, [leftPanelWidth]);
+
+  // Auto-refresh layers when URL changes and panel is open
+  useEffect(() => {
+    if (isLeftPanelOpen && isWebviewReady && activeTab.url) {
+      // Debounce refresh on URL change
+      const timer = setTimeout(() => {
+        handleRefreshLayers();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTab.url, isLeftPanelOpen, isWebviewReady]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Handle get_page_elements tool - scans page for interactive elements
   // Supports hierarchical focusing: if an element is focused, only shows children of that element
   // showBadges: when false, doesn't create visual number badges (used for background context priming)
@@ -3675,6 +3902,8 @@ export default function App() {
           rect: data.rect as SelectedElement['rect']
         });
         setHoveredElement(null); // Clear hover on selection
+        // Clear tree selection when selecting via inspector (different element source)
+        setSelectedTreeNodeId(null);
       } else if (channel === 'screenshot-select') {
         const data = args[0] as { element: SelectedElement; rect: { top: number; left: number; width: number; height: number } };
         setScreenshotElement(data.element);
@@ -7195,7 +7424,34 @@ If you're not sure what the user wants, ask for clarification.
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden pt-1 pb-2 px-2 gap-1">
 
-        {/* --- Left Pane: Browser, New Tab Page, Kanban, Todos, Notes, or Project Setup --- */}
+        {/* --- Left Panel: Layers Tree --- */}
+        {isLeftPanelOpen && (
+          <>
+            <LayersPanel
+              width={leftPanelWidth}
+              treeData={layersTreeData}
+              selectedId={selectedTreeNodeId}
+              onSelect={handleTreeNodeSelect}
+              onRefresh={handleRefreshLayers}
+              isDarkMode={isDarkMode}
+              panelBg={panelBg}
+              panelBorder={panelBorder}
+              isLoading={isLayersLoading}
+            />
+            {/* Left resize handle */}
+            <div
+              className={`w-1 cursor-ew-resize z-10 transition-colors flex-shrink-0 ${isLeftResizing ? (isDarkMode ? 'bg-neutral-500' : 'bg-stone-400') : (isDarkMode ? 'hover:bg-neutral-600' : 'hover:bg-stone-300')}`}
+              onMouseDown={handleLeftResizeStart}
+            />
+          </>
+        )}
+
+        {/* Left resize overlay */}
+        {isLeftResizing && (
+          <div className="fixed inset-0 z-50 cursor-ew-resize" />
+        )}
+
+        {/* --- Center Pane: Browser, New Tab Page, Kanban, Todos, Notes, or Project Setup --- */}
         {setupProject ? (
           <div
             className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
@@ -7269,6 +7525,20 @@ If you're not sure what the user wants, ask for clarification.
               className="h-12 border-b flex items-center gap-2 px-3 flex-shrink-0"
               style={{ borderColor: panelBorder, backgroundColor: headerBg }}
             >
+          {/* Layers Toggle */}
+          <button
+            onClick={() => {
+              setIsLeftPanelOpen(!isLeftPanelOpen);
+              if (!isLeftPanelOpen && !layersTreeData) {
+                handleRefreshLayers();
+              }
+            }}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isLeftPanelOpen ? (isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white') : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-300' : 'hover:bg-stone-200 text-stone-600')}`}
+            title={isLeftPanelOpen ? 'Hide layers' : 'Show layers'}
+          >
+            <Layers size={16} />
+          </button>
+
           {/* Navigation Buttons */}
           <div className="flex items-center gap-1">
             <button

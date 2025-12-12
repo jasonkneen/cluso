@@ -1,0 +1,172 @@
+import { useState } from 'react'
+import { ChevronDown, ChevronRight, Frame, FileText, Box, Type, MousePointer, Link2, FormInput, Image, List } from 'lucide-react'
+
+// Utility function for class names
+function cn(...classes: (string | boolean | undefined)[]) {
+  return classes.filter(Boolean).join(' ')
+}
+
+export interface TreeNode {
+  id: string
+  name: string
+  type: 'frame' | 'page' | 'component' | 'text' | 'group' | 'button' | 'link' | 'input' | 'image' | 'list'
+  elementNumber?: number
+  tagName?: string
+  children?: TreeNode[]
+}
+
+interface ComponentTreeProps {
+  data?: TreeNode | null
+  selectedId?: string | null
+  onSelect?: (node: TreeNode) => void
+  isDarkMode?: boolean
+}
+
+const getIcon = (type: string, tagName?: string) => {
+  // First check tagName for more specific icons
+  if (tagName) {
+    const tag = tagName.toLowerCase()
+    if (tag === 'button') return <MousePointer className="w-4 h-4" />
+    if (tag === 'a') return <Link2 className="w-4 h-4" />
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return <FormInput className="w-4 h-4" />
+    if (tag === 'img') return <Image className="w-4 h-4" />
+    if (tag === 'ul' || tag === 'ol' || tag === 'li') return <List className="w-4 h-4" />
+    if (tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4' || tag === 'h5' || tag === 'h6' || tag === 'p' || tag === 'span') return <Type className="w-4 h-4" />
+  }
+
+  // Fall back to type-based icons
+  switch (type) {
+    case 'frame':
+      return <Frame className="w-4 h-4" />
+    case 'page':
+      return <FileText className="w-4 h-4" />
+    case 'component':
+      return <Box className="w-4 h-4" />
+    case 'text':
+      return <Type className="w-4 h-4" />
+    case 'button':
+      return <MousePointer className="w-4 h-4" />
+    case 'link':
+      return <Link2 className="w-4 h-4" />
+    case 'input':
+      return <FormInput className="w-4 h-4" />
+    case 'image':
+      return <Image className="w-4 h-4" />
+    case 'list':
+      return <List className="w-4 h-4" />
+    case 'group':
+    default:
+      return <Box className="w-4 h-4" />
+  }
+}
+
+interface TreeItemProps {
+  node: TreeNode
+  level: number
+  onSelect: (node: TreeNode) => void
+  selectedId: string | null
+  isDarkMode: boolean
+}
+
+const TreeItem = ({ node, level, onSelect, selectedId, isDarkMode }: TreeItemProps) => {
+  const [isExpanded, setIsExpanded] = useState(level < 2) // Auto-expand first 2 levels
+  const hasChildren = node.children && node.children.length > 0
+  const isSelected = selectedId === node.id
+
+  return (
+    <>
+      <div
+        className={cn(
+          'flex items-center gap-1 px-2 py-1 cursor-pointer text-sm rounded transition-colors',
+          isSelected
+            ? isDarkMode
+              ? 'bg-blue-500/30 text-blue-200'
+              : 'bg-blue-100 text-blue-900'
+            : isDarkMode
+              ? 'hover:bg-white/5 text-neutral-300'
+              : 'hover:bg-black/5 text-stone-700'
+        )}
+        style={{ paddingLeft: `${level * 12 + 8}px` }}
+        onClick={() => onSelect(node)}
+      >
+        {hasChildren ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              setIsExpanded(!isExpanded)
+            }}
+            className="flex items-center justify-center w-4 h-4 flex-shrink-0 opacity-60 hover:opacity-100"
+          >
+            {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          </button>
+        ) : (
+          <div className="w-4 h-4 flex-shrink-0" />
+        )}
+
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <div className={cn(
+            'flex-shrink-0 flex items-center justify-center',
+            isDarkMode ? 'text-neutral-400' : 'text-stone-500'
+          )}>
+            {getIcon(node.type, node.tagName)}
+          </div>
+          <span className="truncate">{node.name}</span>
+          {node.elementNumber && (
+            <span className={cn(
+              'text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0',
+              isDarkMode ? 'bg-blue-500/20 text-blue-300' : 'bg-blue-100 text-blue-600'
+            )}>
+              #{node.elementNumber}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {hasChildren && isExpanded && (
+        <div>
+          {node.children!.map((child) => (
+            <TreeItem
+              key={child.id}
+              node={child}
+              level={level + 1}
+              onSelect={onSelect}
+              selectedId={selectedId}
+              isDarkMode={isDarkMode}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
+export const ComponentTree = ({ data, selectedId, onSelect, isDarkMode = false }: ComponentTreeProps) => {
+  const handleSelect = (node: TreeNode) => {
+    onSelect?.(node)
+  }
+
+  if (!data) {
+    return (
+      <div className={cn(
+        'flex items-center justify-center h-32 text-sm',
+        isDarkMode ? 'text-neutral-500' : 'text-stone-400'
+      )}>
+        No elements found
+      </div>
+    )
+  }
+
+  return (
+    <div className="py-1">
+      <TreeItem
+        node={data}
+        level={0}
+        onSelect={handleSelect}
+        selectedId={selectedId ?? null}
+        isDarkMode={isDarkMode}
+      />
+    </div>
+  )
+}
+
+export default ComponentTree
