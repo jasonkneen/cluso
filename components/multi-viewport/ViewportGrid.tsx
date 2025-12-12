@@ -130,9 +130,11 @@ export function ViewportGrid({
   // Canvas zoom
   const [scale, setScale] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [isAnimating, setIsAnimating] = useState(false)
   const canvasRef = useRef<HTMLDivElement>(null)
   const MIN_SCALE = 0.25
   const MAX_SCALE = 2
+  const ANIMATION_DURATION = 400 // ms
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -425,7 +427,7 @@ export function ViewportGrid({
     }
   }, [viewports, elkAlgorithm, elkDirection, elkSpacing, elkNodeSpacing])
 
-  // Fit all nodes in view
+  // Fit all nodes in view with animation
   const fitView = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas || viewports.length === 0) return
@@ -447,11 +449,16 @@ export function ViewportGrid({
       MAX_SCALE
     )
 
+    // Enable animation, then apply new transform
+    setIsAnimating(true)
     setScale(newScale)
     setPan({ x: panX, y: panY })
+
+    // Disable animation after transition completes
+    setTimeout(() => setIsAnimating(false), ANIMATION_DURATION)
   }, [viewports])
 
-  // Focus on a specific viewport - pan and zoom to center on it
+  // Focus on a specific viewport - pan and zoom to center on it with animation
   const focusOnViewport = useCallback((id: string) => {
     const canvas = canvasRef.current
     const viewport = viewports.find(v => v.id === id)
@@ -483,8 +490,13 @@ export function ViewportGrid({
     const newPanX = canvasCenterX - vpCenterX * newScale
     const newPanY = canvasCenterY - vpCenterY * newScale
 
+    // Enable animation, then apply new transform
+    setIsAnimating(true)
     setScale(newScale)
     setPan({ x: newPanX, y: newPanY })
+
+    // Disable animation after transition completes
+    setTimeout(() => setIsAnimating(false), ANIMATION_DURATION)
   }, [viewports, bringToFront])
 
   // Expose controls to parent via ref
@@ -533,6 +545,7 @@ export function ViewportGrid({
           transformOrigin: 'top left',
           willChange: 'transform',
           backfaceVisibility: 'hidden',
+          transition: isAnimating ? `transform ${ANIMATION_DURATION}ms cubic-bezier(0.4, 0, 0.2, 1)` : 'none',
         }}
       >
         <div className="relative min-w-[2000px] min-h-[1500px]">
