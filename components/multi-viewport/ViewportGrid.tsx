@@ -451,6 +451,42 @@ export function ViewportGrid({
     setPan({ x: panX, y: panY })
   }, [viewports])
 
+  // Focus on a specific viewport - pan and zoom to center on it
+  const focusOnViewport = useCallback((id: string) => {
+    const canvas = canvasRef.current
+    const viewport = viewports.find(v => v.id === id)
+    if (!canvas || !viewport) return
+
+    // Bring to front first
+    bringToFront(id)
+
+    const rect = canvas.getBoundingClientRect()
+    const vpX = viewport.x ?? 0
+    const vpY = viewport.y ?? 0
+    const vpWidth = viewport.displayWidth ?? 400
+    const vpHeight = viewport.displayHeight ?? 300
+
+    // Calculate scale to fit the viewport with padding (80% of canvas)
+    const targetWidthRatio = rect.width * 0.8
+    const targetHeightRatio = rect.height * 0.8
+    const scaleX = targetWidthRatio / vpWidth
+    const scaleY = targetHeightRatio / vpHeight
+    const newScale = Math.min(Math.max(Math.min(scaleX, scaleY), MIN_SCALE), MAX_SCALE)
+
+    // Calculate center of viewport in canvas coordinates
+    const vpCenterX = vpX + vpWidth / 2
+    const vpCenterY = vpY + vpHeight / 2
+
+    // Calculate pan to center the viewport
+    const canvasCenterX = rect.width / 2
+    const canvasCenterY = rect.height / 2
+    const newPanX = canvasCenterX - vpCenterX * newScale
+    const newPanY = canvasCenterY - vpCenterY * newScale
+
+    setScale(newScale)
+    setPan({ x: newPanX, y: newPanY })
+  }, [viewports, bringToFront])
+
   // Expose controls to parent via ref
   useEffect(() => {
     if (controlsRef) {
@@ -462,10 +498,10 @@ export function ViewportGrid({
         autoLayout,
         fitView,
         getViewports: () => viewports,
-        focusViewport: bringToFront,
+        focusViewport: focusOnViewport,
       }
     }
-  }, [viewports, controlsRef, addDevice, addInternalWindow, addTerminal, autoLayout, fitView, bringToFront])
+  }, [viewports, controlsRef, addDevice, addInternalWindow, addTerminal, autoLayout, fitView, focusOnViewport])
 
   // Notify parent when viewport count changes (separate effect to avoid loops)
   useEffect(() => {
