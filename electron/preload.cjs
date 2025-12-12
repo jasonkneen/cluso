@@ -582,6 +582,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     focus: (windowId) => ipcRenderer.invoke('window:focus', windowId),
     // Close a specific window by ID
     close: (windowId) => ipcRenderer.invoke('window:close', windowId),
+    // Set window appearance (opacity/transparency/blur)
+    setAppearance: (appearance) => ipcRenderer.invoke('window:set-appearance', appearance),
     // Listen for window info (sent on ready-to-show)
     onInfo: (callback) => {
       const handler = (_event, info) => callback(info)

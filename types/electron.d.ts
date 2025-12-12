@@ -1013,6 +1013,7 @@ interface ElectronWindowAPI {
   getAll: () => Promise<WindowEntry[]>
   focus: (windowId: number) => Promise<{ success: boolean; error?: string }>
   close: (windowId: number) => Promise<{ success: boolean; error?: string }>
+  setAppearance: (appearance: { transparencyEnabled?: boolean; opacity?: number; blur?: number }) => Promise<{ success: boolean; applied?: { transparencyEnabled: boolean; opacity: number; blur: number }; error?: string }>
   onInfo: (callback: (info: WindowInfo) => void) => () => void
   onRegistryChanged: (callback: (windows: WindowEntry[]) => void) => () => void
 }
