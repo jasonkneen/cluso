@@ -2470,18 +2470,44 @@ export default function App() {
           const element = elementMap.get(${node.elementNumber});
           if (!element) return { success: false };
 
-          // Clear previous highlights
-          document.querySelectorAll('.layers-highlight').forEach(el => {
-            el.classList.remove('layers-highlight');
-            el.style.outline = '';
-            el.style.outlineOffset = '';
-          });
+          // Get or create the highlight overlay
+          let overlay = document.getElementById('layers-highlight-overlay');
+          if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'layers-highlight-overlay';
+            overlay.style.cssText = \`
+              position: fixed;
+              pointer-events: none;
+              border: 3px solid #3b82f6;
+              border-radius: 8px;
+              box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
+              z-index: 999999;
+              transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+              opacity: 0;
+            \`;
+            document.body.appendChild(overlay);
+          }
 
-          // Add highlight
-          element.classList.add('layers-highlight');
-          element.style.outline = '3px solid #3b82f6';
-          element.style.outlineOffset = '2px';
+          // Get element position
+          const rect = element.getBoundingClientRect();
+          const padding = 4;
+
+          // Animate to new position
+          overlay.style.left = (rect.left - padding) + 'px';
+          overlay.style.top = (rect.top - padding) + 'px';
+          overlay.style.width = (rect.width + padding * 2) + 'px';
+          overlay.style.height = (rect.height + padding * 2) + 'px';
+          overlay.style.opacity = '1';
+
+          // Scroll element into view smoothly
           element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+          // Update position after scroll
+          setTimeout(() => {
+            const newRect = element.getBoundingClientRect();
+            overlay.style.left = (newRect.left - padding) + 'px';
+            overlay.style.top = (newRect.top - padding) + 'px';
+          }, 300);
 
           return { success: true };
         })()
