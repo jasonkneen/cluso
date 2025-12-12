@@ -2,6 +2,17 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { CheckCircle2, Circle, Loader2, XCircle, Globe, ChevronRight, AlertCircle, Sparkles } from 'lucide-react'
 import { getAdapter } from '../src/adapters'
 
+declare global {
+  interface Window {
+    electronAPI?: {
+      projectRunner?: {
+        getStatus: (projectPath: string) => Promise<{ success: boolean; status?: { running: boolean; command?: string | null } }>
+        start: (payload: { projectPath: string; command: string }) => Promise<{ success: boolean }>
+      }
+    }
+  }
+}
+
 interface SetupStep {
   id: string
   label: string
@@ -168,6 +179,19 @@ export function ProjectSetupFlow({
   const [error, setError] = useState<string | null>(null)
   const [hasRun, setHasRun] = useState(false)
   const [visibleChips, setVisibleChips] = useState<TechChip[]>([])
+  const [runnerStatus, setRunnerStatus] = useState<{ running: boolean; command?: string | null } | null>(null)
+
+  const refreshRunnerStatus = useCallback(async () => {
+    if (!window.electronAPI?.projectRunner?.getStatus) return
+    try {
+      const res = await window.electronAPI.projectRunner.getStatus(projectPath)
+      if (res.success && res.status) {
+        setRunnerStatus({ running: !!res.status.running, command: res.status.command })
+      }
+    } catch {
+      // ignore
+    }
+  }, [projectPath])
 
   const updateStep = useCallback((id: string, update: Partial<SetupStep>) => {
     setSteps(prev => prev.map(step =>
@@ -391,11 +415,24 @@ export function ProjectSetupFlow({
     }
   }, [hasRun, runSetup])
 
+  useEffect(() => {
+    refreshRunnerStatus()
+    const interval = setInterval(refreshRunnerStatus, 1500)
+    return () => clearInterval(interval)
+  }, [refreshRunnerStatus])
+
   const handleLaunch = () => {
     // User-specified port (from edit) takes priority over auto-detected port
     const port = initialPort || projectInfo.port || 3000
     const url = `http://localhost:${port}`
     onComplete(url, port)
+  }
+
+  const handleStartProject = async () => {
+    const command = projectInfo.devCommand
+    if (!command || !window.electronAPI?.projectRunner?.start) return
+    await window.electronAPI.projectRunner.start({ projectPath, command })
+    await refreshRunnerStatus()
   }
 
   const getStepIcon = (status: SetupStep['status']) => {
@@ -506,7 +543,7 @@ export function ProjectSetupFlow({
           Cancel
         </button>
 
-        {isComplete && (
+      {isComplete && (
           <button
             onClick={handleLaunch}
             className={`
@@ -519,10 +556,27 @@ export function ProjectSetupFlow({
             `}
           >
             <Globe size={14} />
-            <span>Open in Browser</span>
+            <span>{runnerStatus?.running ? 'Open Project' : 'Open in Browser'}</span>
           </button>
         )}
       </div>
+
+      {isComplete && !runnerStatus?.running && projectInfo.devCommand && window.electronAPI?.projectRunner?.start && (
+        <div className="mt-3">
+          <button
+            onClick={handleStartProject}
+            className={`
+              px-4 py-2 text-sm rounded-lg transition-colors
+              ${isDarkMode
+                ? 'bg-blue-500/10 text-blue-300 hover:bg-blue-500/20'
+                : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+              }
+            `}
+          >
+            Start Project ({projectInfo.devCommand})
+          </button>
+        </div>
+      )}
 
       {/* Port info subtle hint */}
       {isComplete && (

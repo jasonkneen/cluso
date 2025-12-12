@@ -7,7 +7,7 @@ import { INJECTION_SCRIPT } from './utils/iframe-injection';
 import { SelectedElement, Message as ChatMessage, ToolUsage } from './types';
 import { TabState, createNewTab } from './types/tab';
 import { TabBar, Tab, TabType } from './components/TabBar';
-import { Schedule } from './components/schedule';
+import { KanbanTab, TodosTab } from './components/tabs';
 import { NotesTab } from './components/schedule/notes';
 import { NewTabPage, addToRecentProjects, getRecentProject } from './components/NewTabPage';
 import { KanbanColumn, TodoItem } from './types/tab';
@@ -1080,6 +1080,19 @@ export default function App() {
     }
   }, [appSettings]);
 
+  // Apply Electron window appearance settings
+  useEffect(() => {
+    const isElectronEnv = typeof window !== 'undefined' && !!window.electronAPI?.isElectron;
+    if (!isElectronEnv || !window.electronAPI?.window?.setAppearance) return;
+    window.electronAPI.window.setAppearance({
+      transparencyEnabled: !!appSettings.transparencyEnabled,
+      opacity: appSettings.windowOpacity,
+      blur: appSettings.windowBlur,
+    }).catch((err: unknown) => {
+      console.warn('[App] Failed to apply window appearance:', err);
+    });
+  }, [appSettings.transparencyEnabled, appSettings.windowOpacity, appSettings.windowBlur]);
+
   // Close onboarding modal when project changes (but not on initial load)
   const prevProjectPathRef = useRef<string | null | undefined>(undefined)
   useEffect(() => {
@@ -1471,18 +1484,30 @@ export default function App() {
   const [isDeviceSelectorOpen, setIsDeviceSelectorOpen] = useState(false)
 
   // Zoom options for device preview
-  type ZoomLevel = 'fit' | '50' | '75' | '100' | '125' | '150'
+  type ZoomLevel = 'fit' | 'actual' | '50' | '75' | '100' | '125' | '150'
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('fit')
   const [isZoomSelectorOpen, setIsZoomSelectorOpen] = useState(false)
 
   const zoomOptions: { value: ZoomLevel; label: string }[] = [
     { value: 'fit', label: 'Fit' },
+    { value: 'actual', label: 'Actual' },
     { value: '50', label: '50%' },
     { value: '75', label: '75%' },
     { value: '100', label: '100%' },
     { value: '125', label: '125%' },
     { value: '150', label: '150%' },
   ]
+
+  // Approximate "actual size" scaling based on local display PPI.
+  // CSS pixels are defined as 96 PPI, so 96 / displayPpi maps CSS px -> physical inches.
+  const displayPpi = appSettings.displayPpi
+  const actualScale = useMemo(() => {
+    const ppi = typeof displayPpi === 'number' && Number.isFinite(displayPpi) && displayPpi > 0
+      ? displayPpi
+      : undefined
+    if (!ppi) return 1
+    return 96 / ppi
+  }, [displayPpi])
 
   // Get current viewport dimensions
   const currentWidth = isCustomDevice ? customWidth : (selectedDevice?.width ?? (viewportSize === 'tablet' ? 768 : 375))
@@ -6901,9 +6926,12 @@ If you're not sure what the user wants, ask for clarification.
             className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
             style={{ backgroundColor: panelBg, borderColor: panelBorder }}
           >
-            <Schedule
-              defaultView="kanban"
-              className={isDarkMode ? 'dark' : ''}
+            <KanbanTab
+              columns={activeTab.kanbanData?.columns || []}
+              boardTitle={activeTab.kanbanData?.boardTitle || activeTab.title || 'Kanban'}
+              isDarkMode={isDarkMode}
+              onUpdateColumns={handleUpdateKanbanColumns}
+              onUpdateTitle={handleUpdateKanbanTitle}
             />
           </div>
         ) : activeTab.type === 'todos' ? (
@@ -6911,9 +6939,11 @@ If you're not sure what the user wants, ask for clarification.
             className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
             style={{ backgroundColor: panelBg, borderColor: panelBorder }}
           >
-            <Schedule
-              defaultView="tasks"
-              className={isDarkMode ? 'dark' : ''}
+            <TodosTab
+              items={activeTab.todosData?.items || []}
+              isDarkMode={isDarkMode}
+              onUpdateItems={handleUpdateTodoItems}
+              projectPath={activeTab.projectPath}
             />
           </div>
         ) : activeTab.type === 'notes' ? (
@@ -7292,7 +7322,7 @@ If you're not sure what the user wants, ask for clarification.
                         } : {
                           width: `${currentWidth}px`,
                           height: `${currentHeight}px`,
-                          transform: `scale(${parseInt(zoomLevel) / 100})`,
+                          transform: `scale(${zoomLevel === 'actual' ? actualScale : (parseInt(zoomLevel) / 100)})`,
                           transformOrigin: 'center center'
                         }
                       )),

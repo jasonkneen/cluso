@@ -136,6 +136,39 @@ function registerTabDataHandlers() {
     }
   })
 
+  // Save project settings (per-project)
+  ipcMain.handle('tabdata:saveProjectSettings', async (_event, projectPath, data) => {
+    try {
+      const dataDir = getDataDir(projectPath)
+      await fs.mkdir(dataDir, { recursive: true })
+      const filePath = path.join(dataDir, 'project.json')
+      await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8')
+      console.log('[TabData] Project settings saved to:', filePath)
+      return { success: true, path: filePath }
+    } catch (error) {
+      console.error('[TabData] Error saving project settings:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Load project settings (per-project)
+  ipcMain.handle('tabdata:loadProjectSettings', async (_event, projectPath) => {
+    try {
+      const dataDir = getDataDir(projectPath)
+      const filePath = path.join(dataDir, 'project.json')
+      const content = await fs.readFile(filePath, 'utf-8')
+      const data = JSON.parse(content)
+      console.log('[TabData] Project settings loaded from:', filePath)
+      return { success: true, data }
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return { success: true, data: null }
+      }
+      console.error('[TabData] Error loading project settings:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
+
   // Load notes data
   ipcMain.handle('tabdata:loadNotes', async (event, projectPath) => {
     try {
@@ -159,7 +192,7 @@ function registerTabDataHandlers() {
     try {
       const dataDir = getDataDir(projectPath)
       const files = await fs.readdir(dataDir).catch(() => [])
-      const tabFiles = files.filter(f => ['kanban.json', 'todos.json', 'notes.json'].includes(f))
+      const tabFiles = files.filter(f => ['kanban.json', 'todos.json', 'notes.json', 'project.json'].includes(f))
       return { success: true, data: tabFiles, path: dataDir }
     } catch (error) {
       console.error('[TabData] Error listing files:', error.message)

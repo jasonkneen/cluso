@@ -66,6 +66,12 @@ interface KanbanTask {
   users: TaskUser[]
 }
 
+const DEFAULT_KANBAN_COLUMNS: Record<string, KanbanTask[]> = {
+  backlog: [],
+  inProgress: [],
+  done: [],
+}
+
 export interface ScheduleProps {
   defaultView?: ScheduleView
   onViewChange?: (view: ScheduleView) => void
@@ -81,81 +87,7 @@ export function Schedule({
   const [searchQuery, setSearchQuery] = React.useState("")
 
   // Kanban state
-  const [columns, setColumns] = React.useState<Record<string, KanbanTask[]>>({
-    backlog: [
-      {
-        id: "1",
-        title: "Integrate payment gateway",
-        description: "Set up and configure payment API for handling transactions.",
-        priority: "high",
-        dueDate: "2024-09-20",
-        users: [
-          { name: "Emma", src: "", fallback: "EJ" },
-          { name: "Daniel", src: "", fallback: "DS" },
-        ],
-        progress: 10,
-        attachments: 2,
-        comments: 4,
-      },
-      {
-        id: "2",
-        title: "Redesign homepage",
-        description: "Update the homepage with the new brand colors and hero section.",
-        priority: "medium",
-        dueDate: "2024-09-25",
-        users: [
-          { name: "Lucas", src: "", fallback: "LB" },
-        ],
-        progress: 0,
-        attachments: 1,
-        comments: 1,
-      },
-    ],
-    inProgress: [
-      {
-        id: "3",
-        title: "Dark mode implementation",
-        description: "Allow users to switch between light and dark themes.",
-        priority: "high",
-        dueDate: "2024-09-18",
-        users: [
-          { name: "Charlie", src: "", fallback: "CW" },
-          { name: "Ava", src: "", fallback: "AR" },
-        ],
-        progress: 40,
-        attachments: 2,
-        comments: 6,
-      },
-      {
-        id: "4",
-        title: "Database optimization",
-        description: "Improve query performance for large datasets.",
-        priority: "medium",
-        dueDate: "2024-09-19",
-        users: [
-          { name: "Liam", src: "", fallback: "LM" },
-        ],
-        progress: 55,
-        attachments: 3,
-        comments: 2,
-      },
-    ],
-    done: [
-      {
-        id: "5",
-        title: "CI/CD pipeline setup",
-        description: "Automate deployment process using GitHub Actions.",
-        priority: "high",
-        dueDate: "2024-09-12",
-        users: [
-          { name: "Ethan", src: "", fallback: "EC" },
-        ],
-        progress: 100,
-        attachments: 2,
-        comments: 4,
-      },
-    ],
-  })
+  const [columns, setColumns] = React.useState<Record<string, KanbanTask[]>>(DEFAULT_KANBAN_COLUMNS)
 
   const [columnTitles] = React.useState<Record<string, string>>({
     backlog: "Backlog",

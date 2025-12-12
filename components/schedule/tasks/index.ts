@@ -1,6 +1,5 @@
 // Core exports
 export { useTodoStore } from "./store"
-export { tasksData } from "./data"
 
 // Type exports
 export type { Todo, TodoStatus, TodoPriority, FilterTab, ViewMode, Comment, TodoFile, SubTask, TodoPosition } from "./types"

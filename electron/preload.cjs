@@ -202,6 +202,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
     list: (projectPath) => ipcRenderer.invoke('tabdata:list', projectPath),
   },
 
+  // Project runner (start/stop dev server processes)
+  projectRunner: {
+    getStatus: (projectPath) => ipcRenderer.invoke('project-runner:get-status', projectPath),
+    start: (payload) => ipcRenderer.invoke('project-runner:start', payload),
+    stop: (projectPath) => ipcRenderer.invoke('project-runner:stop', projectPath),
+    onEvent: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('project-runner:event', handler)
+      return () => ipcRenderer.removeListener('project-runner:event', handler)
+    },
+    onLog: (callback) => {
+      const handler = (_event, data) => callback(data)
+      ipcRenderer.on('project-runner:log', handler)
+      return () => ipcRenderer.removeListener('project-runner:log', handler)
+    },
+  },
+
   // Selector Agent (persistent Claude Agent SDK session for fast element selection)
   selectorAgent: {
     // Initialize selector agent session

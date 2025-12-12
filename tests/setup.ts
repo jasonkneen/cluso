@@ -1,4 +1,4 @@
-import '@testing-library/jest-dom'
+import '@testing-library/jest-dom/vitest'
 import { vi, beforeEach } from 'vitest'
 
 // Mock crypto for Node.js environment
@@ -8,8 +8,12 @@ if (typeof globalThis.crypto === 'undefined') {
   } as unknown as Crypto
 }
 
-// Mock fetch for tests
-globalThis.fetch = vi.fn()
+// Mock fetch for tests (default to a successful JSON response)
+globalThis.fetch = vi.fn().mockResolvedValue({
+  ok: true,
+  status: 200,
+  json: vi.fn().mockResolvedValue({ success: true, data: {} }),
+} as any)
 
 // Mock window.electronAPI for frontend tests
 const mockElectronAPI = {

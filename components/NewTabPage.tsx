@@ -136,6 +136,9 @@ declare global {
         isProjectOpen: (path: string) => Promise<{ isOpen: boolean; windowId: number | null }>
         focus: (windowId: number) => Promise<{ success: boolean }>
       }
+      projectRunner?: {
+        getStatus: (projectPath: string) => Promise<{ success: boolean; status?: { running: boolean } }>
+      }
     }
   }
 }
@@ -152,6 +155,7 @@ export function NewTabPage({
   const [editForm, setEditForm] = useState<{ name: string; path: string; port: string }>({ name: '', path: '', port: '' })
   const [serverProject, setServerProject] = useState<{ cwd: string; name: string } | null>(null)
   const [webModeLoading, setWebModeLoading] = useState(false)
+  const [projectRunStatus, setProjectRunStatus] = useState<Record<string, boolean>>({})
 
   // In web mode, fetch the current project from the server
   const fetchServerProject = useCallback(async () => {
@@ -209,6 +213,36 @@ export function NewTabPage({
     setRecentProjects(loadRecentProjects())
     fetchServerProject()
   }, [fetchServerProject])
+
+  // Refresh running status for recent projects (best-effort)
+  useEffect(() => {
+    let cancelled = false
+
+    const refreshStatuses = async () => {
+      if (!window.electronAPI?.projectRunner?.getStatus) return
+
+      const projects = loadRecentProjects()
+      const updates: Record<string, boolean> = {}
+
+      await Promise.all(projects.map(async (p) => {
+        try {
+          const res = await window.electronAPI!.projectRunner!.getStatus(p.path)
+          updates[p.path] = !!res.status?.running
+        } catch {
+          updates[p.path] = false
+        }
+      }))
+
+      if (!cancelled) setProjectRunStatus(updates)
+    }
+
+    refreshStatuses()
+    const interval = setInterval(refreshStatuses, 2000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [])
 
   const handleOpenFolder = async () => {
     if (window.electronAPI?.dialog) {
@@ -504,6 +538,18 @@ export function NewTabPage({
                       </div>
                     </div>
                     <div className="flex items-center gap-2 ml-3">
+                      {projectRunStatus[project.path] && (
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full border ${
+                            isDarkMode
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          }`}
+                          title="Project is running"
+                        >
+                          Running
+                        </span>
+                      )}
                       <span className={`text-xs whitespace-nowrap ${isDarkMode ? 'text-neutral-600' : 'text-stone-400'}`}>
                         {formatLastOpened(project.lastOpened)}
                       </span>

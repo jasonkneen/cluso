@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const path = require('path')
-const { execSync, exec, spawnSync } = require('child_process')
+const { execSync, exec, spawn, spawnSync } = require('child_process')
 const fs = require('fs').promises
 const oauth = require('./oauth.cjs')
 const codex = require('./codex-oauth.cjs')
@@ -46,6 +46,172 @@ let nextWindowId = 1
 
 // Track the main window for sending events (for backwards compatibility)
 let mainWindow = null
+
+// ==========================================
+// Project Runner (start/stop dev servers)
+// ==========================================
+// Map<projectPath, { proc, command, startedAt, exitCode }>
+const projectRunners = new Map()
+
+function getProjectRunnerState(projectPath) {
+  if (!projectRunners.has(projectPath)) {
+    projectRunners.set(projectPath, {
+      proc: null,
+      command: null,
+      startedAt: null,
+      exitCode: null,
+    })
+  }
+  return projectRunners.get(projectPath)
+}
+
+function sendProjectEvent(projectPath, channel, payload) {
+  // If there's a dedicated window for this project, prefer it
+  const winEntry = getWindowByProject(projectPath)
+  if (winEntry?.window && !winEntry.window.isDestroyed()) {
+    winEntry.window.webContents.send(channel, payload)
+    return
+  }
+
+  // Fallback to mainWindow
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload)
+  }
+}
+
+function getRunnerStatus(projectPath) {
+  const state = getProjectRunnerState(projectPath)
+  const proc = state.proc
+  const running = !!proc && proc.exitCode === null && !proc.killed
+  return {
+    projectPath,
+    running,
+    pid: running ? proc.pid : null,
+    command: state.command,
+    startedAt: state.startedAt,
+    exitCode: proc?.exitCode ?? state.exitCode,
+  }
+}
+
+async function stopRunner(projectPath) {
+  const state = getProjectRunnerState(projectPath)
+  const proc = state.proc
+  if (!proc || proc.exitCode !== null || proc.killed) {
+    state.proc = null
+    return { success: true, stopped: false }
+  }
+
+  try {
+    if (process.platform === 'win32') {
+      // Best-effort: kill process tree
+      exec(`taskkill /PID ${proc.pid} /T /F`, () => {})
+    } else {
+      proc.kill('SIGTERM')
+    }
+  } catch (e) {
+    console.warn('[ProjectRunner] stop error:', e)
+  }
+
+  return { success: true, stopped: true }
+}
+
+function registerProjectRunnerHandlers() {
+  ipcMain.handle('project-runner:get-status', async (_event, projectPath) => {
+    try {
+      return { success: true, status: getRunnerStatus(projectPath) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
+  })
+
+  ipcMain.handle('project-runner:start', async (_event, { projectPath, command, env }) => {
+    try {
+      if (!projectPath || !command) {
+        return { success: false, error: 'projectPath and command are required' }
+      }
+
+      const state = getProjectRunnerState(projectPath)
+
+      // If already running, just return status
+      if (state.proc && state.proc.exitCode === null && !state.proc.killed) {
+        return { success: true, status: getRunnerStatus(projectPath), alreadyRunning: true }
+      }
+
+      state.command = command
+      state.startedAt = Date.now()
+      state.exitCode = null
+
+      // Spawn via shell for cross-platform command strings
+      const proc = spawn(command, {
+        cwd: projectPath,
+        env: { ...process.env, ...(env || {}) },
+        shell: true,
+        stdio: 'pipe',
+      })
+
+      state.proc = proc
+
+      sendProjectEvent(projectPath, 'project-runner:event', {
+        type: 'started',
+        projectPath,
+        pid: proc.pid,
+        command,
+      })
+
+      proc.stdout?.on('data', (data) => {
+        sendProjectEvent(projectPath, 'project-runner:log', {
+          projectPath,
+          stream: 'stdout',
+          text: String(data),
+          timestamp: Date.now(),
+        })
+      })
+
+      proc.stderr?.on('data', (data) => {
+        sendProjectEvent(projectPath, 'project-runner:log', {
+          projectPath,
+          stream: 'stderr',
+          text: String(data),
+          timestamp: Date.now(),
+        })
+      })
+
+      proc.on('exit', (code, signal) => {
+        state.exitCode = code
+        sendProjectEvent(projectPath, 'project-runner:event', {
+          type: 'exit',
+          projectPath,
+          code,
+          signal,
+          timestamp: Date.now(),
+        })
+      })
+
+      proc.on('error', (err) => {
+        sendProjectEvent(projectPath, 'project-runner:event', {
+          type: 'error',
+          projectPath,
+          error: err instanceof Error ? err.message : String(err),
+          timestamp: Date.now(),
+        })
+      })
+
+      return { success: true, status: getRunnerStatus(projectPath), alreadyRunning: false }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
+  })
+
+  ipcMain.handle('project-runner:stop', async (_event, projectPath) => {
+    try {
+      if (!projectPath) return { success: false, error: 'projectPath is required' }
+      const result = await stopRunner(projectPath)
+      return { success: true, ...result, status: getRunnerStatus(projectPath) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
+  })
+}
 
 // Helper: Get window by project path
 function getWindowByProject(projectPath) {
@@ -1457,6 +1623,10 @@ function registerMCPHandlers() {
   })
 }
 
+// Register project runner IPC handlers
+// (start/stop dev servers for a given project folder)
+
+
 // ============================================
 // Fast Apply (Local LLM) IPC Handlers
 // ============================================
@@ -1998,6 +2168,7 @@ app.whenReady().then(async () => {
   registerFastApplyHandlers()
   registerAgentSdkHandlers()
   registerUpdateHandlers()
+  registerProjectRunnerHandlers()
 
   // Register AI SDK handlers and initialize
   aiSdkWrapper.registerHandlers()

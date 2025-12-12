@@ -45,7 +45,8 @@ function sendToRenderer(channel, data) {
 async function loadModule() {
   if (!MgrepLocalService) {
     try {
-      const mgrep = require('@ai-cluso/mgrep-local')
+      // Use dynamic import so test runners can reliably mock this module.
+      const mgrep = await import('@ai-cluso/mgrep-local')
       MgrepLocalService = mgrep.MgrepLocalService
       console.log('[mgrep] Module loaded successfully')
     } catch (error) {
@@ -367,24 +368,26 @@ async function initialize(projectDir) {
       verbose: process.env.NODE_ENV === 'development',
     })
 
-    // Subscribe to service events
-    state.service.onEvent((event) => {
-      console.log('[mgrep] Event:', event.type, 'for project:', projectDir)
-      // Include projectPath in events so UI knows which project
-      sendToRenderer('mgrep:event', { ...event, projectPath: projectDir })
+    // Subscribe to service events (best-effort)
+    if (typeof state.service.onEvent === 'function') {
+      state.service.onEvent((event) => {
+        console.log('[mgrep] Event:', event.type, 'for project:', projectDir)
+        // Include projectPath in events so UI knows which project
+        sendToRenderer('mgrep:event', { ...event, projectPath: projectDir })
 
-      // Update state based on events
-      if (event.type === 'ready') {
-        state.isInitialized = true
-        state.lastError = null
-      } else if (event.type === 'indexing-start') {
-        state.isIndexing = true
-      } else if (event.type === 'indexing-complete') {
-        state.isIndexing = false
-      } else if (event.type === 'error') {
-        state.lastError = event.error
-      }
-    })
+        // Update state based on events
+        if (event.type === 'ready') {
+          state.isInitialized = true
+          state.lastError = null
+        } else if (event.type === 'indexing-start') {
+          state.isIndexing = true
+        } else if (event.type === 'indexing-complete') {
+          state.isIndexing = false
+        } else if (event.type === 'error') {
+          state.lastError = event.error
+        }
+      })
+    }
 
     // Initialize the service
     await state.service.initialize()

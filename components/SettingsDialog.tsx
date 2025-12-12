@@ -110,6 +110,12 @@ export interface AppSettings {
   sendAnalytics: boolean
   fontSize: FontSize
   showLineNumbers: boolean
+  // Display calibration (for "Actual" device preview zoom)
+  displayPpi?: number
+  // Window appearance (Electron)
+  transparencyEnabled?: boolean
+  windowOpacity?: number
+  windowBlur?: number
   providers: Provider[]
   models: SettingsModel[]
   connections: Connection[]
@@ -127,6 +133,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sendAnalytics: false,
   fontSize: 'medium',
   showLineNumbers: true,
+  displayPpi: undefined,
+  transparencyEnabled: false,
+  windowOpacity: 0.92,
+  windowBlur: 12,
   clusoCloudEditsEnabled: false,
   providers: [
     { id: 'google', name: 'Google AI (Gemini)', apiKey: '', enabled: true },
@@ -556,6 +566,19 @@ export function SettingsDialog({
   }
 
   if (!isOpen) return null
+
+  const applyWindowAppearance = async (next: Partial<Pick<AppSettings, 'transparencyEnabled' | 'windowOpacity' | 'windowBlur'>>) => {
+    if (!window.electronAPI?.window?.setAppearance) return
+    try {
+      await window.electronAPI.window.setAppearance({
+        transparencyEnabled: next.transparencyEnabled ?? settings.transparencyEnabled,
+        opacity: next.windowOpacity ?? settings.windowOpacity,
+        blur: next.windowBlur ?? settings.windowBlur,
+      })
+    } catch (error) {
+      console.warn('[Settings] Failed to apply window appearance:', error)
+    }
+  }
 
   const updateSettings = (partial: Partial<AppSettings>) => {
     onSettingsChange({ ...settings, ...partial })
@@ -1094,6 +1117,87 @@ export function SettingsDialog({
                 </button>
               </div>
             </div>
+
+            {window.electronAPI?.window?.setAppearance && (
+              <>
+                <div className={`border-t ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`} />
+
+                <div>
+                  <h3 className={`text-sm font-medium mb-3 ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                    Window Appearance
+                  </h3>
+
+                  <label className="flex items-center justify-between py-2">
+                    <div>
+                      <span className={`text-sm ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>
+                        Transparency
+                      </span>
+                      <p className={`text-xs mt-0.5 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                        Enable glass effect. Requires desktop app.
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        const nextEnabled = !settings.transparencyEnabled
+                        updateSettings({ transparencyEnabled: nextEnabled })
+                        await applyWindowAppearance({ transparencyEnabled: nextEnabled })
+                      }}
+                      className={`w-10 h-6 rounded-full transition-colors relative flex-shrink-0 ml-4 ${
+                        settings.transparencyEnabled
+                          ? 'bg-blue-500'
+                          : isDarkMode ? 'bg-neutral-600' : 'bg-stone-300'
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                          settings.transparencyEnabled ? 'left-5' : 'left-1'
+                        }`}
+                      />
+                    </button>
+                  </label>
+
+                  <div className={`mt-3 space-y-3 ${!settings.transparencyEnabled ? 'opacity-50 pointer-events-none' : ''}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={`text-sm ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>
+                        Opacity
+                      </span>
+                      <input
+                        type="range"
+                        min={0.2}
+                        max={1}
+                        step={0.01}
+                        value={settings.windowOpacity ?? 0.92}
+                        onChange={async (e) => {
+                          const nextOpacity = Number(e.target.value)
+                          updateSettings({ windowOpacity: nextOpacity })
+                          await applyWindowAppearance({ windowOpacity: nextOpacity })
+                        }}
+                        className="w-48"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={`text-sm ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>
+                        Blur
+                      </span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={30}
+                        step={1}
+                        value={settings.windowBlur ?? 12}
+                        onChange={async (e) => {
+                          const nextBlur = Number(e.target.value)
+                          updateSettings({ windowBlur: nextBlur })
+                          await applyWindowAppearance({ windowBlur: nextBlur })
+                        }}
+                        className="w-48"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
 
             <div className={`border-t ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`} />
 
@@ -1689,6 +1793,40 @@ export function SettingsDialog({
                   <Plus size={14} />
                   Add Server
                 </button>
+              </div>
+            </div>
+
+            <div className={`border-t ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`} />
+
+            <div>
+              <h3 className={`text-sm font-medium mb-3 ${isDarkMode ? 'text-neutral-200' : 'text-stone-800'}`}>
+                Display Calibration
+              </h3>
+              <div className={`text-xs mb-2 ${isDarkMode ? 'text-neutral-500' : 'text-stone-500'}`}>
+                Used for the preview zoom "Actual" option.
+              </div>
+
+              <div className="flex items-center justify-between gap-3 py-2">
+                <span className={`text-sm ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>
+                  Screen PPI
+                </span>
+                <input
+                  type="number"
+                  min={50}
+                  max={600}
+                  value={settings.displayPpi ?? ''}
+                  onChange={(e) => {
+                    const raw = e.target.value
+                    const next = raw === '' ? undefined : Number(raw)
+                    updateSettings({ displayPpi: Number.isFinite(next as number) ? (next as number) : undefined })
+                  }}
+                  placeholder="auto"
+                  className={`w-24 px-2 py-1 text-sm rounded-lg text-center ${
+                    isDarkMode
+                      ? 'bg-neutral-800 border border-neutral-700 text-neutral-200 placeholder-neutral-500'
+                      : 'bg-white border border-stone-200 text-stone-700 placeholder-stone-400'
+                  } focus:outline-none focus:ring-2 focus:ring-blue-500/30`}
+                />
               </div>
             </div>
 

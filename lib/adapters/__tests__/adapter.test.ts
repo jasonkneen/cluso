@@ -9,10 +9,18 @@ import type { APIAdapter } from '../types'
 describe('API Adapters', () => {
   beforeEach(() => {
     resetAdapter()
+
+    // Reset any prior Electron mock
+    delete (globalThis as unknown as { window?: unknown }).window
   })
 
   describe('createAdapter', () => {
     it('should create an Electron adapter', () => {
+      ;(globalThis as unknown as { window?: any }).window = {
+        electronAPI: {
+          isElectron: true,
+        },
+      }
       const adapter = createAdapter('electron')
       expect(adapter.type).toBe('electron')
     })

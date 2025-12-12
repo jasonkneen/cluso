@@ -4,6 +4,8 @@
  * These tests import the actual hook and utility functions and test them directly.
  */
 
+// @vitest-environment jsdom
+
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { mockElectronAPI } from './setup'
@@ -402,6 +404,11 @@ describe('mcpToolsToAISDKFormat (real function)', () => {
 // ============================================================================
 
 describe('useAIChatV2 hook (real hook)', () => {
+  beforeEach(() => {
+    // Ensure tests default to Electron mode unless explicitly overridden.
+    window.electronAPI = mockElectronAPI as any
+  })
+
   // Helper to wait for initialization
   const waitForInit = async (result: { current: { isInitialized: boolean } }) => {
     await new Promise(resolve => setTimeout(resolve, 10))
@@ -559,10 +566,11 @@ describe('useAIChatV2 hook (real hook)', () => {
 
   describe('error handling', () => {
     it('should return error when electronAPI is not available', async () => {
-      // Temporarily remove electronAPI
+      // Force Electron mode (isElectron=true) but without the AI SDK API.
+      // This should trigger the Electron-mode "AI SDK not available" error path.
       const original = window.electronAPI
       // @ts-expect-error - Removing electronAPI
-      window.electronAPI = undefined
+      window.electronAPI = { isElectron: true } as any
 
       const onError = vi.fn()
       const { result } = renderHook(() => useAIChatV2({ onError }))

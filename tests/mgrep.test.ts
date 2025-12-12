@@ -68,6 +68,7 @@ describe('mgrep integration', () => {
     mockService.search.mockResolvedValue([])
     mockService.indexFiles.mockResolvedValue({ totalChunks: 10, filesProcessed: 5 })
     mockService.getStats.mockResolvedValue({ totalFiles: 5, totalChunks: 10, databaseSize: 1024 })
+    mockService.clear.mockResolvedValue(undefined)
 
     // Mock mainWindow with isDestroyed method
     mockMainWindow = {
@@ -104,24 +105,24 @@ describe('mgrep integration', () => {
     })
 
     it('should create database directory', async () => {
-      const fsMock = await import('fs/promises')
       await mgrep.initialize(testProjectPath)
 
-      expect(fsMock.mkdir).toHaveBeenCalledWith(
-        expect.stringContaining('.mgrep-local'),
-        expect.any(Object)
-      )
+      const dbDir = path.join(testProjectPath, '.mgrep-local', 'vectors')
+      const stat = await fs.stat(dbDir)
+      expect(stat.isDirectory()).toBe(true)
     })
 
     it('should trigger auto-indexing after initialization', async () => {
       await mgrep.initialize(testProjectPath)
 
-      // Wait a tick for the async scanAndIndexProject to start
-      await new Promise(resolve => setTimeout(resolve, 100))
-
-      // Should have called glob to find files
-      const globMock = await import('glob')
-      expect(globMock.glob).toHaveBeenCalled()
+      // scanAndIndexProject sends scanning-start before its first await.
+      expect(mockMainWindow.webContents.send).toHaveBeenCalledWith(
+        'mgrep:event',
+        expect.objectContaining({
+          type: 'scanning-start',
+          projectPath: testProjectPath,
+        })
+      )
     })
   })
 

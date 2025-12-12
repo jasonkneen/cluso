@@ -962,6 +962,23 @@ interface ElectronMgrepAPI {
   onEvent: (callback: (event: MgrepEvent) => void) => () => void
 }
 
+interface ProjectRunnerStatus {
+  projectPath: string
+  running: boolean
+  pid: number | null
+  command: string | null
+  startedAt: number | null
+  exitCode: number | null
+}
+
+interface ElectronProjectRunnerAPI {
+  getStatus: (projectPath: string) => Promise<{ success: boolean; status?: ProjectRunnerStatus; error?: string }>
+  start: (payload: { projectPath: string; command: string; env?: Record<string, string> }) => Promise<{ success: boolean; status?: ProjectRunnerStatus; alreadyRunning?: boolean; error?: string }>
+  stop: (projectPath: string) => Promise<{ success: boolean; stopped?: boolean; status?: ProjectRunnerStatus; error?: string }>
+  onEvent: (callback: (event: unknown) => void) => () => void
+  onLog: (callback: (event: unknown) => void) => () => void
+}
+
 // Window Management API (Multi-window support with project locking)
 interface WindowInfo {
   windowId: number | null
@@ -1037,6 +1054,7 @@ interface ElectronAPI {
   agentTodos?: ElectronAgentTodosAPI
   lsp?: ElectronLSPAPI
   mgrep?: ElectronMgrepAPI
+  projectRunner?: ElectronProjectRunnerAPI
   window?: ElectronWindowAPI
   getWebviewPreloadPath: () => Promise<string>
   isElectron: boolean

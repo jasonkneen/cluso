@@ -7,13 +7,12 @@ import TodoList from "./todo-list"
 import AddTodoSheet from "./add-todo-sheet"
 import TodoDetailSheet from "./todo-detail-sheet"
 import { Todo } from "./types"
-import { tasksData } from "./data"
 
 interface TasksProps {
   tasks?: Todo[]
 }
 
-export default function Tasks({ tasks = tasksData }: TasksProps) {
+export default function Tasks({ tasks = [] }: TasksProps) {
   const {
     setTodos,
     activeTab,
@@ -26,9 +25,7 @@ export default function Tasks({ tasks = tasksData }: TasksProps) {
   } = useTodoStore()
 
   useEffect(() => {
-    if (tasks && tasks.length > 0) {
-      setTodos(tasks)
-    }
+    setTodos(tasks)
   }, [tasks, setTodos])
 
   // Add state for managing edit mode
@@ -59,6 +56,28 @@ export default function Tasks({ tasks = tasksData }: TasksProps) {
   const handleCloseTodoSheet = () => {
     setTodoSheetOpen(false)
     setSelectedTodoId(null)
+  }
+
+  if (!tasks || tasks.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center px-6">
+        <div className="max-w-sm text-center">
+          <h1 className="text-2xl font-bold tracking-tight">Tasks</h1>
+          <p className="mt-2 text-sm text-muted-foreground">No tasks yet. Create one to get started.</p>
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={handleAddTodoClick}
+              className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
+            >
+              Add task
+            </button>
+          </div>
+
+          <AddTodoSheet isOpen={isAddDialogOpen} onClose={handleCloseAddSheet} editTodoId={editTodoId} />
+        </div>
+      </div>
+    )
   }
 
   return (
