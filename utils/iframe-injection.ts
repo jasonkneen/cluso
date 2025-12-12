@@ -483,39 +483,43 @@ export const INJECTION_SCRIPT = `
     }, true);
 
     // Rectangle drag selection - mousedown to start
+    // Hold Shift to start rectangle selection from anywhere
     document.addEventListener('mousedown', function(e) {
       if (!isInspectorActive && !isScreenshotActive && !isMoveActive) return;
       if (e.button !== 0) return; // Only left click
+      if (!e.shiftKey) return; // Require Shift key for rect selection
 
-      // Check if clicking on an element or empty space
-      const target = e.target;
-      const isEmptySpace = target === document.body ||
-                          target === document.documentElement ||
-                          target.tagName === 'HTML' ||
-                          (target.tagName === 'DIV' && !target.closest('button, a, input, img, p, h1, h2, h3, span'));
+      e.preventDefault();
+      e.stopPropagation();
 
-      if (isEmptySpace) {
-        e.preventDefault();
-        isRectSelecting = true;
-        rectStartX = e.clientX;
-        rectStartY = e.clientY;
+      // Clear any text selection
+      window.getSelection()?.removeAllRanges();
 
-        ensureOverlays();
-        const rectEl = document.getElementById('cluso-rect-selection');
-        rectEl.style.left = rectStartX + 'px';
-        rectEl.style.top = rectStartY + 'px';
-        rectEl.style.width = '0px';
-        rectEl.style.height = '0px';
-        rectEl.style.display = 'block';
-        rectEl.classList.toggle('screenshot-mode', isScreenshotActive);
+      // Disable text selection on body while dragging
+      document.body.style.userSelect = 'none';
+      document.body.style.webkitUserSelect = 'none';
 
-        updateHoverOverlay(null); // Hide hover overlay
-      }
+      isRectSelecting = true;
+      rectStartX = e.clientX;
+      rectStartY = e.clientY;
+
+      ensureOverlays();
+      const rectEl = document.getElementById('cluso-rect-selection');
+      rectEl.style.left = rectStartX + 'px';
+      rectEl.style.top = rectStartY + 'px';
+      rectEl.style.width = '0px';
+      rectEl.style.height = '0px';
+      rectEl.style.display = 'block';
+      rectEl.classList.toggle('screenshot-mode', isScreenshotActive);
+
+      updateHoverOverlay(null); // Hide hover overlay
     }, true);
 
     // Rectangle drag selection - mousemove to resize
     document.addEventListener('mousemove', function(e) {
       if (!isRectSelecting) return;
+
+      e.preventDefault(); // Prevent text selection while dragging
 
       const rectEl = document.getElementById('cluso-rect-selection');
       const left = Math.min(e.clientX, rectStartX);
@@ -534,6 +538,11 @@ export const INJECTION_SCRIPT = `
       if (!isRectSelecting) return;
 
       isRectSelecting = false;
+
+      // Re-enable text selection
+      document.body.style.userSelect = '';
+      document.body.style.webkitUserSelect = '';
+
       const rectEl = document.getElementById('cluso-rect-selection');
       rectEl.style.display = 'none';
 
