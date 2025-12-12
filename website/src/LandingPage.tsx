@@ -1265,7 +1265,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
         <section className="hero">
           <a href="https://calendly.com/jasonkneen/15min" target="_blank" rel="noopener noreferrer" className="hero-badge" style={{ textDecoration: 'none', color: 'inherit' }}>
             <span className="dot"></span>
-            <span>Book a Demo</span>
+            <span>Book a 121 Demo</span>
           </a>
 
           <h1>
@@ -1333,7 +1333,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onDownload }) => {
                 className="btn btn-large"
                 style={{ display: 'inline', backgroundColor: 'white', color: 'black', borderColor: 'white' }}
               >
-                Download Now
+                Download
               </a>
             </p>
             

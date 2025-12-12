@@ -363,6 +363,45 @@ function registerWindowHandlers() {
     return { success: false, error: 'Window not found' }
   })
 
+  // Set window appearance options (opacity/transparency/blur)
+  // NOTE: `transparent` can’t be toggled after window creation in Electron.
+  // We create the window with transparency enabled and emulate “off” by setting
+  // an opaque background + disabling vibrancy.
+  ipcMain.handle('window:set-appearance', (event, appearance = {}) => {
+    const webContents = event.sender
+    const win = BrowserWindow.fromWebContents(webContents)
+    if (!win) return { success: false, error: 'Window not found' }
+
+    const transparencyEnabled = !!appearance.transparencyEnabled
+    const opacityRaw = typeof appearance.opacity === 'number' ? appearance.opacity : 1
+    const blurRaw = typeof appearance.blur === 'number' ? appearance.blur : 0
+
+    const opacity = Math.min(1, Math.max(0.2, opacityRaw))
+    const blur = Math.min(30, Math.max(0, blurRaw))
+
+    try {
+      // Background: transparent when enabled, solid otherwise
+      win.setBackgroundColor(transparencyEnabled ? '#00000000' : '#1a1a1a')
+
+      // Opacity
+      win.setOpacity(transparencyEnabled ? opacity : 1)
+
+      // Blur (platform-specific)
+      if (typeof win.setVibrancy === 'function') {
+        // macOS
+        win.setVibrancy(transparencyEnabled && blur > 0 ? 'sidebar' : null)
+      }
+      if (typeof win.setBackgroundMaterial === 'function') {
+        // Windows 11+ (best-effort)
+        win.setBackgroundMaterial(transparencyEnabled && blur > 0 ? 'mica' : 'none')
+      }
+
+      return { success: true, applied: { transparencyEnabled, opacity, blur } }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to set appearance' }
+    }
+  })
+
   console.log('[Window] IPC handlers registered')
 }
 
@@ -1758,7 +1797,9 @@ function createWindow(options = {}) {
   const newWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    backgroundColor: '#1a1a1a',
+    // Create transparent-capable window; renderer can emulate opaque mode.
+    transparent: true,
+    backgroundColor: '#00000000',
     titleBarStyle: 'hiddenInset', // Hide title bar but keep traffic lights
     trafficLightPosition: { x: 12, y: 12 }, // Position traffic lights
     show: false,
