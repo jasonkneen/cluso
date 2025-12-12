@@ -71,7 +71,7 @@ export interface UseSelectorAgentReturn {
   /** Context state */
   contextState: SelectorContextState | null
   /** Initialize the selector session */
-  initialize: (options?: { cwd?: string }) => Promise<boolean>
+  initialize: (options?: { cwd?: string; modelId?: string }) => Promise<boolean>
   /** Prime the agent with page context */
   primeContext: (context: PageContext) => Promise<boolean>
   /** Request element selection */
@@ -236,7 +236,7 @@ export function useSelectorAgent(options: UseSelectorAgentOptions = {}): UseSele
   /**
    * Initialize the selector agent session
    */
-  const initialize = useCallback(async (initOptions?: { cwd?: string }): Promise<boolean> => {
+  const initialize = useCallback(async (initOptions?: { cwd?: string; modelId?: string }): Promise<boolean> => {
     if (!window.electronAPI?.selectorAgent) {
       setError('Selector agent is only available in the desktop app')
       return false
@@ -254,6 +254,7 @@ export function useSelectorAgent(options: UseSelectorAgentOptions = {}): UseSele
     try {
       const result = await window.electronAPI.selectorAgent.init({
         cwd: initOptions?.cwd || cwd,
+        modelId: initOptions?.modelId,
       })
 
       if (!result.success) {

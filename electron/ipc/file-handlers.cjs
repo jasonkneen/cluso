@@ -11,8 +11,12 @@ const fileSearchLimiter = new RateLimiter(2, 500)
 function registerFileHandlers() {
   // File operations handlers
   ipcMain.handle('files:readFile', async (event, filePath) => {
+    const validation = validatePath(filePath, { allowHomeDir: true })
+    if (!validation.valid) {
+      return { success: false, error: validation.error }
+    }
     try {
-      const content = await fs.readFile(filePath, 'utf-8')
+      const content = await fs.readFile(validation.path, 'utf-8')
       return { success: true, data: content }
     } catch (error) {
       return { success: false, error: error.message }
@@ -20,9 +24,13 @@ function registerFileHandlers() {
   })
 
   ipcMain.handle('files:selectFile', async (event, filePath) => {
+    const validation = validatePath(filePath, { allowHomeDir: true })
+    if (!validation.valid) {
+      return { success: false, error: validation.error }
+    }
     try {
-      const content = await fs.readFile(filePath, 'utf-8')
-      return { success: true, data: { path: filePath, content } }
+      const content = await fs.readFile(validation.path, 'utf-8')
+      return { success: true, data: { path: validation.path, content } }
     } catch (error) {
       return { success: false, error: error.message }
     }
@@ -31,11 +39,16 @@ function registerFileHandlers() {
   ipcMain.handle('files:listDirectory', async (event, dirPath) => {
     try {
       const targetDir = dirPath || process.cwd()
-      console.log('[Files] Listing directory:', targetDir)
-      const entries = await fs.readdir(targetDir, { withFileTypes: true })
+      const validation = validatePath(targetDir, { allowHomeDir: true })
+      if (!validation.valid) {
+        return { success: false, error: validation.error }
+      }
+      const resolvedDir = validation.path
+      console.log('[Files] Listing directory:', resolvedDir)
+      const entries = await fs.readdir(resolvedDir, { withFileTypes: true })
       const files = entries.map(entry => ({
         name: entry.name,
-        path: path.join(targetDir, entry.name),
+        path: path.join(resolvedDir, entry.name),
         isDirectory: entry.isDirectory()
       }))
       files.sort((a, b) => {
@@ -65,6 +78,9 @@ function registerFileHandlers() {
 
   ipcMain.handle('files:readPrompt', async (event, name) => {
     try {
+      if (!name || /[\\/]/.test(String(name)) || String(name).includes('..')) {
+        return { success: false, error: 'Invalid prompt name' }
+      }
       const promptsDir = path.join(process.cwd(), 'prompts')
       const txtPath = path.join(promptsDir, `${name}.txt`)
       const mdPath = path.join(promptsDir, `${name}.md`)
@@ -186,8 +202,12 @@ function registerFileHandlers() {
   })
 
   ipcMain.handle('files:exists', async (event, filePath) => {
+    const validation = validatePath(filePath, { allowHomeDir: true })
+    if (!validation.valid) {
+      return { success: false, exists: false, error: validation.error }
+    }
     try {
-      await fs.access(filePath)
+      await fs.access(validation.path)
       return { success: true, exists: true }
     } catch {
       return { success: true, exists: false }
@@ -198,7 +218,13 @@ function registerFileHandlers() {
   // Used by source patch to find component definition files when only filename is known
   ipcMain.handle('files:findFiles', async (event, searchDir, filename) => {
     try {
-      console.log('[Files] findFiles called:', { searchDir, filename })
+      const validation = validatePath(searchDir, { allowHomeDir: true })
+      if (!validation.valid) {
+        return { success: false, error: validation.error }
+      }
+      const resolvedSearchDir = validation.path
+
+      console.log('[Files] findFiles called:', { searchDir: resolvedSearchDir, filename })
       const results = []
       const searchLower = filename.toLowerCase()
 
@@ -237,7 +263,7 @@ function registerFileHandlers() {
         }
       }
 
-      await searchDirectory(searchDir)
+      await searchDirectory(resolvedSearchDir)
       console.log('[Files] findFiles found', results.length, 'matches')
       return { success: true, data: results }
     } catch (error) {
@@ -247,8 +273,16 @@ function registerFileHandlers() {
   })
 
   ipcMain.handle('files:copyFile', async (event, srcPath, destPath) => {
+    const srcValidation = validatePath(srcPath, { allowHomeDir: true })
+    const destValidation = validatePath(destPath, { allowHomeDir: true })
+    if (!srcValidation.valid) {
+      return { success: false, error: srcValidation.error }
+    }
+    if (!destValidation.valid) {
+      return { success: false, error: destValidation.error }
+    }
     try {
-      await fs.copyFile(srcPath, destPath)
+      await fs.copyFile(srcValidation.path, destValidation.path)
       return { success: true }
     } catch (error) {
       return { success: false, error: error.message }
@@ -258,9 +292,14 @@ function registerFileHandlers() {
   ipcMain.handle('files:searchInFiles', async (event, searchPattern, dirPath, options = {}) => {
     return fileSearchLimiter.execute(async () => {
       try {
+        const searchDirRaw = dirPath || process.cwd()
+        const validation = validatePath(searchDirRaw, { allowHomeDir: true })
+        if (!validation.valid) {
+          return { success: false, error: validation.error }
+        }
         const { filePattern = '*', maxResults = 100, caseSensitive = false } = options
         const results = []
-        const searchDir = dirPath || process.cwd()
+        const searchDir = validation.path
         const regex = new RegExp(searchPattern, caseSensitive ? 'g' : 'gi')
 
         async function searchDirectory(dir, depth = 0) {
@@ -321,7 +360,12 @@ function registerFileHandlers() {
   ipcMain.handle('files:glob', async (event, pattern, dirPath) => {
     return fileSearchLimiter.execute(async () => {
       try {
-        const searchDir = dirPath || process.cwd()
+        const searchDirRaw = dirPath || process.cwd()
+        const validation = validatePath(searchDirRaw, { allowHomeDir: true })
+        if (!validation.valid) {
+          return { success: false, error: validation.error }
+        }
+        const searchDir = validation.path
         const results = []
 
         function matchGlob(filename, pattern) {
@@ -380,12 +424,16 @@ function registerFileHandlers() {
   ipcMain.handle('files:readMultiple', async (event, filePaths) => {
     try {
       const results = await Promise.all(
-        filePaths.map(async (filePath) => {
+        (filePaths || []).map(async (rawPath) => {
+          const validation = validatePath(rawPath, { allowHomeDir: true })
+          if (!validation.valid) {
+            return { path: rawPath, success: false, error: validation.error }
+          }
           try {
-            const content = await fs.readFile(filePath, 'utf-8')
-            return { path: filePath, success: true, content }
+            const content = await fs.readFile(validation.path, 'utf-8')
+            return { path: validation.path, success: true, content }
           } catch (err) {
-            return { path: filePath, success: false, error: err.message }
+            return { path: validation.path, success: false, error: err.message }
           }
         })
       )
@@ -398,7 +446,12 @@ function registerFileHandlers() {
   ipcMain.handle('files:getTree', async (event, dirPath, options = {}) => {
     try {
       const { maxDepth = 5, includeHidden = false } = options
-      const searchDir = dirPath || process.cwd()
+      const searchDirRaw = dirPath || process.cwd()
+      const validation = validatePath(searchDirRaw, { allowHomeDir: true })
+      if (!validation.valid) {
+        return { success: false, error: validation.error }
+      }
+      const searchDir = validation.path
 
       async function buildTree(dir, depth = 0) {
         if (depth >= maxDepth) return null

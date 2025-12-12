@@ -10,6 +10,7 @@
 
 import { SelectedElement } from '../types'
 import { ProviderConfig } from '../hooks/useAIChat'
+import { fileService } from '../services/FileService'
 
 // Result of a successful patch generation
 export interface SourcePatch {
@@ -44,17 +45,14 @@ const HERO_PLACEHOLDER =
  */
 async function lintCodeSnippet(code: string, filePath?: string): Promise<{ valid: boolean; errors?: string[] }> {
   // Try Electron IPC first (uses ESLint in main process)
-  if (window.electronAPI?.files?.lintCode) {
-    try {
-      const result = await window.electronAPI.files.lintCode(code, filePath)
-      if (result.success) {
-        return { valid: result.data?.valid ?? true, errors: result.data?.errors }
-      }
-      // If linting failed to run, log but don't block
-      console.log('[Source Patch] Lint IPC call failed:', result.error)
-    } catch (error) {
-      console.log('[Source Patch] Lint exception:', error)
+  try {
+    const result = await fileService.lintCode(code, filePath)
+    if (result.success) {
+      return { valid: result.data?.valid ?? true, errors: result.data?.errors }
     }
+    console.log('[Source Patch] Lint IPC call failed:', result.error)
+  } catch (error) {
+    console.log('[Source Patch] Lint exception:', error)
   }
 
   // Fallback: skip linting if not available
@@ -327,7 +325,7 @@ async function resolveFilePath(
         // FAST PATH 1: Use glob (ripgrep-based, very fast)
         if (window.electronAPI?.files?.glob) {
           console.log('[Source Patch] Trying glob search...')
-          const globResult = await window.electronAPI.files.glob(`**/${relativePath}`, projectPath)
+          const globResult = await fileService.glob(`**/${relativePath}`, projectPath)
 
           if (globResult.success && globResult.data && globResult.data.length > 0) {
             // Filter out node_modules, .git, dist, build
@@ -358,7 +356,7 @@ async function resolveFilePath(
         // SLOW PATH: Use recursive findFiles as fallback
         if (window.electronAPI?.files?.findFiles) {
           console.log('[Source Patch] Trying findFiles search...')
-          const searchResult = await window.electronAPI.files.findFiles(projectPath, relativePath)
+          const searchResult = await fileService.findFiles(projectPath, relativePath)
 
           if (searchResult.success && searchResult.data && searchResult.data.length > 0) {
             const validPaths = searchResult.data.filter(
@@ -957,7 +955,7 @@ export async function generateSourcePatch(
     // Try getCwd fallback
     if (window.electronAPI?.files?.getCwd) {
       console.log('[Source Patch] No projectPath, trying getCwd fallback...')
-      const cwdResult = await window.electronAPI.files.getCwd()
+      const cwdResult = await fileService.getCwd()
       console.log('[Source Patch] getCwd result:', cwdResult)
       if (cwdResult.success && cwdResult.data) {
         let relativePath = filePath
@@ -992,7 +990,7 @@ export async function generateSourcePatch(
   }
 
   console.log('[Source Patch] Reading source file:', filePath)
-  const fileResult = await window.electronAPI.files.readFile(filePath)
+  const fileResult = await fileService.readFileFull(filePath)
   if (!fileResult.success || !fileResult.data) {
     console.log('[Source Patch] ABORT: Failed to read source file')
     console.log('[Source Patch] Error:', fileResult.error)

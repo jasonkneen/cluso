@@ -12,8 +12,8 @@ const { existsSync } = require('fs')
 const path = require('path')
 const os = require('os')
 
-// Model IDs - use fast model for selector to minimize latency
-const SELECTOR_MODEL_ID = 'claude-haiku-4-5-20251001'
+// Default model ID - can be overridden per session
+const DEFAULT_SELECTOR_MODEL_ID = 'claude-haiku-4-5-20251001'
 
 // Session state
 let selectorSession = null
@@ -226,6 +226,7 @@ Be concise but helpful. Propose bold changes when appropriate.`
 async function initializeSession(options = {}) {
   const {
     cwd = process.cwd(),
+    modelId = DEFAULT_SELECTOR_MODEL_ID,
     onTextChunk,
     onSelectionResult,
     onError,
@@ -246,14 +247,14 @@ async function initializeSession(options = {}) {
     // Note: Haiku doesn't support thinking, so maxThinkingTokens must be 0
     const cliPath = resolveClaudeCodeCli()
     console.log('[SelectorAgent] Creating session:', {
-      model: SELECTOR_MODEL_ID,
+      model: modelId,
       cwd,
       cliPath,
     })
     selectorSession = query({
       prompt: messageGenerator(),
       options: {
-        model: SELECTOR_MODEL_ID,
+        model: modelId,
         maxThinkingTokens: 0, // Haiku doesn't support thinking
         // Only read project-level config (.mcp.json), NOT user-level (Claude Desktop)
         settingSources: ['project'],

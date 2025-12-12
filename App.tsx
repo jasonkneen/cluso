@@ -113,6 +113,7 @@ import { generateText } from 'ai';
 import { generateSourcePatch, SourcePatch } from './utils/generateSourcePatch';
 import { useErrorPrefetch } from './hooks/useErrorPrefetch';
 import { ErrorSolutionPanel } from './components/ErrorSolutionPanel';
+import { fileService } from './services/FileService';
 
 // --- Helper Functions ---
 
@@ -149,9 +150,11 @@ async function generateUIUpdate(
   element: SelectedElement,
   userRequest: string,
   apiKey: string,
-  modelId: string = 'gemini-2.5-flash-lite'  // Default fallback, but should be passed explicitly
+  modelId: string = 'gemini-2.5-flash-lite',  // Default fallback, but should be passed explicitly
+  providers?: ProviderConfig[]
 ): Promise<UIUpdateResult> {
-  const google = createGoogleGenerativeAI({ apiKey });
+  const isGeminiModel = modelId.startsWith('gemini-')
+  const google = isGeminiModel ? createGoogleGenerativeAI({ apiKey }) : null;
 
   const prompt = `You are a UI modification assistant. Given an HTML element and a user request, output ONLY a JSON object with changes.
 
@@ -187,15 +190,38 @@ Examples:
 
   try {
     console.log(`[UI Update] Calling ${modelId} for UI changes...`);
-    console.log('[UI Update] API Key present:', !!apiKey, 'length:', apiKey?.length);
-    const result = await generateText({
-      model: google(modelId),
-      prompt,
-      maxTokens: 200,
-    });
+    let text = ''
+
+    if (isGeminiModel && google) {
+      console.log('[UI Update] Using Google direct generateText')
+      const result = await generateText({
+        model: google(modelId),
+        prompt,
+        maxTokens: 200,
+      });
+      text = result.text.trim();
+    } else if (window.electronAPI?.aiSdk?.generate) {
+      console.log('[UI Update] Using Electron AI SDK generate')
+      const providersMap: Record<string, string> = {}
+      for (const p of providers || []) {
+        if (p.apiKey) providersMap[p.id] = p.apiKey
+      }
+      const sdkResult = await window.electronAPI.aiSdk.generate({
+        modelId,
+        messages: [{ role: 'user', content: prompt }],
+        providers: providersMap,
+        system: 'You are a UI modification assistant. Output ONLY valid JSON.',
+        maxSteps: 1,
+      })
+      if (!sdkResult.success || !sdkResult.text) {
+        throw new Error(sdkResult.error || 'AI SDK generate failed')
+      }
+      text = sdkResult.text.trim()
+    } else {
+      throw new Error('No available provider for UI update')
+    }
 
     // Parse the JSON response
-    const text = result.text.trim();
     console.log('[UI Update] Gemini response:', text);
 
     // Handle markdown code blocks
@@ -1653,45 +1679,21 @@ export default function App() {
     isMoveActiveRef.current = isMoveActive;
   }, [isMoveActive]);
 
-  // Auto-switch to Claude Haiku 4.5 (or fallback to fast model) when inspector is active
+  // Inspector should not auto-switch models.
+  // We only disable thinking for responsiveness while active.
   useEffect(() => {
     if (isInspectorActive) {
-      // Save current settings before switching
       preInspectorSettingsRef.current = {
         model: selectedModel,
         thinkingLevel: thinkingLevel,
       };
 
-      // Prefer Gemini 2.5 Flash Lite for fast tooling, fallback to other fast models
-      const fastModel = displayModels.find(m =>
-        m.id === 'gemini-2.5-flash-lite' && m.isAvailable
-      ) || displayModels.find(m =>
-        m.id.includes('gemini-2') && m.id.includes('flash') && m.isAvailable
-      ) || displayModels.find(m =>
-        m.id.includes('flash') && m.isAvailable
-      ) || displayModels.find(m =>
-        m.id.includes('haiku') && m.isAvailable
-      );
-
-      if (fastModel) {
-        console.log('[Inspector] Switching to fast model:', fastModel.id);
-        setSelectedModel({
-          id: fastModel.id,
-          name: fastModel.name,
-          provider: fastModel.provider,
-          Icon: fastModel.Icon,
-        });
-      }
-
-      // Disable thinking for faster responses
       if (thinkingLevel !== 'off') {
         console.log('[Inspector] Disabling thinking mode');
         setThinkingLevel('off');
       }
     } else if (preInspectorSettingsRef.current) {
-      // Restore previous settings when inspector is deactivated
-      console.log('[Inspector] Restoring previous model:', preInspectorSettingsRef.current.model.id);
-      setSelectedModel(preInspectorSettingsRef.current.model);
+      console.log('[Inspector] Restoring previous thinking level:', preInspectorSettingsRef.current.thinkingLevel);
       setThinkingLevel(preInspectorSettingsRef.current.thinkingLevel);
       preInspectorSettingsRef.current = null;
     }
@@ -2286,9 +2288,20 @@ export default function App() {
   // Initialize selector agent when Electron is available
   useEffect(() => {
     if (isElectron && !selectorAgentActive) {
-      initializeSelectorAgent().then(success => {
+      const preferredModelId = selectedModelRef.current?.id;
+      initializeSelectorAgent({ modelId: preferredModelId }).then(success => {
         if (success) {
-          console.log('[SelectorAgent] Initialized successfully');
+          console.log('[SelectorAgent] Initialized successfully', preferredModelId ? `with model ${preferredModelId}` : '');
+          return;
+        }
+        // Retry with default model if custom selection failed
+        if (preferredModelId) {
+          console.warn('[SelectorAgent] Init failed with model', preferredModelId, '- retrying default');
+          initializeSelectorAgent().then(retrySuccess => {
+            if (retrySuccess) {
+              console.log('[SelectorAgent] Initialized successfully with default model');
+            }
+          });
         }
       });
     }
@@ -2334,89 +2347,55 @@ export default function App() {
   ): Promise<{ success: boolean; error?: string }> => {
     console.log('[AI] Patching source file:', filePath, description);
 
-    if (!isElectron || !window.electronAPI?.files) {
-      return { success: false, error: 'File editing only available in Electron mode' };
+    const patchResult = await fileService.patchFileBySearch({
+      filePath,
+      searchCode,
+      replaceCode,
+      description,
+    });
+
+    if (!patchResult.success) {
+      return { success: false, error: patchResult.error || `Failed to patch file: ${filePath}` };
     }
 
-    try {
-      // Read the current file content
-      const readResult = await window.electronAPI.files.readFile(filePath);
-      if (!readResult.success || !readResult.data) {
-        return { success: false, error: `Could not read file: ${filePath}` };
-      }
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      role: 'system',
+      content: `✓ Patched ${filePath}: ${description}`,
+      timestamp: new Date()
+    }]);
 
-      const currentContent = readResult.data;
-
-      // Check if the search code exists in the file
-      if (!currentContent.includes(searchCode)) {
-        return { success: false, error: `Could not find the code to replace in ${filePath}. The file may have changed.` };
-      }
-
-      // Replace the code
-      const newContent = currentContent.replace(searchCode, replaceCode);
-
-      // Write the updated content
-      const writeResult = await window.electronAPI.files.writeFile(filePath, newContent);
-      if (!writeResult.success) {
-        return { success: false, error: `Failed to write file: ${filePath}` };
-      }
-
-      // Add success message to chat
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        role: 'system',
-        content: `✓ Patched ${filePath}: ${description}`,
-        timestamp: new Date()
-      }]);
-
-      return { success: true };
-    } catch (err) {
-      console.error('[AI] Failed to patch source file:', err);
-      return { success: false, error: (err as Error).message };
-    }
-  }, [isElectron]);
+    return { success: true };
+  }, []);
 
   // Handle list_files tool - list files in a directory
   const handleListFiles = useCallback(async (path?: string): Promise<string> => {
     console.log('[AI] Listing files:', path);
-    if (!isElectron || !window.electronAPI?.files) {
-      return 'Error: File listing only available in Electron mode';
-    }
     try {
-      const result = await window.electronAPI.files.listDirectory(path);
+      const result = await fileService.listDirectory(path);
       if (result.success && result.data) {
         const formatted = result.data.map(f =>
           `${f.isDirectory ? '📁' : '📄'} ${f.name}${f.isDirectory ? '/' : ''}`
         ).join('\n');
         return formatted || 'Empty directory';
       }
-      return 'Error: Could not list directory';
+      return 'Error: ' + (result.error || 'Could not list directory');
     } catch (err) {
       return 'Error: ' + (err as Error).message;
     }
-  }, [isElectron]);
+  }, []);
 
   // Handle read_file tool - read a file's contents
   const handleReadFile = useCallback(async (filePath: string): Promise<string> => {
     console.log('[AI] Reading file:', filePath);
-    if (!isElectron || !window.electronAPI?.files) {
-      return 'Error: File reading only available in Electron mode';
-    }
     try {
-      const result = await window.electronAPI.files.readFile(filePath);
-      if (result.success && result.data) {
-        // Truncate if too long
-        const content = result.data;
-        if (content.length > 10000) {
-          return content.substring(0, 10000) + '\n... (truncated, file is ' + content.length + ' chars)';
-        }
-        return content;
-      }
-      return 'Error: Could not read file';
+      const result = await fileService.readFile(filePath, { truncateAt: 10000 });
+      if (result.success && result.data) return result.data;
+      return 'Error: ' + (result.error || 'Could not read file');
     } catch (err) {
       return 'Error: ' + (err as Error).message;
     }
-  }, [isElectron]);
+  }, []);
 
   // Handle click_element tool - click on an element
   const handleClickElement = useCallback(async (selector: string): Promise<{ success: boolean; error?: string }> => {
@@ -2513,12 +2492,12 @@ export default function App() {
   // File Browser Overlay Functions
   const showFileBrowser = useCallback(async (path?: string): Promise<string> => {
     console.log('[FileBrowser] Opening:', path);
-    if (!isElectron || !window.electronAPI?.files) {
+    if (!isElectron) {
       return 'Error: File browser only available in Electron mode';
     }
     try {
       const targetPath = path || fileBrowserBasePath || '.';
-      const result = await window.electronAPI.files.listDirectory(targetPath);
+      const result = await fileService.listDirectory(targetPath);
       if (result.success && result.data) {
         const items: FileBrowserItem[] = result.data.map(f => ({
           name: f.name,
@@ -2580,10 +2559,7 @@ export default function App() {
 
     if (item.isDirectory) {
       // Open directory
-      if (!isElectron || !window.electronAPI?.files) {
-        return 'Error: File browser only available in Electron mode';
-      }
-      const result = await window.electronAPI.files.listDirectory(item.path);
+      const result = await fileService.listDirectory(item.path);
       if (result.success && result.data) {
         const items: FileBrowserItem[] = result.data.map(f => ({
           name: f.name,
@@ -2621,27 +2597,20 @@ export default function App() {
         return `Showing image "${item.name}"`;
       } else {
         // Read file content
-        if (!isElectron || !window.electronAPI?.files) {
-          return 'Error: File reading only available in Electron mode';
-        }
-        const result = await window.electronAPI.files.readFile(item.path);
+        const result = await fileService.readFile(item.path, { truncateAt: 50000 });
         if (result.success && result.data) {
-          const content = result.data.length > 50000
-            ? result.data.substring(0, 50000) + '\n... (truncated)'
-            : result.data;
-
           const panel: FileBrowserPanel = {
             type: 'file',
             path: item.path,
             title: item.name,
-            content
+            content: result.data
           };
           // Update ref immediately
           fileBrowserStackRef.current = [...currentStack, panel];
           setFileBrowserStack(prev => [...prev, panel]);
           return `Opened file "${item.name}"`;
         }
-        return 'Error: Could not read file';
+        return 'Error: ' + (result.error || 'Could not read file');
       }
     }
   }, [isElectron]); // Uses refs for state, so no dependency on fileBrowserVisible/fileBrowserStack
@@ -2740,11 +2709,11 @@ export default function App() {
       return 'Error: Could not find folder';
     }
 
-    if (!isElectron || !window.electronAPI?.files) {
+    if (!isElectron) {
       return 'Error: File browser only available in Electron mode';
     }
 
-    const result = await window.electronAPI.files.listDirectory(targetItem.path);
+    const result = await fileService.listDirectory(targetItem.path);
     if (result.success && result.data) {
       const items: FileBrowserItem[] = result.data.map(f => ({
         name: f.name,
@@ -2771,13 +2740,13 @@ export default function App() {
   const openFile = useCallback(async (name?: string, path?: string): Promise<string> => {
     console.log('[FileBrowser] Opening file:', name || path);
 
-    if (!isElectron || !window.electronAPI?.files) {
+    if (!isElectron) {
       return 'Error: File browser only available in Electron mode';
     }
 
     // If path is provided, use it directly
     if (path) {
-      const result = await window.electronAPI.files.readFile(path);
+      const result = await fileService.readFile(path, { truncateAt: 50000 });
       if (result.success && result.data) {
         const fileName = path.split('/').pop() || path;
         const ext = fileName.split('.').pop()?.toLowerCase();
@@ -2795,15 +2764,11 @@ export default function App() {
           setFileBrowserVisible(true);
           return `Showing image "${fileName}"`;
         } else {
-          const content = result.data.length > 50000
-            ? result.data.substring(0, 50000) + '\n... (truncated)'
-            : result.data;
-
           const panel: FileBrowserPanel = {
             type: 'file',
             path: path,
             title: fileName,
-            content
+            content: result.data
           };
           fileBrowserStackRef.current = [panel];
           fileBrowserVisibleRef.current = true;
@@ -2812,7 +2777,7 @@ export default function App() {
           return `Opened file "${fileName}"`;
         }
       }
-      return `Error: Could not read file at ${path}`;
+      return `Error: ${result.error || `Could not read file at ${path}`}`;
     }
 
     // Search by name
@@ -2829,7 +2794,7 @@ export default function App() {
     }
 
     // List directory and search for file
-    const result = await window.electronAPI.files.listDirectory(searchPath);
+    const result = await fileService.listDirectory(searchPath);
     if (result.success && result.data) {
       const lowerName = name.toLowerCase();
       // Find exact match first
@@ -2841,7 +2806,7 @@ export default function App() {
 
       if (found) {
         const filePath = `${searchPath}/${found.name}`.replace(/\/\//g, '/');
-        const fileResult = await window.electronAPI.files.readFile(filePath);
+        const fileResult = await fileService.readFile(filePath, { truncateAt: 50000 });
 
         if (fileResult.success && fileResult.data) {
           const ext = found.name.split('.').pop()?.toLowerCase();
@@ -2874,15 +2839,11 @@ export default function App() {
               setFileBrowserVisible(true);
               return `Showing image "${found.name}"`;
             } else {
-              const content = fileResult.data.length > 50000
-                ? fileResult.data.substring(0, 50000) + '\n... (truncated)'
-                : fileResult.data;
-
               const filePanel: FileBrowserPanel = {
                 type: 'file',
                 path: filePath,
                 title: found.name,
-                content
+                content: fileResult.data
               };
               fileBrowserStackRef.current = [dirPanel, filePanel];
               fileBrowserVisibleRef.current = true;
@@ -3019,28 +2980,25 @@ export default function App() {
 
   // Load available prompts and directory files on mount
   useEffect(() => {
-    if (isElectron && window.electronAPI?.files) {
-      // Load prompts
-      window.electronAPI.files.listPrompts().then(result => {
-        if (result.success && result.data) {
-          setAvailableCommands(result.data.map(name => ({ name, prompt: '' })));
-        }
-      });
-      // Load directory files
-      window.electronAPI.files.listDirectory().then(result => {
-        if (result.success && result.data) {
-          console.log('[Files] Loaded directory:', result.data.length, 'files');
-          setDirectoryFiles(result.data);
-        }
-      });
-    }
+    if (!isElectron) return;
+    fileService.listPrompts().then(result => {
+      if (result.success && result.data) {
+        setAvailableCommands(result.data.map(name => ({ name, prompt: '' })));
+      }
+    });
+    fileService.listDirectory().then(result => {
+      if (result.success && result.data) {
+        console.log('[Files] Loaded directory:', result.data.length, 'files');
+        setDirectoryFiles(result.data);
+      }
+    });
   }, [isElectron]);
 
   // Load directory listing for @ command
   const loadDirectoryFiles = useCallback(async (dirPath?: string) => {
-    if (!isElectron || !window.electronAPI?.files) return;
+    if (!isElectron) return;
     console.log('[@ Files] Loading directory:', dirPath || '(default)');
-    const result = await window.electronAPI.files.listDirectory(dirPath);
+    const result = await fileService.listDirectory(dirPath);
     if (result.success && result.data) {
       console.log('[@ Files] Loaded', result.data.length, 'files from:', dirPath || '(default)');
       setDirectoryFiles(result.data);
@@ -3071,9 +3029,9 @@ export default function App() {
 
   // Handle @ command - select a file from the list
   const handleFileSelect = useCallback(async (filePath: string) => {
-    if (!isElectron || !window.electronAPI?.files) return;
+    if (!isElectron) return;
 
-    const result = await window.electronAPI.files.selectFile(filePath);
+    const result = await fileService.selectFile(filePath);
     if (result.success && result.data) {
       const { path, content } = result.data;
 
@@ -3132,9 +3090,9 @@ export default function App() {
 
   // Handle / command - execute prompt
   const handleCommandSelect = useCallback(async (commandName: string) => {
-    if (!isElectron || !window.electronAPI?.files) return;
+    if (!isElectron) return;
 
-    const result = await window.electronAPI.files.readPrompt(commandName);
+    const result = await fileService.readPrompt(commandName);
     if (result.success && result.data) {
       setInput(result.data); // Replace input with prompt content
       setShowCommandAutocomplete(false);
@@ -4407,15 +4365,12 @@ export default function App() {
     // Handle file-based undo (restore original content)
     if (file.isFileModification && file.originalContent !== undefined) {
       console.log('[Undo] Restoring file:', path);
-      const { api: electronAPI } = getElectronAPI();
-      if (electronAPI?.files?.writeFile) {
-        const result = await electronAPI.files.writeFile(path, file.originalContent);
-        if (result.success) {
-          console.log('[Undo] File restored successfully');
-          setEditedFiles(prev => prev.filter(f => f.path !== path));
-        } else {
-          console.error('[Undo] Failed to restore file:', result.error);
-        }
+      const result = await fileService.writeFile(path, file.originalContent);
+      if (result.success) {
+        console.log('[Undo] File restored successfully');
+        setEditedFiles(prev => prev.filter(f => f.path !== path));
+      } else {
+        console.error('[Undo] Failed to restore file:', result.error);
       }
       return;
     }
@@ -4469,9 +4424,7 @@ export default function App() {
     for (const file of filesToUndo) {
       // Handle file-based undo with original content
       if (file.isFileModification && file.originalContent !== undefined) {
-        if (electronAPI?.files?.writeFile) {
-          await electronAPI.files.writeFile(file.path, file.originalContent).catch(() => {});
-        }
+        await fileService.writeFile(file.path, file.originalContent).catch(() => {});
       } else if (file.isFileModification) {
         // No original content - use git to restore
         if (electronAPI?.git?.checkoutFile) {
@@ -5782,12 +5735,18 @@ If you're not sure what the user wants, ask for clarification.
           console.log('[Instant UI] NO sourceLocation on selectedElement!');
         }
 
-        // Phase 1: Instant DOM update using Gemini Flash Lite (always use Google for instant UI since we need the API key anyway)
-        // This generates CSS/text changes based on user request - fast and cheap
-        const geminiModelForUI = 'gemini-2.5-flash-lite';
-        setStreamingMessage(prev => prev ? { ...prev, content: `🎯 Analyzing \`<${selectedElement.tagName.toLowerCase()}>\` element...\n\n⚡ Generating CSS changes with Gemini Flash Lite...` } : null);
+        // Phase 1: Instant DOM update using the currently selected model.
+        // If it's a Gemini model, use direct Google call; otherwise use AI SDK.
+        const uiModelForUpdate = selectedModelRef.current.id;
+        setStreamingMessage(prev => prev ? { ...prev, content: `🎯 Analyzing \`<${selectedElement.tagName.toLowerCase()}>\` element...\n\n⚡ Generating CSS changes with ${uiModelForUpdate}...` } : null);
 
-        const uiResult = await generateUIUpdate(selectedElement, userMessage.content, googleProvider.apiKey, geminiModelForUI);
+        const uiResult = await generateUIUpdate(
+          selectedElement,
+          userMessage.content,
+          googleProvider.apiKey,
+          uiModelForUpdate,
+          providerConfigsRef.current,
+        );
         const hasCssChanges = Object.keys(uiResult.cssChanges).length > 0;
         const hasTextChange = !!uiResult.textChange;
         const hasAnyChange = hasCssChanges || hasTextChange;
@@ -6526,7 +6485,7 @@ If you're not sure what the user wants, ask for clarification.
     }
 
     try {
-      const result = await window.electronAPI.files.readFile(filePath);
+      const result = await fileService.readFileFull(filePath);
       if (result.success && result.data) {
         const lines = result.data.split('\n');
         // Get lines around the target (with some context)
@@ -6688,10 +6647,6 @@ If you're not sure what the user wants, ask for clarification.
     }]);
 
     try {
-      if (!window.electronAPI?.files?.writeFile) {
-        console.log('[DOM Approval] ❌ ABORT: writeFile API not available');
-        throw new Error('File API not available');
-      }
       // Verify content actually changed
       const contentChanged = patch.originalContent !== patch.patchedContent;
       console.log('[DOM Approval] Content changed:', contentChanged);
@@ -6704,12 +6659,12 @@ If you're not sure what the user wants, ask for clarification.
       console.log('[DOM Approval] Patched length:', patch.patchedContent?.length || 0);
       console.log('[DOM Approval] First 200 chars of patched content:', patch.patchedContent?.substring(0, 200));
 
-      const result = await window.electronAPI.files.writeFile(patch.filePath, patch.patchedContent);
+      const result = await fileService.writeFile(patch.filePath, patch.patchedContent);
       console.log('[DOM Approval] writeFile result:', result);
 
       // Verify the write by reading it back
-      if (result.success && window.electronAPI?.files?.readFile) {
-        const verifyResult = await window.electronAPI.files.readFile(patch.filePath);
+      if (result.success) {
+        const verifyResult = await fileService.readFileFull(patch.filePath);
         if (verifyResult.success) {
           const matches = verifyResult.data === patch.patchedContent;
           console.log('[DOM Approval] Verification read-back:', matches ? '✅ MATCHES' : '❌ MISMATCH');
@@ -8543,24 +8498,23 @@ If you're not sure what the user wants, ask for clarification.
                       </button>
                       <button
                         onClick={async () => {
-                          if (window.electronAPI?.files?.writeFile && pendingPatch) {
-                            const result = await window.electronAPI.files.writeFile(
-                              pendingPatch.filePath,
-                              pendingPatch.patchedContent
-                            );
-                            if (result.success) {
-                              console.log('[Source Patch] Applied successfully');
-                              setMessages(prev => [...prev, {
-                                id: `msg-patch-${Date.now()}`,
-                                role: 'assistant',
-                                content: `Source code updated: ${pendingPatch.filePath.split('/').pop()}`,
-                                timestamp: new Date(),
-                              }]);
-                            } else {
-                              console.error('[Source Patch] Failed to apply:', result.error);
-                            }
-                            setPendingPatch(null);
+                          if (!pendingPatch) return;
+                          const result = await fileService.writeFile(
+                            pendingPatch.filePath,
+                            pendingPatch.patchedContent
+                          );
+                          if (result.success) {
+                            console.log('[Source Patch] Applied successfully');
+                            setMessages(prev => [...prev, {
+                              id: `msg-patch-${Date.now()}`,
+                              role: 'assistant',
+                              content: `Source code updated: ${pendingPatch.filePath.split('/').pop()}`,
+                              timestamp: new Date(),
+                            }]);
+                          } else {
+                            console.error('[Source Patch] Failed to apply:', result.error);
                           }
+                          setPendingPatch(null);
                         }}
                         className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
                           isDarkMode

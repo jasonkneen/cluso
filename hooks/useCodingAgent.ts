@@ -4,6 +4,7 @@ import { ToolsMap, ToolDefinition, mcpToolsToAISDKFormat, MCPToolDefinition, MCP
 import { SelectedElement, Message } from '../types'
 import { getSystemPrompt, getPromptModeForIntent, type PromptMode } from '../utils/systemPrompts'
 import { getElectronAPI } from './useElectronAPI'
+import { fileService } from '../services/FileService'
 
 // Intent classification types - designed to be combinable (e.g., ui_modify + research)
 export type IntentType =
@@ -628,11 +629,7 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
         if (!resolvedPath) {
           return { error: 'read_file requires a "path" argument' }
         }
-        const { api: electronAPI } = getElectronAPI()
-        if (!electronAPI?.files?.readFile) {
-          return { error: 'File operations not available (not in Electron)' }
-        }
-        const result = await electronAPI.files.readFile(resolvedPath)
+        const result = await fileService.readFileFull(resolvedPath)
         if (result.success) {
           return { content: result.data, path: resolvedPath }
         }
@@ -648,19 +645,13 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
       }),
       execute: async (args: unknown) => {
         const { path, content } = args as { path: string; content: string }
-        const { api: electronAPI } = getElectronAPI()
-        if (!electronAPI?.files?.writeFile) {
-          return { error: 'File operations not available (not in Electron)' }
-        }
         // Read original content for undo capability
         let originalContent: string | undefined
-        if (electronAPI?.files?.readFile) {
-          const readResult = await electronAPI.files.readFile(path)
-          if (readResult.success) {
-            originalContent = readResult.data
-          }
+        const readResult = await fileService.readFileFull(path)
+        if (readResult.success) {
+          originalContent = readResult.data
         }
-        const result = await electronAPI.files.writeFile(path, content)
+        const result = await fileService.writeFile(path, content)
         if (result.success) {
           // Notify about file modification for edited files drawer
           onFileModified?.({
@@ -683,11 +674,7 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
       }),
       execute: async (args: unknown) => {
         const { path, content } = args as { path: string; content?: string }
-        const { api: electronAPI } = getElectronAPI()
-        if (!electronAPI?.files?.createFile) {
-          return { error: 'File operations not available (not in Electron)' }
-        }
-        const result = await electronAPI.files.createFile(path, content || '')
+        const result = await fileService.createFile(path, content || '')
         if (result.success) {
           // Notify about file creation for edited files drawer
           onFileModified?.({
@@ -708,19 +695,13 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path: string }
-        const { api: electronAPI } = getElectronAPI()
-        if (!electronAPI?.files?.deleteFile) {
-          return { error: 'File operations not available (not in Electron)' }
-        }
         // Read original content for undo capability before deleting
         let originalContent: string | undefined
-        if (electronAPI?.files?.readFile) {
-          const readResult = await electronAPI.files.readFile(path)
-          if (readResult.success) {
-            originalContent = readResult.data
-          }
+        const readResult = await fileService.readFileFull(path)
+        if (readResult.success) {
+          originalContent = readResult.data
         }
-        const result = await electronAPI.files.deleteFile(path)
+        const result = await fileService.deleteFile(path)
         if (result.success) {
           // Notify about file deletion for edited files drawer
           onFileModified?.({
@@ -742,11 +723,7 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
       }),
       execute: async (args: unknown) => {
         const { oldPath, newPath } = args as { oldPath: string; newPath: string }
-        const { api: electronAPI } = getElectronAPI()
-        if (!electronAPI?.files?.renameFile) {
-          return { error: 'File operations not available (not in Electron)' }
-        }
-        const result = await electronAPI.files.renameFile(oldPath, newPath)
+        const result = await fileService.renameFile(oldPath, newPath)
         if (result.success) {
           return { success: true, oldPath, newPath }
         }
@@ -761,11 +738,7 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path?: string }
-        const { api: electronAPI } = getElectronAPI()
-        if (!electronAPI?.files?.listDirectory) {
-          return { error: 'File operations not available (not in Electron)' }
-        }
-        const result = await electronAPI.files.listDirectory(path)
+        const result = await fileService.listDirectory(path)
         if (result.success) {
           return { entries: result.data, path: path || 'project root' }
         }
@@ -780,11 +753,7 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path: string }
-        const { api: electronAPI } = getElectronAPI()
-        if (!electronAPI?.files?.createDirectory) {
-          return { error: 'File operations not available (not in Electron)' }
-        }
-        const result = await electronAPI.files.createDirectory(path)
+        const result = await fileService.createDirectory(path)
         if (result.success) {
           return { success: true, path }
         }
@@ -799,11 +768,7 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path: string }
-        const { api: electronAPI } = getElectronAPI()
-        if (!electronAPI?.files?.exists) {
-          return { error: 'File operations not available (not in Electron)' }
-        }
-        const result = await electronAPI.files.exists(path)
+        const result = await fileService.exists(path)
         return { exists: result.exists, path }
       },
     } as ToolDefinition,
@@ -815,11 +780,7 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
       }),
       execute: async (args: unknown) => {
         const { path } = args as { path: string }
-        const { api: electronAPI } = getElectronAPI()
-        if (!electronAPI?.files?.stat) {
-          return { error: 'File operations not available (not in Electron)' }
-        }
-        const result = await electronAPI.files.stat(path)
+        const result = await fileService.stat(path)
         if (result.success) {
           return { ...result.data, path }
         }
@@ -883,11 +844,7 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
           caseSensitive?: boolean
           maxResults?: number
         }
-        const { api: electronAPI } = getElectronAPI()
-        if (!electronAPI?.files?.searchInFiles) {
-          return { error: 'Search not available (not in Electron)' }
-        }
-        const result = await electronAPI.files.searchInFiles(pattern, directory, {
+        const result = await fileService.searchInFiles(pattern, directory, {
           filePattern,
           caseSensitive,
           maxResults,
@@ -938,18 +895,16 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
         }
 
         // Fallback to grep-based search
-        if (electronAPI?.files?.searchInFiles) {
-          const result = await electronAPI.files.searchInFiles(query, undefined, { maxResults: limit || 10 })
-          if (result.success) {
-            return {
-              matches: result.data,
-              count: result.data.length,
-              semantic: false,
-              warning: '⚠️ Fell back to keyword search (slower, less accurate). Code Index not initialized - go to Settings → Code Index to enable AI-powered semantic search for better results.',
-            }
+        const grepResult = await fileService.searchInFiles(query, undefined, { maxResults: limit || 10 })
+        if (grepResult.success) {
+          return {
+            matches: grepResult.data,
+            count: grepResult.data.length,
+            semantic: false,
+            warning: '⚠️ Fell back to keyword search (slower, less accurate). Code Index not initialized - go to Settings → Code Index to enable AI-powered semantic search for better results.',
           }
-          return { error: result.error }
         }
+        if (grepResult.error) return { error: grepResult.error }
 
         return { error: 'Search not available. Enable Code Index in Settings for semantic search.' }
       },
@@ -964,11 +919,7 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
       }),
       execute: async (args: unknown) => {
         const { pattern, directory } = args as { pattern: string; directory?: string }
-        const { api: electronAPI } = getElectronAPI()
-        if (!electronAPI?.files?.glob) {
-          return { error: 'Glob not available (not in Electron)' }
-        }
-        const result = await electronAPI.files.glob(pattern, directory)
+        const result = await fileService.glob(pattern, directory)
         if (result.success) {
           return { files: result.data, count: result.data.length }
         }
@@ -985,11 +936,7 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
       }),
       execute: async (args: unknown) => {
         const { sourcePath, destPath } = args as { sourcePath: string; destPath: string }
-        const { api: electronAPI } = getElectronAPI()
-        if (!electronAPI?.files?.copyFile) {
-          return { error: 'Copy not available (not in Electron)' }
-        }
-        const result = await electronAPI.files.copyFile(sourcePath, destPath)
+        const result = await fileService.copyFile(sourcePath, destPath)
         if (result.success) {
           return { success: true, sourcePath, destPath }
         }
@@ -1005,11 +952,7 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
       }),
       execute: async (args: unknown) => {
         const { paths } = args as { paths: string[] }
-        const { api: electronAPI } = getElectronAPI()
-        if (!electronAPI?.files?.readMultiple) {
-          return { error: 'Read multiple not available (not in Electron)' }
-        }
-        const result = await electronAPI.files.readMultiple(paths)
+        const result = await fileService.readMultiple(paths)
         if (result.success) {
           return { files: result.data }
         }
@@ -1031,11 +974,7 @@ export function createCodingAgentTools(options: CreateCodingAgentToolsOptions = 
           maxDepth?: number
           includeHidden?: boolean
         }
-        const { api: electronAPI } = getElectronAPI()
-        if (!electronAPI?.files?.getTree) {
-          return { error: 'Get tree not available (not in Electron)' }
-        }
-        const result = await electronAPI.files.getTree(directory, { maxDepth, includeHidden })
+        const result = await fileService.getTree(directory, { maxDepth, includeHidden })
         if (result.success) {
           return { tree: result.data }
         }

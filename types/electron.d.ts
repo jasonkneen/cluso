@@ -617,6 +617,7 @@ interface ElectronFastApplyAPI {
 // Selector Agent types (persistent Claude Agent SDK session for element selection)
 interface SelectorAgentInitOptions {
   cwd?: string
+  modelId?: string
 }
 
 interface SelectorAgentResult {

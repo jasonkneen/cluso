@@ -40,6 +40,7 @@ import { apiClient } from '../services/apiClient'
 import { FastApplySettings } from './FastApplySettings'
 import { CodeIndexSettings } from './CodeIndexSettings'
 import { useTheme } from '../hooks/useTheme'
+import { fileService } from '../services/FileService'
 
 type SettingsSection = 'general' | 'display' | 'providers' | 'models' | 'mcp' | 'lsp' | 'themes' | 'codeindex' | 'pro'
 
@@ -393,12 +394,12 @@ export function SettingsDialog({
     try {
       // Get project path from files API if available
       let projectPath = undefined
-      if (window.electronAPI?.files?.getCwd) {
-        try {
-          const result = await window.electronAPI.files.getCwd()
-          if (result?.path) projectPath = result.path
-        } catch {}
-      }
+      try {
+        const cwdResult = await fileService.getCwd()
+        if (cwdResult.success && cwdResult.data) {
+          projectPath = cwdResult.data
+        }
+      } catch {}
 
       const result = await window.electronAPI.mcp.discover(projectPath)
       if (result.success && result.discovered) {

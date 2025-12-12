@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react'
+import { fileService } from '../services/FileService'
 
 interface IndexStats {
   totalFiles: number
@@ -371,7 +372,7 @@ export function CodeIndexSettings({ isDarkMode, projectPath }: CodeIndexSettings
             if (!window.electronAPI?.files?.searchInFiles) return null
             const start = performance.now()
             try {
-              const result = await window.electronAPI.files.searchInFiles(searchQuery, searchProject, { maxResults: 5 })
+              const result = await fileService.searchInFiles(searchQuery, searchProject, { maxResults: 5 })
               const time = performance.now() - start
               setGrepTime(time)
               if (result.success && result.data) {
@@ -407,7 +408,7 @@ export function CodeIndexSettings({ isDarkMode, projectPath }: CodeIndexSettings
         // Grep search only
         if (!window.electronAPI?.files?.searchInFiles) return
         const start = performance.now()
-        const result = await window.electronAPI.files.searchInFiles(searchQuery, searchProject, { maxResults: 5 })
+        const result = await fileService.searchInFiles(searchQuery, searchProject, { maxResults: 5 })
         const time = performance.now() - start
         setGrepTime(time)
 

@@ -9,6 +9,7 @@
  */
 
 import type { MCPServerConfig } from '../types/mcp'
+import { fileService } from '../services/FileService'
 
 /**
  * Source of the discovered MCP configuration
@@ -85,18 +86,18 @@ export async function discoverFromFile(
 
   try {
     // Check if file exists
-    const exists = await window.electronAPI.files.exists(filePath)
-    if (!exists) {
+    const existsResult = await fileService.exists(filePath)
+    if (!existsResult.success || !existsResult.exists) {
       return []
     }
 
     // Read and parse the config file
-    const content = await window.electronAPI.files.readFile(filePath)
-    if (!content || typeof content !== 'string') {
+    const content = await fileService.readFileFull(filePath)
+    if (!content.success || !content.data) {
       return []
     }
 
-    const config: ClaudeCodeMCPConfig = JSON.parse(content)
+    const config: ClaudeCodeMCPConfig = JSON.parse(content.data)
     const results: MCPDiscoveryResult[] = []
 
     if (config.mcpServers) {
@@ -142,9 +143,9 @@ export async function discoverGlobalServers(): Promise<MCPDiscoveryResult[]> {
     // Try to get it from the Electron API
     try {
       if (window.electronAPI?.files?.getCwd) {
-        const cwd = await window.electronAPI.files.getCwd()
+        const cwd = await fileService.getCwd()
         // Parse home from cwd - usually /Users/xxx/something
-        const match = cwd?.match(/^(\/Users\/[^/]+|\/home\/[^/]+|C:\\Users\\[^\\]+)/)
+        const match = cwd.data?.match(/^(\/Users\/[^/]+|\/home\/[^/]+|C:\\Users\\[^\\]+)/)
         if (match) {
           homePath = match[1]
         }
