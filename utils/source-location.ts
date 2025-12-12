@@ -6,7 +6,8 @@ import {
 } from 'bippy';
 
 import {
-  getSourceFromHostInstance,
+  getSource,
+  type FiberSource,
 } from 'bippy/source';
 
 import { debugLog } from './debug';
@@ -25,14 +26,33 @@ export interface ElementSourceInfo {
 
 /**
  * Get source location information for a DOM element
- * Uses bippy's built-in getSourceFromHostInstance for accurate source mapping
+ * Uses bippy's getFiberFromHostInstance and getSource for accurate source mapping
  */
 export async function getElementSourceLocation(element: HTMLElement): Promise<ElementSourceInfo | null> {
   try {
     debugLog.sourcePatch.log('Attempting to get source for element:', element.tagName, element.id || element.className);
 
-    // Use bippy's getSourceFromHostInstance - this handles all the complexity
-    const sourceInfo = await getSourceFromHostInstance(element);
+    // Get the fiber from the DOM element
+    const fiber = getFiberFromHostInstance(element);
+    if (!fiber) {
+      debugLog.sourcePatch.warn('No fiber found for element');
+      return null;
+    }
+
+    // Get the latest fiber and walk up to find a composite (component) fiber
+    const latestFiber = getLatestFiber(fiber);
+    let compositeFiber: Fiber | null = latestFiber;
+    while (compositeFiber && !isCompositeFiber(compositeFiber)) {
+      compositeFiber = compositeFiber.return;
+    }
+
+    if (!compositeFiber) {
+      debugLog.sourcePatch.warn('No composite fiber found');
+      return null;
+    }
+
+    // Use bippy's getSource to get source location
+    const sourceInfo: FiberSource | null = await getSource(compositeFiber);
 
     debugLog.sourcePatch.log('Source info from bippy:', sourceInfo);
 
@@ -131,7 +151,7 @@ export function initSourceLocationTracking() {
   console.log('[SourceLocation] API available at window.__SOURCE_LOCATION__');
   console.log('[SourceLocation] Testing bippy availability:', {
     getFiberFromHostInstance: typeof getFiberFromHostInstance,
-    getSourceFromHostInstance: typeof getSourceFromHostInstance,
+    getSource: typeof getSource,
   });
 
   // Test if React is available

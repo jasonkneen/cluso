@@ -1,0 +1,255 @@
+import React, { useRef, useEffect, useState, useCallback, memo } from 'react'
+import { cn } from '@/lib/utils'
+import { Ghost } from 'lucide-react'
+import { BaseNode } from './BaseNode'
+
+export interface TerminalNodeProps {
+  id: string
+  x: number
+  y: number
+  width: number
+  height: number
+  zIndex: number
+  isDarkMode: boolean
+  // WebSocket URL for PTY connection
+  wsUrl: string
+  // Callbacks
+  onMove: (x: number, y: number) => void
+  onResize: (width: number, height: number) => void
+  onRemove: () => void
+  onFocus: () => void
+  // Chromeless mode
+  chromeless?: boolean
+  // Canvas scale for fixed-size toolbar
+  canvasScale?: number
+}
+
+export const TerminalNode = memo(function TerminalNode({
+  id,
+  x,
+  y,
+  width,
+  height,
+  zIndex,
+  isDarkMode,
+  wsUrl,
+  onMove,
+  onResize,
+  onRemove,
+  onFocus,
+  chromeless,
+  canvasScale,
+}: TerminalNodeProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const terminalRef = useRef<unknown>(null)
+  const fitAddonRef = useRef<unknown>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const [isConnected, setIsConnected] = useState(false)
+  const initializedRef = useRef(false)
+
+  // Initialize terminal - runs once on mount
+  useEffect(() => {
+    // Prevent double initialization from StrictMode
+    if (initializedRef.current) return
+
+    let mounted = true
+    let ws: WebSocket | null = null
+
+    async function initTerminal() {
+      if (!containerRef.current) return
+
+      try {
+        // Dynamic import ghostty-web
+        const ghostty = await import('ghostty-web')
+        await ghostty.init()
+
+        if (!mounted || !containerRef.current) return
+
+        // Mark as initialized BEFORE creating terminal to prevent race conditions
+        initializedRef.current = true
+
+        const term = new ghostty.Terminal({
+          cols: 80,
+          rows: 24,
+          fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, monospace',
+          fontSize: 13,
+          theme: {
+            background: isDarkMode ? '#1e1e1e' : '#fafaf9',
+            foreground: isDarkMode ? '#d4d4d4' : '#292524',
+            cursor: isDarkMode ? '#d4d4d4' : '#292524',
+          },
+        })
+
+        const fitAddon = new ghostty.FitAddon()
+        term.loadAddon(fitAddon)
+
+        await term.open(containerRef.current)
+        fitAddon.fit()
+
+        terminalRef.current = term
+        fitAddonRef.current = fitAddon
+
+        // Force canvas to 100% (fit sets pixel values)
+        const canvas = containerRef.current?.querySelector('canvas')
+        if (canvas) {
+          canvas.style.display = 'block'
+          canvas.style.width = '100%'
+          canvas.style.height = '100%'
+        }
+
+        // Connect to WebSocket PTY
+        if (wsUrl && mounted) {
+          // @ts-expect-error - terminal type
+          const cols = term.cols || 80
+          // @ts-expect-error - terminal type
+          const rows = term.rows || 24
+          const url = `${wsUrl}?cols=${cols}&rows=${rows}`
+
+          ws = new WebSocket(url)
+          wsRef.current = ws
+
+          ws.onopen = () => {
+            if (mounted) {
+              setIsConnected(true)
+            } else {
+              ws?.close()
+            }
+          }
+
+          ws.onmessage = (event) => {
+            if (mounted && terminalRef.current) {
+              // @ts-expect-error - terminal write method
+              terminalRef.current.write?.(event.data)
+            }
+          }
+
+          ws.onclose = () => {
+            if (mounted) {
+              setIsConnected(false)
+              // Only write if terminal is still active (not disposed)
+              try {
+                // @ts-expect-error - terminal write method
+                if (terminalRef.current) terminalRef.current.write?.('\r\n\x1b[33mConnection closed.\x1b[0m\r\n')
+              } catch {
+                // Terminal was disposed, ignore
+              }
+            }
+          }
+
+          ws.onerror = () => {
+            if (mounted) {
+              setIsConnected(false)
+            }
+          }
+        }
+
+        // Handle terminal input
+        term.onData((data: string) => {
+          if (mounted && wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(data)
+          }
+        })
+
+        // Handle resize
+        term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
+          if (mounted && wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }))
+          }
+        })
+      } catch (error) {
+        console.error('[TerminalNode] Failed to initialize terminal:', error)
+        initializedRef.current = false
+      }
+    }
+
+    initTerminal()
+
+    return () => {
+      mounted = false
+      // Close WebSocket
+      if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+        ws.close()
+      }
+      wsRef.current = null
+      // Dispose terminal
+      // @ts-expect-error - terminal dispose method
+      terminalRef.current?.dispose?.()
+      terminalRef.current = null
+      fitAddonRef.current = null
+      // Reset initialized flag on unmount so a new instance can initialize
+      initializedRef.current = false
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Force canvas to 100% dimensions (not pixels)
+  const fixCanvasSize = useCallback(() => {
+    const canvas = containerRef.current?.querySelector('canvas')
+    if (canvas) {
+      canvas.style.display = 'block'
+      canvas.style.width = '100%'
+      canvas.style.height = '100%'
+    }
+  }, [])
+
+  // Fit terminal when size changes
+  useEffect(() => {
+    if (fitAddonRef.current) {
+      // Small delay to let the container resize first
+      const timer = setTimeout(() => {
+        // @ts-expect-error - fitAddon fit method
+        fitAddonRef.current?.fit?.()
+        // Fix canvas size after fit (fit sets pixel values)
+        fixCanvasSize()
+      }, 50)
+      return () => clearTimeout(timer)
+    }
+  }, [width, height, fixCanvasSize])
+
+  // Title bar extras
+  const titleBarExtra = (
+    <div className="flex items-center gap-1">
+      <span className={cn(
+        "w-2 h-2 rounded-full",
+        isConnected ? "bg-green-500" : "bg-red-500"
+      )} />
+    </div>
+  )
+
+  // Toolbar controls for chromeless mode
+  const toolbarControls = (
+    <div className="flex items-center gap-1">
+      <span className={cn(
+        "w-2 h-2 rounded-full",
+        isConnected ? "bg-green-500" : "bg-red-500"
+      )} />
+    </div>
+  )
+
+  return (
+    <BaseNode
+      id={id}
+      x={x}
+      y={y}
+      width={width}
+      height={height}
+      zIndex={zIndex}
+      isDarkMode={isDarkMode}
+      title="Terminal"
+      icon={<Ghost size={12} className={isDarkMode ? "text-neutral-400" : "text-stone-500"} />}
+      titleBarExtra={titleBarExtra}
+      toolbarControls={toolbarControls}
+      onMove={onMove}
+      onResize={onResize}
+      onRemove={onRemove}
+      onFocus={onFocus}
+      chromeless={chromeless}
+      canvasScale={canvasScale}
+    >
+      <div
+        ref={containerRef}
+        className="w-full h-full overflow-hidden"
+        style={{ backgroundColor: isDarkMode ? '#1e1e1e' : '#fafaf9' }}
+      />
+    </BaseNode>
+  )
+})

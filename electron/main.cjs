@@ -23,6 +23,7 @@ const registerLspHandlers = require('./ipc/lsp-handlers.cjs')
 const registerVoiceHandlers = require('./ipc/voice-handlers.cjs')
 const registerAgentHandlers = require('./ipc/agent-handlers.cjs')
 const registerTabDataHandlers = require('./ipc/tab-data-handlers.cjs')
+const ptyServer = require('./pty-server.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -2204,6 +2205,9 @@ app.whenReady().then(async () => {
   lsp.setMainWindow(mainWindow)
   mgrep.setMainWindow(mainWindow)
 
+  // Start PTY WebSocket server for terminal support
+  ptyServer.start(3001)
+
   // Auto-load Fast Apply if it was enabled in previous session
   try {
     const fa = getFastApply()
@@ -2232,6 +2236,8 @@ app.on('window-all-closed', () => {
   // Stop all file watchers before quitting
   fileWatcher.stopAll()
   mgrep.shutdown()
+  // Stop PTY server
+  ptyServer.stop()
   if (process.platform !== 'darwin') {
     app.quit()
   }

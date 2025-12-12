@@ -9,7 +9,7 @@ export interface DevicePreset {
 }
 
 // Window types - device viewports or internal app windows
-export type WindowType = 'device' | 'kanban' | 'todo' | 'notes'
+export type WindowType = 'device' | 'kanban' | 'todo' | 'notes' | 'terminal'
 
 export interface Viewport {
   id: string

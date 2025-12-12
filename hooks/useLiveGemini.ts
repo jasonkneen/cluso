@@ -671,18 +671,39 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
       if (!AudioContextClass) throw new Error('AudioContext not supported');
       inputAudioContextRef.current = new AudioContextClass({ sampleRate: 16000 });
       outputAudioContextRef.current = new AudioContextClass({ sampleRate: 24000 });
+
+      // Resume audio contexts (required by browsers after user interaction)
+      if (inputAudioContextRef.current.state === 'suspended') {
+        await inputAudioContextRef.current.resume();
+        debugLog.liveGemini.log('Input AudioContext resumed');
+      }
+      if (outputAudioContextRef.current.state === 'suspended') {
+        await outputAudioContextRef.current.resume();
+        debugLog.liveGemini.log('Output AudioContext resumed');
+      }
       analyserRef.current = outputAudioContextRef.current.createAnalyser();
       analyserRef.current.fftSize = 256;
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
 
-      // Build model name with native audio support
-      // Only use Gemini models for Live API - fall back to Flash if non-Gemini selected
-      const baseModel = selectedModelId && selectedModelId.startsWith('gemini-')
-        ? selectedModelId
-        : 'gemini-2.5-flash';
-      const modelName = `${baseModel}-native-audio-preview-09-2025`;
+      // Gemini Live API only supports specific models
+      // Force use of gemini-2.0-flash-exp which is known to work with Live API
+      const liveCompatibleModels = [
+        'gemini-2.0-flash-exp',
+        'gemini-2.0-flash-live-001',
+        'gemini-2.0-flash',
+      ];
+
+      // Check if selected model is Live API compatible, otherwise use default
+      let modelName = 'gemini-2.0-flash-exp'; // Default to known working model
+      if (selectedModelId && liveCompatibleModels.some(m => selectedModelId.includes(m))) {
+        modelName = selectedModelId;
+      }
+
+      debugLog.liveGemini.log('Connecting to Gemini Live with model:', modelName);
+      debugLog.liveGemini.log('Selected model was:', selectedModelId, '(Live API requires 2.0 models)');
+      debugLog.liveGemini.log('API key present:', !!apiKey, 'length:', apiKey?.length);
 
       const sessionPromise = aiRef.current.live.connect({
         model: modelName,
@@ -788,21 +809,61 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
         callbacks: {
           onopen: () => {
             debug("Connection Opened");
+            debugLog.liveGemini.log('Gemini Live connection opened successfully');
+            debugLog.liveGemini.log('Input AudioContext state:', inputAudioContextRef.current?.state);
+            debugLog.liveGemini.log('Media stream tracks:', mediaStreamRef.current?.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, muted: t.muted })));
             reconnectAttemptRef.current = 0; // Reset reconnect counter on successful connection
             setStreamState(prev => ({ ...prev, isConnected: true }));
 
-            if (!inputAudioContextRef.current) return;
-            
+            if (!inputAudioContextRef.current) {
+              debugLog.liveGemini.error('Input AudioContext is null!');
+              return;
+            }
+
+            // Ensure AudioContext is running (may have been suspended during connection delay)
+            if (inputAudioContextRef.current.state === 'suspended') {
+              inputAudioContextRef.current.resume().then(() => {
+                debugLog.liveGemini.log('Input AudioContext resumed in onopen');
+              });
+            }
+
             const source = inputAudioContextRef.current.createMediaStreamSource(stream);
             const processor = inputAudioContextRef.current.createScriptProcessor(4096, 1, 1);
             
+            let audioChunkCount = 0;
             processor.onaudioprocess = (e) => {
+               // Skip if session is closed or closing
+               if (!sessionPromiseRef.current) return;
+
                const inputData = e.inputBuffer.getChannelData(0);
+
+               // Check if there's actual audio data (not silence)
+               let maxAmplitude = 0;
+               for (let i = 0; i < inputData.length; i++) {
+                 const absVal = Math.abs(inputData[i]);
+                 if (absVal > maxAmplitude) maxAmplitude = absVal;
+               }
+
                const blob = createAudioBlob(inputData);
 
-               withSession(session => {
-                 session.sendRealtimeInput({ media: blob });
+               // Only send if session still exists
+               sessionPromiseRef.current?.then(session => {
+                 if (session && sessionPromiseRef.current) {
+                   try {
+                     session.sendRealtimeInput({ media: blob });
+                   } catch (err) {
+                     // Silently ignore send errors when connection is closing
+                   }
+                 }
+               }).catch(() => {
+                 // Session closed, ignore
                });
+
+               // Log every 50th chunk to avoid spam
+               audioChunkCount++;
+               if (audioChunkCount % 50 === 0) {
+                 debugLog.liveGemini.log(`Audio chunk ${audioChunkCount}, max amplitude: ${maxAmplitude.toFixed(4)}`);
+               }
             };
             
             source.connect(processor);
@@ -915,17 +976,38 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
             }
           },
           onclose: () => {
-            debug("Connection Closed - Auto-reconnecting");
-            // Keep stream open for instant DOM edits and follow-ups
-            // Auto-reconnect immediately to maintain persistent connection
-            debugLog.liveGemini.log('Stream closed, auto-reconnecting to maintain persistent connection...');
+            debug("Connection Closed");
+            debugLog.liveGemini.log('Stream closed');
 
-            // Reconnect immediately without delay to keep stream open
-            reconnectAttemptRef.current = 0; // Reset counter on close since we auto-reconnect
-            connect().catch(err => {
-              debugLog.liveGemini.error('Auto-reconnect failed:', err);
-              setStreamState(prev => ({ ...prev, error: 'Auto-reconnect failed. Click connect to try again.' }));
-            });
+            // Clean up audio processing to stop "WebSocket closed" errors
+            if (scriptProcessorRef.current) {
+              scriptProcessorRef.current.disconnect();
+              scriptProcessorRef.current = null;
+            }
+
+            // Only auto-reconnect if we still have a session reference (not manually disconnected)
+            if (sessionPromiseRef.current && reconnectAttemptRef.current < maxReconnectAttempts) {
+              reconnectAttemptRef.current++;
+              const delay = 1000; // 1 second delay before reconnect
+              debugLog.liveGemini.log(`Auto-reconnecting in ${delay}ms (attempt ${reconnectAttemptRef.current}/${maxReconnectAttempts})...`);
+
+              reconnectTimeoutRef.current = window.setTimeout(() => {
+                // Double-check we should still reconnect
+                if (sessionPromiseRef.current === null) {
+                  debugLog.liveGemini.log('Reconnect cancelled - session was manually closed');
+                  return;
+                }
+                sessionPromiseRef.current = null; // Clear before reconnecting
+                connect().catch(err => {
+                  debugLog.liveGemini.error('Auto-reconnect failed:', err);
+                  setStreamState(prev => ({ ...prev, error: 'Auto-reconnect failed. Click connect to try again.' }));
+                });
+              }, delay);
+            } else if (reconnectAttemptRef.current >= maxReconnectAttempts) {
+              debugLog.liveGemini.log('Max reconnect attempts reached');
+              setStreamState(prev => ({ ...prev, isConnected: false, error: 'Connection lost. Click to reconnect.' }));
+              cleanup(true);
+            }
           },
           onerror: (err) => {
             debugLog.liveGemini.error("Connection Error", err);

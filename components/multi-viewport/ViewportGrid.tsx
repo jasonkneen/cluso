@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { DeviceNode } from './nodes/DeviceNode'
 import { InternalNode, getInternalWindowConfig } from './nodes/InternalNode'
+import { TerminalNode } from './nodes/TerminalNode'
 import { ConnectionLines } from './canvas/ConnectionLines'
 import { calculateLayout, calculateFitView, LayoutDirection, LayoutAlgorithm } from './canvas/elkLayout'
 import { Viewport, WindowType, DEVICE_PRESETS, getPresetById, getPresetsByType } from './types'
@@ -26,11 +27,14 @@ interface ViewportGridProps {
   renderKanban?: () => React.ReactNode
   renderTodo?: () => React.ReactNode
   renderNotes?: () => React.ReactNode
+  // Terminal WebSocket URL for PTY connection
+  terminalWsUrl?: string
   // External control refs for toolbar integration
   controlsRef?: React.MutableRefObject<{
     viewportCount: number
     addDevice: (type: 'mobile' | 'tablet' | 'desktop') => void
     addInternalWindow: (type: 'kanban' | 'todo' | 'notes') => void
+    addTerminal: () => void
     autoLayout: (direction?: LayoutDirection) => void
     fitView: () => void
   } | null>
@@ -102,6 +106,7 @@ export function ViewportGrid({
   renderKanban,
   renderTodo,
   renderNotes,
+  terminalWsUrl,
   controlsRef,
   onViewportCountChange,
   nodeStyle = 'standard',
@@ -226,6 +231,24 @@ export function ViewportGrid({
       linkedToViewportId: linkedToId,
     }])
   }, [viewports, getNextPosition])
+
+  // Add terminal window - use ref to avoid stale closure
+  const addTerminal = useCallback(() => {
+    const { x, y } = getNextPosition()
+    const newZ = maxZIndexRef.current + 1
+    maxZIndexRef.current = newZ
+    setMaxZIndex(newZ)
+
+    setViewports(prev => [...prev, {
+      id: crypto.randomUUID(),
+      windowType: 'terminal',
+      displayWidth: 600,
+      displayHeight: 400,
+      x,
+      y,
+      zIndex: newZ,
+    }])
+  }, [getNextPosition])
 
   // Update viewport
   const updateViewport = useCallback((id: string, updates: Partial<Viewport>) => {
@@ -431,12 +454,13 @@ export function ViewportGrid({
         viewportCount: viewports.length,
         addDevice,
         addInternalWindow: (type) => addInternalWindow(type),
+        addTerminal,
         autoLayout,
         fitView,
       }
     }
     onViewportCountChange?.(viewports.length)
-  }, [viewports.length, controlsRef, onViewportCountChange, addDevice, addInternalWindow, autoLayout, fitView])
+  }, [viewports.length, controlsRef, onViewportCountChange, addDevice, addInternalWindow, addTerminal, autoLayout, fitView])
 
   return (
     <div
@@ -508,6 +532,27 @@ export function ViewportGrid({
                   canvasScale={scale}
                 />
               )
+            } else if (viewport.windowType === 'terminal') {
+              // Terminal node
+              return (
+                <TerminalNode
+                  key={viewport.id}
+                  id={viewport.id}
+                  x={viewport.x ?? 0}
+                  y={viewport.y ?? 0}
+                  width={viewport.displayWidth ?? 600}
+                  height={viewport.displayHeight ?? 400}
+                  zIndex={viewport.zIndex ?? 1}
+                  isDarkMode={isDarkMode}
+                  wsUrl={terminalWsUrl ?? 'ws://localhost:3001/pty'}
+                  onMove={(x, y) => updateViewport(viewport.id, { x, y })}
+                  onResize={(w, h) => updateViewport(viewport.id, { displayWidth: w, displayHeight: h })}
+                  onRemove={() => removeViewport(viewport.id)}
+                  onFocus={() => bringToFront(viewport.id)}
+                  chromeless={nodeStyle === 'chromeless'}
+                  canvasScale={scale}
+                />
+              )
             } else {
               // Internal window (kanban, todo, notes)
               const renderContent = () => {
@@ -528,7 +573,7 @@ export function ViewportGrid({
                   width={viewport.displayWidth ?? 350}
                   height={viewport.displayHeight ?? 400}
                   zIndex={viewport.zIndex ?? 1}
-                  windowType={viewport.windowType as Exclude<WindowType, 'device'>}
+                  windowType={viewport.windowType as Exclude<WindowType, 'device' | 'terminal'>}
                   linkedViewportName={getLinkedViewportName(viewport.linkedToViewportId)}
                   isDarkMode={isDarkMode}
                   onMove={(x, y) => updateViewport(viewport.id, { x, y })}

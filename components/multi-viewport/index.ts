@@ -1,5 +1,6 @@
 export { ViewportGrid } from './ViewportGrid'
 export { ViewportItem, ViewportPerformanceWarning } from './ViewportItem'
 export { InternalWindowItem } from './InternalWindowItem'
+export { TerminalNode } from './nodes/TerminalNode'
 export { DEVICE_PRESETS, getPresetById, getPresetsByType } from './types'
 export type { Viewport, DevicePreset, ViewportItemProps, WindowType } from './types'

@@ -41,6 +41,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@google/genai": "^1.30.0",
     "@hookform/resolvers": "^5.2.2",
+    "@lydell/node-pty": "^1.1.0",
     "@modelcontextprotocol/sdk": "^1.23.0",
     "@morphllm/morphsdk": "^0.2.57",
     "@radix-ui/react-avatar": "^1.1.11",
@@ -91,6 +92,7 @@
     "diff-match-patch": "^1.0.5",
     "electron-updater": "^6.6.2",
     "elkjs": "^0.11.0",
+    "ghostty-web": "^0.4.0",
     "glob": "^13.0.0",
     "lowlight": "^3.3.0",
     "lucide-react": "^0.556.0",
@@ -106,6 +108,7 @@
     "tailwind-merge": "^3.4.0",
     "uuid": "^13.0.0",
     "v0-sdk": "^0.15.3",
+    "ws": "^8.18.3",
     "zod": "^3.25.76",
     "zustand": "^5.0.9"
   },

@@ -113,6 +113,7 @@ import {
   StickyNote,
   Maximize,
   AlignHorizontalSpaceAround,
+  Ghost,
 } from 'lucide-react';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
@@ -1500,6 +1501,7 @@ export default function App() {
     viewportCount: number
     addDevice: (type: 'mobile' | 'tablet' | 'desktop') => void
     addInternalWindow: (type: 'kanban' | 'todo' | 'notes') => void
+    addTerminal: () => void
     autoLayout: (direction?: 'RIGHT' | 'DOWN' | 'LEFT' | 'UP') => void
     fitView: () => void
   } | null>(null)
@@ -1562,6 +1564,9 @@ export default function App() {
   const [consoleHeight, setConsoleHeight] = useState(192); // 192px = h-48
   const [consoleFilters, setConsoleFilters] = useState<Set<'log' | 'warn' | 'error' | 'info'>>(new Set());
   const [isConsoleResizing, setIsConsoleResizing] = useState(false);
+  const [consolePanelTab, setConsolePanelTab] = useState<'console' | 'terminal'>('console');
+  const terminalContainerRef = useRef<HTMLDivElement>(null);
+  const terminalInstanceRef = useRef<unknown>(null);
   const consoleResizeStartY = useRef<number>(0);
   const consoleResizeStartHeight = useRef<number>(192);
   const consoleEndRef = useRef<HTMLDivElement>(null);
@@ -4178,6 +4183,104 @@ export default function App() {
       consoleEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [consoleLogs, isConsolePanelOpen]);
+
+  // Initialize ghostty terminal when terminal tab is selected
+  useEffect(() => {
+    if (consolePanelTab !== 'terminal' || !terminalContainerRef.current || terminalInstanceRef.current) return
+
+    let mounted = true
+
+    async function initTerminal() {
+      try {
+        // Dynamic import ghostty-web
+        const ghostty = await import('ghostty-web')
+        await ghostty.init()
+
+        if (!mounted || !terminalContainerRef.current) return
+
+        const term = new ghostty.Terminal({
+          cols: 80,
+          rows: 12,
+          fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, monospace',
+          fontSize: 13,
+          theme: {
+            background: isDarkMode ? '#1e1e1e' : '#fafaf9',
+            foreground: isDarkMode ? '#d4d4d4' : '#292524',
+            cursor: isDarkMode ? '#d4d4d4' : '#292524',
+          },
+        })
+
+        const fitAddon = new ghostty.FitAddon()
+        term.loadAddon(fitAddon)
+
+        await term.open(terminalContainerRef.current)
+        fitAddon.fit()
+
+        terminalInstanceRef.current = { term, fitAddon }
+
+        // Connect to WebSocket PTY
+        const wsUrl = 'ws://localhost:3001/pty'
+        const cols = term.cols || 80
+        const rows = term.rows || 12
+        const url = `${wsUrl}?cols=${cols}&rows=${rows}`
+
+        const ws = new WebSocket(url)
+
+        ws.onopen = () => {
+          console.log('[Terminal Panel] Connected to PTY')
+        }
+
+        ws.onmessage = (event) => {
+          term.write(event.data)
+        }
+
+        ws.onclose = () => {
+          term.write('\r\n\x1b[33mConnection closed.\x1b[0m\r\n')
+        }
+
+        // Handle terminal input
+        term.onData((data: string) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(data)
+          }
+        })
+
+        // Handle resize
+        term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+          }
+        })
+
+        // Store WebSocket for cleanup
+        ;(terminalInstanceRef.current as { term: unknown; fitAddon: unknown; ws?: WebSocket }).ws = ws
+      } catch (error) {
+        console.error('[Terminal Panel] Failed to initialize terminal:', error)
+      }
+    }
+
+    initTerminal()
+
+    return () => {
+      mounted = false
+      if (terminalInstanceRef.current) {
+        const instance = terminalInstanceRef.current as { term: { dispose?: () => void }; ws?: WebSocket }
+        instance.ws?.close()
+        instance.term?.dispose?.()
+        terminalInstanceRef.current = null
+      }
+    }
+  }, [consolePanelTab, isDarkMode])
+
+  // Fit terminal when console panel resizes
+  useEffect(() => {
+    if (consolePanelTab === 'terminal' && terminalInstanceRef.current) {
+      const instance = terminalInstanceRef.current as { fitAddon: { fit?: () => void } }
+      setTimeout(() => {
+        instance.fitAddon?.fit?.()
+      }, 50)
+    }
+  }, [consoleHeight, consolePanelTab])
 
   // Handle console log row click with shift-click range selection
   const handleLogRowClick = useCallback((index: number, event: React.MouseEvent) => {
@@ -7543,6 +7646,13 @@ If you're not sure what the user wants, ask for clarification.
                         >
                           <StickyNote size={16} />
                         </button>
+                        <button
+                          onClick={() => viewportControlsRef.current?.addTerminal()}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
+                          title="Add Ghostty Terminal"
+                        >
+                          <Ghost size={16} />
+                        </button>
 
                         <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
 
@@ -7914,80 +8024,100 @@ If you're not sure what the user wants, ask for clarification.
                 <div className={`w-8 h-0.5 rounded-full transition-colors ${isConsoleResizing ? (isDarkMode ? 'bg-neutral-400' : 'bg-stone-500') : (isDarkMode ? 'bg-neutral-600 group-hover:bg-neutral-500' : 'bg-stone-300 group-hover:bg-stone-400')}`} />
               </div>
               <div className={`flex items-center justify-between px-3 py-1.5 border-b ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
+                {/* Left side: Tab buttons */}
                 <div className="flex items-center gap-1.5" style={{ position: 'relative', top: '-3px' }}>
-                  {/* Console label - click to clear filters */}
+                  {/* Console tab */}
                   <button
-                    onClick={clearConsoleFilters}
+                    onClick={() => setConsolePanelTab('console')}
                     className={`flex items-center gap-2 px-2.5 py-1 rounded-full transition-colors ${
-                      consoleFilters.size === 0
+                      consolePanelTab === 'console'
                         ? (isDarkMode ? 'bg-neutral-600 text-neutral-200' : 'bg-stone-300 text-stone-700')
-                        : (isDarkMode ? 'bg-neutral-700 text-neutral-400 hover:bg-neutral-600' : 'bg-stone-200 text-stone-500 hover:bg-stone-300')
+                        : (isDarkMode ? 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700' : 'bg-stone-100 text-stone-500 hover:bg-stone-200')
                     }`}
-                    title="Show all logs"
+                    title="Console logs"
                   >
                     <Terminal size={14} />
                     <span className="text-xs font-medium">Console</span>
                     <span className="text-xs opacity-70">{filteredConsoleLogs.length}</span>
                   </button>
 
-                  {/* Filter chips */}
+                  {/* Terminal tab */}
                   <button
-                    onClick={() => toggleConsoleFilter('log')}
-                    className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
-                      consoleFilters.has('log')
-                        ? (isDarkMode ? 'bg-neutral-500 text-white' : 'bg-stone-500 text-white')
+                    onClick={() => setConsolePanelTab('terminal')}
+                    className={`flex items-center gap-2 px-2.5 py-1 rounded-full transition-colors ${
+                      consolePanelTab === 'terminal'
+                        ? (isDarkMode ? 'bg-neutral-600 text-neutral-200' : 'bg-stone-300 text-stone-700')
                         : (isDarkMode ? 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700' : 'bg-stone-100 text-stone-500 hover:bg-stone-200')
                     }`}
-                    title="Filter by log"
+                    title="Terminal"
                   >
-                    log
-                  </button>
-                  <button
-                    onClick={() => toggleConsoleFilter('info')}
-                    className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
-                      consoleFilters.has('info')
-                        ? 'bg-blue-500 text-white'
-                        : (isDarkMode ? 'bg-neutral-800 text-blue-400 hover:bg-neutral-700' : 'bg-blue-50 text-blue-600 hover:bg-blue-100')
-                    }`}
-                    title="Filter by info"
-                  >
-                    info
-                  </button>
-                  <button
-                    onClick={() => toggleConsoleFilter('warn')}
-                    className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
-                      consoleFilters.has('warn')
-                        ? 'bg-yellow-500 text-white'
-                        : (isDarkMode ? 'bg-neutral-800 text-yellow-400 hover:bg-neutral-700' : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100')
-                    }`}
-                    title="Filter by warn"
-                  >
-                    warn
-                  </button>
-                  <button
-                    onClick={() => toggleConsoleFilter('error')}
-                    className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
-                      consoleFilters.has('error')
-                        ? 'bg-red-500 text-white'
-                        : (isDarkMode ? 'bg-neutral-800 text-red-400 hover:bg-neutral-700' : 'bg-red-50 text-red-600 hover:bg-red-100')
-                    }`}
-                    title="Filter by error"
-                  >
-                    error
+                    <Ghost size={14} />
+                    <span className="text-xs font-medium">Terminal</span>
                   </button>
                 </div>
+
+                {/* Right side: Filter chips (only for console) + actions */}
                 <div className="flex items-center gap-1">
-                  {selectedLogIndices.size > 0 && (
+                  {/* Filter chips - only show when console tab is active */}
+                  {consolePanelTab === 'console' && (
+                    <div className="flex items-center gap-1 mr-2">
+                      <button
+                        onClick={() => toggleConsoleFilter('log')}
+                        className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
+                          consoleFilters.has('log')
+                            ? (isDarkMode ? 'bg-neutral-500 text-white' : 'bg-stone-500 text-white')
+                            : (isDarkMode ? 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700' : 'bg-stone-100 text-stone-500 hover:bg-stone-200')
+                        }`}
+                        title="Filter by log"
+                      >
+                        log
+                      </button>
+                      <button
+                        onClick={() => toggleConsoleFilter('info')}
+                        className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
+                          consoleFilters.has('info')
+                            ? 'bg-blue-500 text-white'
+                            : (isDarkMode ? 'bg-neutral-800 text-blue-400 hover:bg-neutral-700' : 'bg-blue-50 text-blue-600 hover:bg-blue-100')
+                        }`}
+                        title="Filter by info"
+                      >
+                        info
+                      </button>
+                      <button
+                        onClick={() => toggleConsoleFilter('warn')}
+                        className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
+                          consoleFilters.has('warn')
+                            ? 'bg-yellow-500 text-white'
+                            : (isDarkMode ? 'bg-neutral-800 text-yellow-400 hover:bg-neutral-700' : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100')
+                        }`}
+                        title="Filter by warn"
+                      >
+                        warn
+                      </button>
+                      <button
+                        onClick={() => toggleConsoleFilter('error')}
+                        className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
+                          consoleFilters.has('error')
+                            ? 'bg-red-500 text-white'
+                            : (isDarkMode ? 'bg-neutral-800 text-red-400 hover:bg-neutral-700' : 'bg-red-50 text-red-600 hover:bg-red-100')
+                        }`}
+                        title="Filter by error"
+                      >
+                        error
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Selection actions - only for console */}
+                  {consolePanelTab === 'console' && selectedLogIndices.size > 0 && (
                     <>
                       <span className={`text-xs px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-600'}`}>
                         {selectedLogIndices.size} selected
                       </span>
-                      {/* Quick Actions for selected logs */}
                       <div className="flex items-center gap-0.5 ml-1">
                         <button
                           onClick={() => {
                             const logsText = selectedLogs?.map(l => l.message).join('\n') || '';
-                            // Trigger instant web search
                             performInstantSearch(logsText);
                           }}
                           className={`p-1.5 rounded transition-colors ${isDarkMode ? 'hover:bg-neutral-600 text-neutral-400 hover:text-neutral-200' : 'hover:bg-stone-200 text-stone-500 hover:text-stone-700'}`}
@@ -8015,13 +8145,18 @@ If you're not sure what the user wants, ask for clarification.
                       </div>
                     </>
                   )}
-                  <button
-                    onClick={handleClearConsole}
-                    className={`p-1 rounded hover:bg-opacity-80 transition ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'}`}
-                    title="Clear console"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
-                  </button>
+
+                  {/* Clear console button - only for console tab */}
+                  {consolePanelTab === 'console' && (
+                    <button
+                      onClick={handleClearConsole}
+                      className={`p-1 rounded hover:bg-opacity-80 transition ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'}`}
+                      title="Clear console"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
+                    </button>
+                  )}
+
                   <button
                     onClick={() => setIsConsolePanelOpen(false)}
                     className={`p-1 rounded hover:bg-opacity-80 transition ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'}`}
@@ -8031,49 +8166,59 @@ If you're not sure what the user wants, ask for clarification.
                   </button>
                 </div>
               </div>
-              <div className={`flex-1 overflow-y-auto font-mono text-xs p-2 space-y-0.5 ${isDarkMode ? 'text-neutral-300' : 'text-stone-700'}`}>
-                {filteredConsoleLogs.length === 0 ? (
-                  <div className={`text-center py-8 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-                    {consoleLogs.length === 0 ? 'No console messages yet' : 'No logs match current filters'}
-                  </div>
-                ) : (
-                  filteredConsoleLogs.map((log, index) => (
-                    <div
-                      key={index}
-                      onClick={(e) => handleLogRowClick(index, e)}
-                      className={`flex items-start gap-2 px-2 py-0.5 rounded cursor-pointer select-none transition-colors ${
-                        selectedLogIndices.has(index)
-                          ? (isDarkMode ? 'bg-blue-500/20 ring-1 ring-blue-500/50' : 'bg-blue-100 ring-1 ring-blue-300')
-                          : log.type === 'error' ? (isDarkMode ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' : 'bg-red-50 text-red-600 hover:bg-red-100')
-                          : log.type === 'warn' ? (isDarkMode ? 'bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20' : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100')
-                          : log.type === 'info' ? (isDarkMode ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20' : 'bg-blue-50 text-blue-600 hover:bg-blue-100')
-                          : (isDarkMode ? 'hover:bg-neutral-700' : 'hover:bg-stone-100')
-                      }`}
-                      title="Click to select, Shift+click for range"
-                    >
-                      <span className={`flex-shrink-0 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-                        {log.timestamp.toLocaleTimeString()}
-                      </span>
-                      <span className="flex-shrink-0 w-12 text-center">
-                        [{log.type}]
-                      </span>
-                      <span className="break-all flex-1">{log.message}</span>
-                      <span
-                        className={`flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-                          selectedLogIndices.has(index)
-                            ? (isDarkMode ? 'bg-blue-500 border-blue-500' : 'bg-blue-500 border-blue-500')
-                            : (isDarkMode ? 'border-neutral-500 hover:border-neutral-400' : 'border-stone-300 hover:border-stone-400')
-                        }`}
-                      >
-                        {selectedLogIndices.has(index) && (
-                          <Check size={10} className="text-white" />
-                        )}
-                      </span>
+              {/* Content area - switches between console and terminal */}
+              {consolePanelTab === 'console' ? (
+                <div className={`flex-1 overflow-y-auto font-mono text-xs p-2 space-y-0.5 ${isDarkMode ? 'text-neutral-300' : 'text-stone-700'}`}>
+                  {filteredConsoleLogs.length === 0 ? (
+                    <div className={`text-center py-8 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                      {consoleLogs.length === 0 ? 'No console messages yet' : 'No logs match current filters'}
                     </div>
-                  ))
-                )}
-                <div ref={consoleEndRef} />
-              </div>
+                  ) : (
+                    filteredConsoleLogs.map((log, index) => (
+                      <div
+                        key={index}
+                        onClick={(e) => handleLogRowClick(index, e)}
+                        className={`flex items-start gap-2 px-2 py-0.5 rounded cursor-pointer select-none transition-colors ${
+                          selectedLogIndices.has(index)
+                            ? (isDarkMode ? 'bg-blue-500/20 ring-1 ring-blue-500/50' : 'bg-blue-100 ring-1 ring-blue-300')
+                            : log.type === 'error' ? (isDarkMode ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' : 'bg-red-50 text-red-600 hover:bg-red-100')
+                            : log.type === 'warn' ? (isDarkMode ? 'bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20' : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100')
+                            : log.type === 'info' ? (isDarkMode ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20' : 'bg-blue-50 text-blue-600 hover:bg-blue-100')
+                            : (isDarkMode ? 'hover:bg-neutral-700' : 'hover:bg-stone-100')
+                        }`}
+                        title="Click to select, Shift+click for range"
+                      >
+                        <span className={`flex-shrink-0 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                          {log.timestamp.toLocaleTimeString()}
+                        </span>
+                        <span className="flex-shrink-0 w-12 text-center">
+                          [{log.type}]
+                        </span>
+                        <span className="break-all flex-1">{log.message}</span>
+                        <span
+                          className={`flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                            selectedLogIndices.has(index)
+                              ? (isDarkMode ? 'bg-blue-500 border-blue-500' : 'bg-blue-500 border-blue-500')
+                              : (isDarkMode ? 'border-neutral-500 hover:border-neutral-400' : 'border-stone-300 hover:border-stone-400')
+                          }`}
+                        >
+                          {selectedLogIndices.has(index) && (
+                            <Check size={10} className="text-white" />
+                          )}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                  <div ref={consoleEndRef} />
+                </div>
+              ) : (
+                /* Terminal view */
+                <div
+                  ref={terminalContainerRef}
+                  className={`flex-1 overflow-hidden ${isDarkMode ? 'bg-[#1e1e1e]' : 'bg-stone-50'}`}
+                  style={{ minHeight: 100 }}
+                />
+              )}
             </div>
           )}
 
