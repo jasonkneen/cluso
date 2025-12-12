@@ -46,6 +46,7 @@ export const TerminalNode = memo(function TerminalNode({
   const wsRef = useRef<WebSocket | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const initializedRef = useRef(false)
+  const fitTimerRef = useRef<number | null>(null)
 
   // Initialize terminal - runs once on mount
   useEffect(() => {
@@ -194,14 +195,23 @@ export const TerminalNode = memo(function TerminalNode({
   // Fit terminal when size changes
   useEffect(() => {
     if (fitAddonRef.current) {
-      // Small delay to let the container resize first
-      const timer = setTimeout(() => {
+      if (fitTimerRef.current) {
+        window.clearTimeout(fitTimerRef.current)
+      }
+      // Debounce fitting while resizing to reduce layout churn
+      fitTimerRef.current = window.setTimeout(() => {
         // @ts-expect-error - fitAddon fit method
         fitAddonRef.current?.fit?.()
         // Fix canvas size after fit (fit sets pixel values)
         fixCanvasSize()
-      }, 50)
-      return () => clearTimeout(timer)
+        fitTimerRef.current = null
+      }, 120)
+      return () => {
+        if (fitTimerRef.current) {
+          window.clearTimeout(fitTimerRef.current)
+          fitTimerRef.current = null
+        }
+      }
     }
   }, [width, height, fixCanvasSize])
 

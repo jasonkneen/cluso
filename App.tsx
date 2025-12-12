@@ -1572,6 +1572,7 @@ export default function App() {
   }
 
   // Console Panel State
+  type ConsoleLogEntry = { type: 'log' | 'warn' | 'error' | 'info'; message: string; timestamp: Date }
   const [consoleLogs, setConsoleLogs] = useState<Array<{type: 'log' | 'warn' | 'error' | 'info'; message: string; timestamp: Date}>>([]);
   const [isConsolePanelOpen, setIsConsolePanelOpen] = useState(false);
   const [consoleHeight, setConsoleHeight] = useState(192); // 192px = h-48
@@ -1585,6 +1586,40 @@ export default function App() {
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const [selectedLogIndices, setSelectedLogIndices] = useState<Set<number>>(new Set());
   const lastClickedLogIndex = useRef<number | null>(null);
+  const consoleLogBufferRef = useRef<ConsoleLogEntry[]>([])
+  const consoleLogFlushTimerRef = useRef<number | null>(null)
+
+  const flushConsoleLogBuffer = useCallback(() => {
+    if (consoleLogFlushTimerRef.current) {
+      window.clearTimeout(consoleLogFlushTimerRef.current)
+      consoleLogFlushTimerRef.current = null
+    }
+    if (consoleLogBufferRef.current.length === 0) return
+    const buffered = consoleLogBufferRef.current
+    consoleLogBufferRef.current = []
+
+    setConsoleLogs(prev => {
+      const next = [...prev, ...buffered]
+      // Keep at most 200 entries to bound render cost
+      return next.length > 200 ? next.slice(-200) : next
+    })
+  }, [])
+
+  const enqueueConsoleLog = useCallback((entry: ConsoleLogEntry) => {
+    consoleLogBufferRef.current.push(entry)
+    if (consoleLogFlushTimerRef.current) return
+    // Batch multiple console-message events into a single React update
+    consoleLogFlushTimerRef.current = window.setTimeout(flushConsoleLogBuffer, 100)
+  }, [flushConsoleLogBuffer])
+
+  useEffect(() => {
+    return () => {
+      if (consoleLogFlushTimerRef.current) {
+        window.clearTimeout(consoleLogFlushTimerRef.current)
+        consoleLogFlushTimerRef.current = null
+      }
+    }
+  }, [])
 
   // Debug Mode - shows all activity in console panel
   const [debugMode, setDebugMode] = useState(false);
@@ -1596,13 +1631,9 @@ export default function App() {
       : `[${prefix}] ${message}`;
     console.log(fullMessage);
     if (debugMode) {
-      setConsoleLogs(prev => [...prev.slice(-199), {
-        type: 'info',
-        message: fullMessage,
-        timestamp: new Date()
-      }]);
+      enqueueConsoleLog({ type: 'info', message: fullMessage, timestamp: new Date() })
     }
-  }, [debugMode]);
+  }, [debugMode, enqueueConsoleLog]);
 
   // AI Element Selection State (pending confirmation)
   const [aiSelectedElement, setAiSelectedElement] = useState<{
@@ -4588,11 +4619,7 @@ export default function App() {
         3: 'error'
       };
       const logType = levelMap[e.level] || 'log';
-      setConsoleLogs(prev => [...prev.slice(-99), {
-        type: logType,
-        message: e.message,
-        timestamp: new Date()
-      }]);
+      enqueueConsoleLog({ type: logType, message: e.message, timestamp: new Date() })
     };
 
     webview.addEventListener('dom-ready', handleDomReady);
@@ -4631,7 +4658,7 @@ export default function App() {
       webview.removeEventListener('page-title-updated', handlePageTitleUpdated as (e: unknown) => void);
       webview.removeEventListener('ipc-message', handleIpcMessage as (e: unknown) => void);
     };
-  }, [updateTab]);
+  }, [updateTab, enqueueConsoleLog]);
 
   // Ref callback for webview elements - sets up handlers when mounted
   // Returns a STABLE callback for each tabId to prevent constant re-setup
