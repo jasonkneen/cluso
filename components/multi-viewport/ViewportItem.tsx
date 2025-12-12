@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useCallback, useState, useMemo } from 'react'
 import { cn } from '@/lib/utils'
-import { Maximize2, Minimize2, Trash2, RotateCcw, GripVertical, Smartphone, Tablet, Monitor, AlertTriangle, Lock, Unlock } from 'lucide-react'
+import { Maximize2, Minimize2, Trash2, RotateCcw, GripVertical, Smartphone, Tablet, Monitor, AlertTriangle, Lock, Unlock, Plus, KanbanSquare, ListTodo, StickyNote } from 'lucide-react'
 import { ViewportItemProps } from './types'
 
 // Grid snap size in pixels
@@ -282,6 +282,7 @@ export function ViewportItem({
   onOrientationToggle,
   onResize,
   dragHandleProps,
+  onAddLinkedWindow,
 }: ViewportItemProps) {
   const webviewRef = useRef<WebviewElement | null>(null)
 
@@ -528,6 +529,23 @@ export function ViewportItem({
   })
   const cardRef = useRef<HTMLDivElement>(null)
 
+  // Dropdown state for linked window creation
+  const [showLinkDropdown, setShowLinkDropdown] = useState(false)
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!showLinkDropdown) return
+    const handleClickOutside = () => setShowLinkDropdown(false)
+    // Delay to allow the click that opened it to complete
+    const timer = setTimeout(() => {
+      window.addEventListener('click', handleClickOutside)
+    }, 0)
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener('click', handleClickOutside)
+    }
+  }, [showLinkDropdown])
+
   // Handle resize - receives final snapped and bounded values
   const handleResize = useCallback((width: number, height: number) => {
     setLocalSize({ width, height })
@@ -544,7 +562,7 @@ export function ViewportItem({
     <div
       ref={cardRef}
       className={cn(
-        "flex flex-col rounded-xl overflow-hidden transition-shadow hover:shadow-lg relative",
+        "flex flex-col rounded-xl transition-shadow hover:shadow-lg relative",
         isPrimary
           ? "ring-1 ring-blue-500 border border-blue-500/50"
           : "border",
@@ -560,8 +578,6 @@ export function ViewportItem({
         height: localSize.height,
         flexShrink: 0,
         flexGrow: 0,
-        contain: 'layout style paint',
-        isolation: 'isolate',
       }}
     >
       {/* Resize handles */}
@@ -572,6 +588,88 @@ export function ViewportItem({
         currentHeight={localSize.height}
         cardRef={cardRef}
       />
+
+      {/* Link handle - "+" button on right edge */}
+      {onAddLinkedWindow && (
+        <>
+          <button
+            onClick={() => setShowLinkDropdown(!showLinkDropdown)}
+            className={cn(
+              "absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-20 w-5 h-5 rounded-full flex items-center justify-center transition-all border",
+              isDarkMode
+                ? "border-neutral-600 text-neutral-400 hover:border-neutral-400 hover:text-neutral-200 bg-neutral-800"
+                : "border-stone-300 text-stone-400 hover:border-stone-500 hover:text-stone-600 bg-white"
+            )}
+            title="Add linked window"
+          >
+            <Plus size={12} />
+          </button>
+
+          {/* Dropdown menu - positioned outside the card */}
+          {showLinkDropdown && (
+            <div
+              className={cn(
+                "absolute rounded-lg shadow-xl border py-1 min-w-[120px]",
+                isDarkMode
+                  ? "bg-neutral-800 border-neutral-700"
+                  : "bg-white border-stone-200"
+              )}
+              style={{
+                left: localSize.width + 16,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                zIndex: 9999,
+              }}
+            >
+              <button
+                onClick={() => {
+                  onAddLinkedWindow('todo')
+                  setShowLinkDropdown(false)
+                }}
+                className={cn(
+                  "w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors",
+                  isDarkMode
+                    ? "text-neutral-200 hover:bg-neutral-700"
+                    : "text-stone-700 hover:bg-stone-100"
+                )}
+              >
+                <ListTodo size={14} />
+                <span>Todo</span>
+              </button>
+              <button
+                onClick={() => {
+                  onAddLinkedWindow('kanban')
+                  setShowLinkDropdown(false)
+                }}
+                className={cn(
+                  "w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors",
+                  isDarkMode
+                    ? "text-neutral-200 hover:bg-neutral-700"
+                    : "text-stone-700 hover:bg-stone-100"
+                )}
+              >
+                <KanbanSquare size={14} />
+                <span>Kanban</span>
+              </button>
+              <button
+                onClick={() => {
+                  onAddLinkedWindow('notes')
+                  setShowLinkDropdown(false)
+                }}
+                className={cn(
+                  "w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors",
+                  isDarkMode
+                    ? "text-neutral-200 hover:bg-neutral-700"
+                    : "text-stone-700 hover:bg-stone-100"
+                )}
+              >
+                <StickyNote size={14} />
+                <span>Notes</span>
+              </button>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Card header - compact */}
       <div className={cn(

@@ -5,6 +5,8 @@ import {
   useSensor,
   useSensors,
   DragEndEvent,
+  DragMoveEvent,
+  DragStartEvent,
   useDraggable,
   closestCenter,
 } from '@dnd-kit/core'
@@ -99,6 +101,7 @@ function DraggableViewportItem({
   onRemove,
   onOrientationToggle,
   onResize,
+  onAddLinkedWindow,
 }: {
   viewport: Viewport
   preset: DevicePreset
@@ -120,6 +123,7 @@ function DraggableViewportItem({
   onRemove: () => void
   onOrientationToggle: () => void
   onResize: (width: number, height: number) => void
+  onAddLinkedWindow?: (windowType: 'kanban' | 'todo' | 'notes') => void
 }) {
   const {
     attributes,
@@ -171,6 +175,7 @@ function DraggableViewportItem({
         onOrientationToggle={onOrientationToggle}
         onResize={onResize}
         dragHandleProps={listeners}
+        onAddLinkedWindow={onAddLinkedWindow}
       />
     </div>
   )
@@ -182,6 +187,7 @@ function DraggableInternalWindow({
   isDarkMode,
   onRemove,
   onResize,
+  linkedViewportName,
   renderKanban,
   renderTodo,
   renderNotes,
@@ -190,6 +196,7 @@ function DraggableInternalWindow({
   isDarkMode: boolean
   onRemove: () => void
   onResize: (width: number, height: number) => void
+  linkedViewportName?: string
   renderKanban?: () => React.ReactNode
   renderTodo?: () => React.ReactNode
   renderNotes?: () => React.ReactNode
@@ -225,11 +232,95 @@ function DraggableInternalWindow({
         onRemove={onRemove}
         onResize={onResize}
         dragHandleProps={listeners}
+        linkedViewportName={linkedViewportName}
         renderKanban={renderKanban}
         renderTodo={renderTodo}
         renderNotes={renderNotes}
       />
     </div>
+  )
+}
+
+// Connection lines between linked items
+function ConnectionLines({
+  viewports,
+  isDarkMode,
+  activeDragId,
+  dragDelta,
+}: {
+  viewports: Viewport[]
+  isDarkMode: boolean
+  activeDragId?: string | null
+  dragDelta?: { x: number; y: number } | null
+}) {
+  // Find all linked windows and their source viewports
+  const connections = viewports
+    .filter(v => v.linkedToViewportId)
+    .map(linkedWindow => {
+      const sourceViewport = viewports.find(v => v.id === linkedWindow.linkedToViewportId)
+      if (!sourceViewport) return null
+
+      // Apply drag delta if this viewport is being dragged
+      const sourceDragOffset = activeDragId === sourceViewport.id && dragDelta ? dragDelta : { x: 0, y: 0 }
+      const targetDragOffset = activeDragId === linkedWindow.id && dragDelta ? dragDelta : { x: 0, y: 0 }
+
+      // Calculate connection points
+      // Source: right edge center
+      const sourceX = (sourceViewport.x ?? 0) + (sourceViewport.displayWidth ?? 400) + sourceDragOffset.x
+      const sourceY = (sourceViewport.y ?? 0) + (sourceViewport.displayHeight ?? 250) / 2 + sourceDragOffset.y
+
+      // Target: left edge center
+      const targetX = (linkedWindow.x ?? 0) + targetDragOffset.x
+      const targetY = (linkedWindow.y ?? 0) + (linkedWindow.displayHeight ?? 300) / 2 + targetDragOffset.y
+
+      return {
+        id: `${sourceViewport.id}-${linkedWindow.id}`,
+        sourceX,
+        sourceY,
+        targetX,
+        targetY,
+      }
+    })
+    .filter(Boolean) as { id: string; sourceX: number; sourceY: number; targetX: number; targetY: number }[]
+
+  if (connections.length === 0) return null
+
+  return (
+    <svg
+      className="absolute inset-0 pointer-events-none"
+      style={{ overflow: 'visible', zIndex: 0 }}
+    >
+      {connections.map(conn => {
+        // Calculate control points for a smooth bezier curve
+        const controlOffset = Math.min(Math.abs(conn.targetX - conn.sourceX) / 2, 50)
+
+        return (
+          <g key={conn.id}>
+            {/* Connection line */}
+            <path
+              d={`M ${conn.sourceX} ${conn.sourceY} C ${conn.sourceX + controlOffset} ${conn.sourceY}, ${conn.targetX - controlOffset} ${conn.targetY}, ${conn.targetX} ${conn.targetY}`}
+              stroke={isDarkMode ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.25)'}
+              strokeWidth={2}
+              strokeDasharray="4 4"
+              fill="none"
+            />
+            {/* Small circles at endpoints */}
+            <circle
+              cx={conn.sourceX}
+              cy={conn.sourceY}
+              r={3}
+              fill={isDarkMode ? 'rgba(59, 130, 246, 0.5)' : 'rgba(59, 130, 246, 0.4)'}
+            />
+            <circle
+              cx={conn.targetX}
+              cy={conn.targetY}
+              r={3}
+              fill={isDarkMode ? 'rgba(59, 130, 246, 0.5)' : 'rgba(59, 130, 246, 0.4)'}
+            />
+          </g>
+        )
+      })}
+    </svg>
   )
 }
 
@@ -246,6 +337,9 @@ export function ViewportGrid({
   onScreenshotSelect,
   onConsoleLog,
   onClose,
+  renderKanban,
+  renderTodo,
+  renderNotes,
 }: ViewportGridProps) {
   // State - load from localStorage on init
   const [viewports, setViewports] = useState<Viewport[]>(loadViewports)
@@ -257,6 +351,10 @@ export function ViewportGrid({
   // Primary viewport for synced navigation
   const [primaryViewportId, setPrimaryViewportId] = useState<string | null>(null)
   const [syncedUrl, setSyncedUrl] = useState<string>(url)
+
+  // Track active drag for connection line updates
+  const [activeDragId, setActiveDragId] = useState<string | null>(null)
+  const [dragDelta, setDragDelta] = useState<{ x: number; y: number } | null>(null)
 
   // Only sync URL on initial mount - don't update when parent prop changes
   // This prevents webview reloads when switching views
@@ -375,7 +473,7 @@ export function ViewportGrid({
     return { x: newX, y: 0 }
   }, [viewports])
 
-  // Viewport actions
+  // Viewport actions - add device viewport
   const addViewport = useCallback((presetId: string, orientation?: 'portrait' | 'landscape') => {
     const preset = getPresetById(presetId)
     if (!preset) return
@@ -387,6 +485,7 @@ export function ViewportGrid({
 
     setViewports(prev => [...prev, {
       id: crypto.randomUUID(),
+      windowType: 'device',
       devicePresetId: presetId,
       orientation: orientation ?? (preset.type === 'desktop' ? 'landscape' : 'portrait'),
       displayWidth: defaultWidth,
@@ -396,6 +495,47 @@ export function ViewportGrid({
     }])
     setIsAddMenuOpen(false)
   }, [getNextPosition])
+
+  // Add internal window (kanban, todo, notes)
+  const addInternalWindow = useCallback((windowType: WindowType) => {
+    if (windowType === 'device') return // Use addViewport for devices
+
+    const config = getWindowConfig(windowType)
+    const { x, y } = getNextPosition()
+
+    setViewports(prev => [...prev, {
+      id: crypto.randomUUID(),
+      windowType,
+      displayWidth: config.defaultWidth,
+      displayHeight: config.defaultHeight,
+      x,
+      y,
+    }])
+    setIsAddMenuOpen(false)
+  }, [getNextPosition])
+
+  // Add linked internal window (spawned from a device viewport's "+" handle)
+  const addLinkedWindow = useCallback((sourceViewportId: string, windowType: 'kanban' | 'todo' | 'notes') => {
+    const sourceViewport = viewports.find(v => v.id === sourceViewportId)
+    if (!sourceViewport) return
+
+    const config = getWindowConfig(windowType)
+
+    // Position to the right of the source viewport
+    const sourceRight = (sourceViewport.x ?? 0) + (sourceViewport.displayWidth ?? 400)
+    const sourceTop = sourceViewport.y ?? 0
+    const gap = GRID_SNAP
+
+    setViewports(prev => [...prev, {
+      id: crypto.randomUUID(),
+      windowType,
+      displayWidth: config.defaultWidth,
+      displayHeight: config.defaultHeight,
+      x: snapToGrid(sourceRight + gap),
+      y: sourceTop,
+      linkedToViewportId: sourceViewportId,
+    }])
+  }, [viewports])
 
   // Smart add - picks next device not on canvas
   const addSmartViewport = useCallback((type: 'mobile' | 'tablet' | 'desktop') => {
@@ -426,9 +566,27 @@ export function ViewportGrid({
     ))
   }, [])
 
+  // Drag start handler - track which item is being dragged
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveDragId(event.active.id as string)
+    setDragDelta({ x: 0, y: 0 })
+  }, [])
+
+  // Drag move handler - update delta for connection lines
+  const handleDragMove = useCallback((event: DragMoveEvent) => {
+    if (event.delta) {
+      setDragDelta({ x: event.delta.x, y: event.delta.y })
+    }
+  }, [])
+
   // Drag end handler - update position with grid snap
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, delta } = event
+
+    // Reset drag state
+    setActiveDragId(null)
+    setDragDelta(null)
+
     if (!delta) return
 
     setViewports(prev => prev.map(v => {
@@ -441,8 +599,11 @@ export function ViewportGrid({
     }))
   }, [])
 
-  // Get preset for a viewport
+  // Get preset for a device viewport (returns default for internal windows)
   const getViewportPreset = (viewport: Viewport): DevicePreset => {
+    if (viewport.windowType !== 'device' || !viewport.devicePresetId) {
+      return DEVICE_PRESETS[0] // Default for internal windows
+    }
     return getPresetById(viewport.devicePresetId) || DEVICE_PRESETS[0]
   }
 
@@ -508,6 +669,46 @@ export function ViewportGrid({
           title="Add Mobile"
         >
           <Smartphone size={11} />
+        </button>
+
+        <div className="w-px h-3 mx-0.5 bg-neutral-600" />
+
+        {/* Internal window buttons */}
+        <button
+          onClick={() => addInternalWindow('kanban')}
+          className={cn(
+            "p-1 rounded transition-colors",
+            isDarkMode
+              ? "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700"
+              : "text-stone-400 hover:text-stone-700 hover:bg-stone-200"
+          )}
+          title="Add Kanban"
+        >
+          <KanbanSquare size={11} />
+        </button>
+        <button
+          onClick={() => addInternalWindow('todo')}
+          className={cn(
+            "p-1 rounded transition-colors",
+            isDarkMode
+              ? "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700"
+              : "text-stone-400 hover:text-stone-700 hover:bg-stone-200"
+          )}
+          title="Add Todo"
+        >
+          <ListTodo size={11} />
+        </button>
+        <button
+          onClick={() => addInternalWindow('notes')}
+          className={cn(
+            "p-1 rounded transition-colors",
+            isDarkMode
+              ? "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700"
+              : "text-stone-400 hover:text-stone-700 hover:bg-stone-200"
+          )}
+          title="Add Notes"
+        >
+          <StickyNote size={11} />
         </button>
 
         {/* Add dropdown */}
@@ -654,36 +855,65 @@ export function ViewportGrid({
       <div className="flex-1 overflow-auto p-2">
         <DndContext
           sensors={sensors}
+          onDragStart={handleDragStart}
+          onDragMove={handleDragMove}
           onDragEnd={handleDragEnd}
         >
           <div className={cn(
             "relative w-full h-full min-h-[600px] transition-all duration-200",
             expandedViewport && "blur-sm pointer-events-none"
           )}>
+            {/* Connection lines between linked items */}
+            <ConnectionLines
+              viewports={viewports}
+              isDarkMode={isDarkMode}
+              activeDragId={activeDragId}
+              dragDelta={dragDelta}
+            />
+
             {viewports.map(viewport => (
-              <DraggableViewportItem
-                key={viewport.id}
-                viewport={viewport}
-                preset={getViewportPreset(viewport)}
-                url={syncedUrl}
-                isDarkMode={isDarkMode}
-                isElectron={isElectron}
-                webviewPreloadPath={webviewPreloadPath}
-                isPrimary={primaryViewportId === viewport.id}
-                onSetPrimary={() => handleSetPrimary(viewport.id)}
-                onNavigate={primaryViewportId === viewport.id ? handlePrimaryNavigate : undefined}
-                isInspectorActive={isInspectorActive}
-                isScreenshotActive={isScreenshotActive}
-                isMoveActive={isMoveActive}
-                onInspectorHover={onInspectorHover}
-                onInspectorSelect={onInspectorSelect}
-                onScreenshotSelect={onScreenshotSelect}
-                onConsoleLog={onConsoleLog}
-                onExpand={() => setExpandedViewportId(viewport.id)}
-                onRemove={() => removeViewport(viewport.id)}
-                onOrientationToggle={() => toggleOrientation(viewport.id)}
-                onResize={(width, height) => updateViewportSize(viewport.id, width, height)}
-              />
+              viewport.windowType === 'device' ? (
+                <DraggableViewportItem
+                  key={viewport.id}
+                  viewport={viewport}
+                  preset={getViewportPreset(viewport)}
+                  url={syncedUrl}
+                  isDarkMode={isDarkMode}
+                  isElectron={isElectron}
+                  webviewPreloadPath={webviewPreloadPath}
+                  isPrimary={primaryViewportId === viewport.id}
+                  onSetPrimary={() => handleSetPrimary(viewport.id)}
+                  onNavigate={primaryViewportId === viewport.id ? handlePrimaryNavigate : undefined}
+                  isInspectorActive={isInspectorActive}
+                  isScreenshotActive={isScreenshotActive}
+                  isMoveActive={isMoveActive}
+                  onInspectorHover={onInspectorHover}
+                  onInspectorSelect={onInspectorSelect}
+                  onScreenshotSelect={onScreenshotSelect}
+                  onConsoleLog={onConsoleLog}
+                  onExpand={() => setExpandedViewportId(viewport.id)}
+                  onRemove={() => removeViewport(viewport.id)}
+                  onOrientationToggle={() => toggleOrientation(viewport.id)}
+                  onResize={(width, height) => updateViewportSize(viewport.id, width, height)}
+                  onAddLinkedWindow={(windowType) => addLinkedWindow(viewport.id, windowType)}
+                />
+              ) : (
+                <DraggableInternalWindow
+                  key={viewport.id}
+                  viewport={viewport}
+                  isDarkMode={isDarkMode}
+                  onRemove={() => removeViewport(viewport.id)}
+                  onResize={(width, height) => updateViewportSize(viewport.id, width, height)}
+                  linkedViewportName={
+                    viewport.linkedToViewportId
+                      ? getPresetById(viewports.find(v => v.id === viewport.linkedToViewportId)?.devicePresetId ?? '')?.name
+                      : undefined
+                  }
+                  renderKanban={renderKanban}
+                  renderTodo={renderTodo}
+                  renderNotes={renderNotes}
+                />
+              )
             ))}
           </div>
         </DndContext>

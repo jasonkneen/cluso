@@ -129,6 +129,8 @@ export interface InternalWindowItemProps {
   onRemove: () => void
   onResize?: (width: number, height: number) => void
   dragHandleProps?: Record<string, unknown>
+  // Linked viewport info
+  linkedViewportName?: string
   // Content render props
   renderKanban?: () => React.ReactNode
   renderTodo?: () => React.ReactNode
@@ -141,6 +143,7 @@ export function InternalWindowItem({
   onRemove,
   onResize,
   dragHandleProps,
+  linkedViewportName,
   renderKanban,
   renderTodo,
   renderNotes,
@@ -232,6 +235,15 @@ export function InternalWindowItem({
           )}>
             {config.name}
           </span>
+          {linkedViewportName && (
+            <span className={cn(
+              "text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1",
+              isDarkMode ? "bg-blue-900/50 text-blue-300" : "bg-blue-100 text-blue-600"
+            )}>
+              <span className="opacity-60">→</span>
+              {linkedViewportName}
+            </span>
+          )}
           <span className={cn(
             "text-[10px] px-1 py-0.5 rounded",
             isDarkMode ? "bg-neutral-700 text-neutral-400" : "bg-stone-200 text-stone-500"

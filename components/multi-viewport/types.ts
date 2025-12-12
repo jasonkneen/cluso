@@ -20,6 +20,8 @@ export interface Viewport {
   displayHeight?: number // Custom display height
   x?: number // Position on canvas
   y?: number // Position on canvas
+  // Linked window support
+  linkedToViewportId?: string // ID of the viewport this window is linked to
 }
 
 export interface ViewportItemProps {
@@ -50,6 +52,8 @@ export interface ViewportItemProps {
   onOrientationToggle: () => void
   onResize?: (width: number, height: number) => void
   dragHandleProps?: Record<string, unknown>
+  // Linked window creation
+  onAddLinkedWindow?: (windowType: 'kanban' | 'todo' | 'notes') => void
 }
 
 // Device presets - exported for reuse

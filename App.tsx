@@ -7361,6 +7361,34 @@ If you're not sure what the user wants, ask for clarification.
                   }])
                 }}
                 onClose={() => setIsMultiViewportMode(false)}
+                renderKanban={() => (
+                  <KanbanTab
+                    columns={activeTab.kanbanData?.columns || [
+                      { id: 'backlog', title: 'Backlog', cards: [] },
+                      { id: 'in-progress', title: 'In Progress', cards: [] },
+                      { id: 'done', title: 'Done', cards: [] },
+                    ]}
+                    boardTitle={activeTab.kanbanData?.boardTitle || 'Project Board'}
+                    isDarkMode={isDarkMode}
+                    onUpdateColumns={handleUpdateKanbanColumns}
+                    onUpdateTitle={handleUpdateKanbanTitle}
+                  />
+                )}
+                renderTodo={() => (
+                  <TodosTab
+                    items={activeTab.todosData?.items || []}
+                    isDarkMode={isDarkMode}
+                    onUpdateItems={handleUpdateTodoItems}
+                    projectPath={activeTab.projectPath}
+                  />
+                )}
+                renderNotes={() => (
+                  <NotesTab
+                    content={activeTab.notesData?.content || ''}
+                    isDarkMode={isDarkMode}
+                    onUpdateContent={handleUpdateNotesContent}
+                  />
+                )}
               />
             </div>
 
