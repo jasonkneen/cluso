@@ -843,6 +843,7 @@ export default function App() {
   const [layersTreeData, setLayersTreeData] = useState<import('./components/ComponentTree').TreeNode | null>(null);
   const [selectedTreeNodeId, setSelectedTreeNodeId] = useState<string | null>(null);
   const [isLayersLoading, setIsLayersLoading] = useState(false);
+  const [multiViewportData, setMultiViewportData] = useState<Array<{ id: string; windowType: string; devicePresetId?: string }>>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -2316,9 +2317,64 @@ export default function App() {
 
   // Layers panel handlers
   const handleRefreshLayers = useCallback(async () => {
-    if (!isWebviewReady) return;
     setIsLayersLoading(true);
     try {
+      // In multi-viewport mode, show canvas/nodes tree instead of page elements
+      if (isMultiViewportMode && multiViewportData.length > 0) {
+        const getNodeName = (v: { windowType: string; devicePresetId?: string }) => {
+          if (v.windowType === 'device') {
+            const presetNames: Record<string, string> = {
+              'desktop': 'Desktop',
+              'laptop': 'Laptop',
+              'iphone-15-pro': 'iPhone 15 Pro',
+              'iphone-15': 'iPhone 15',
+              'iphone-se': 'iPhone SE',
+              'pixel-8': 'Pixel 8',
+              'galaxy-s24': 'Galaxy S24',
+              'ipad-pro-12': 'iPad Pro 12.9"',
+              'ipad-pro-11': 'iPad Pro 11"',
+              'ipad-mini': 'iPad Mini',
+            };
+            return presetNames[v.devicePresetId || 'desktop'] || v.devicePresetId || 'Device';
+          }
+          const typeNames: Record<string, string> = {
+            'kanban': 'Kanban Board',
+            'todo': 'Todo List',
+            'notes': 'Notes',
+            'terminal': 'Terminal',
+          };
+          return typeNames[v.windowType] || v.windowType;
+        };
+
+        const getNodeType = (windowType: string): TreeNode['type'] => {
+          if (windowType === 'device') return 'frame';
+          if (windowType === 'terminal') return 'input';
+          return 'component';
+        };
+
+        const canvasTree: TreeNode = {
+          id: 'canvas',
+          name: 'Canvas',
+          type: 'page',
+          children: multiViewportData.map(v => ({
+            id: `node-${v.id}`,
+            name: getNodeName(v),
+            type: getNodeType(v.windowType),
+            tagName: v.windowType,
+          })),
+        };
+
+        setLayersTreeData(canvasTree);
+        setIsLayersLoading(false);
+        return;
+      }
+
+      // Single viewport mode - scan page elements
+      if (!isWebviewReady) {
+        setIsLayersLoading(false);
+        return;
+      }
+
       const webview = webviewRefs.current.get(activeTabId);
       if (!webview) {
         setIsLayersLoading(false);
@@ -2453,10 +2509,18 @@ export default function App() {
       console.error('[Layers] Refresh error:', err);
     }
     setIsLayersLoading(false);
-  }, [isWebviewReady, activeTabId]);
+  }, [isWebviewReady, activeTabId, isMultiViewportMode, multiViewportData]);
 
   const handleTreeNodeSelect = useCallback(async (node: TreeNode) => {
     setSelectedTreeNodeId(node.id);
+
+    // In multi-viewport mode, clicking a node focuses it on the canvas
+    if (isMultiViewportMode && node.id.startsWith('node-')) {
+      const viewportId = node.id.replace('node-', '');
+      viewportControlsRef.current?.focusViewport?.(viewportId);
+      return;
+    }
+
     if (node.elementNumber) {
       // Highlight in webview
       const webview = webviewRefs.current.get(activeTabId);
@@ -2519,7 +2583,7 @@ export default function App() {
         console.error('[Layers] Highlight error:', err);
       }
     }
-  }, [activeTabId]);
+  }, [activeTabId, isMultiViewportMode]);
 
   // Left panel resize handlers
   const handleLeftResizeStart = useCallback((e: React.MouseEvent) => {
@@ -2544,16 +2608,23 @@ export default function App() {
     document.addEventListener('mouseup', handleMouseUp);
   }, [leftPanelWidth]);
 
-  // Auto-refresh layers when URL changes and panel is open
+  // Auto-refresh layers when URL changes, mode changes, or viewports change
   useEffect(() => {
-    if (isLeftPanelOpen && isWebviewReady && activeTab.url) {
-      // Debounce refresh on URL change
-      const timer = setTimeout(() => {
+    if (isLeftPanelOpen) {
+      // In multi-viewport mode, refresh when viewports change
+      if (isMultiViewportMode && multiViewportData.length > 0) {
         handleRefreshLayers();
-      }, 500);
-      return () => clearTimeout(timer);
+        return;
+      }
+      // In single viewport mode, refresh when URL changes
+      if (isWebviewReady && activeTab.url) {
+        const timer = setTimeout(() => {
+          handleRefreshLayers();
+        }, 500);
+        return () => clearTimeout(timer);
+      }
     }
-  }, [activeTab.url, isLeftPanelOpen, isWebviewReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab.url, isLeftPanelOpen, isWebviewReady, isMultiViewportMode, multiViewportData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle get_page_elements tool - scans page for interactive elements
   // Supports hierarchical focusing: if an element is focused, only shows children of that element
@@ -7971,6 +8042,7 @@ If you're not sure what the user wants, ask for clarification.
                 elkDirection={appSettings.elkDirection || 'RIGHT'}
                 elkSpacing={appSettings.elkSpacing || 120}
                 elkNodeSpacing={appSettings.elkNodeSpacing || 60}
+                onViewportsChange={(viewports) => setMultiViewportData(viewports.map(v => ({ id: v.id, windowType: v.windowType, devicePresetId: v.devicePresetId })))}
               />
             </div>
 

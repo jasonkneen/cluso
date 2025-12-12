@@ -37,8 +37,11 @@ interface ViewportGridProps {
     addTerminal: () => void
     autoLayout: (direction?: LayoutDirection) => void
     fitView: () => void
+    getViewports: () => Viewport[]
+    focusViewport: (id: string) => void
   } | null>
   onViewportCountChange?: (count: number) => void
+  onViewportsChange?: (viewports: Viewport[]) => void
   // Node style - 'standard' (with title bar) or 'chromeless' (floating toolbar)
   nodeStyle?: 'standard' | 'chromeless'
   // ELK Layout settings
@@ -109,6 +112,7 @@ export function ViewportGrid({
   terminalWsUrl,
   controlsRef,
   onViewportCountChange,
+  onViewportsChange,
   nodeStyle = 'standard',
   elkAlgorithm = 'layered',
   elkDirection = 'RIGHT',
@@ -447,7 +451,7 @@ export function ViewportGrid({
     setPan({ x: panX, y: panY })
   }, [viewports])
 
-  // Expose controls to parent via ref and notify count changes
+  // Expose controls to parent via ref and notify count/viewport changes
   useEffect(() => {
     if (controlsRef) {
       controlsRef.current = {
@@ -457,10 +461,13 @@ export function ViewportGrid({
         addTerminal,
         autoLayout,
         fitView,
+        getViewports: () => viewports,
+        focusViewport: bringToFront,
       }
     }
     onViewportCountChange?.(viewports.length)
-  }, [viewports.length, controlsRef, onViewportCountChange, addDevice, addInternalWindow, addTerminal, autoLayout, fitView])
+    onViewportsChange?.(viewports)
+  }, [viewports, controlsRef, onViewportCountChange, onViewportsChange, addDevice, addInternalWindow, addTerminal, autoLayout, fitView, bringToFront])
 
   return (
     <div
