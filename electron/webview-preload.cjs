@@ -448,12 +448,161 @@ let moveStartX = 0
 let moveStartY = 0
 let moveScrollHandler = null // Scroll event handler for move mode
 
+// Rectangle selection state
+let isRectSelecting = false
+let rectStartX = 0
+let rectStartY = 0
+let currentHovered = null
+
+// --- Animated Overlay Helper Functions ---
+function ensureOverlays() {
+  if (!document.getElementById('cluso-hover-overlay')) {
+    const hover = document.createElement('div')
+    hover.id = 'cluso-hover-overlay'
+    document.body.appendChild(hover)
+  }
+  if (!document.getElementById('cluso-selection-overlay')) {
+    const sel = document.createElement('div')
+    sel.id = 'cluso-selection-overlay'
+    document.body.appendChild(sel)
+  }
+  if (!document.getElementById('cluso-rect-selection')) {
+    const rect = document.createElement('div')
+    rect.id = 'cluso-rect-selection'
+    document.body.appendChild(rect)
+  }
+}
+
+function positionOverlay(overlay, rect) {
+  overlay.style.left = rect.left + 'px'
+  overlay.style.top = rect.top + 'px'
+  overlay.style.width = rect.width + 'px'
+  overlay.style.height = rect.height + 'px'
+}
+
+function updateHoverOverlay(element) {
+  ensureOverlays()
+  const overlay = document.getElementById('cluso-hover-overlay')
+  if (!element) {
+    overlay.classList.remove('visible')
+    return
+  }
+  const rect = element.getBoundingClientRect()
+  positionOverlay(overlay, rect)
+  overlay.classList.remove('screenshot-mode', 'move-mode')
+  if (isScreenshotActive) overlay.classList.add('screenshot-mode')
+  if (isMoveActive) overlay.classList.add('move-mode')
+  overlay.classList.add('visible')
+}
+
+function updateSelectionOverlay(element) {
+  ensureOverlays()
+  const overlay = document.getElementById('cluso-selection-overlay')
+  if (!element) {
+    overlay.classList.remove('visible')
+    return
+  }
+  const rect = element.getBoundingClientRect()
+  positionOverlay(overlay, rect)
+  overlay.classList.add('visible')
+}
+
+function hideAllOverlays() {
+  const hover = document.getElementById('cluso-hover-overlay')
+  const sel = document.getElementById('cluso-selection-overlay')
+  const rect = document.getElementById('cluso-rect-selection')
+  if (hover) hover.classList.remove('visible')
+  if (sel) sel.classList.remove('visible')
+  if (rect) rect.style.display = 'none'
+}
+
+// Get all elements intersecting with a rectangle
+function getElementsInRect(x1, y1, x2, y2) {
+  const left = Math.min(x1, x2)
+  const top = Math.min(y1, y2)
+  const right = Math.max(x1, x2)
+  const bottom = Math.max(y1, y2)
+
+  const selector = 'button, a, input, textarea, select, img, video, h1, h2, h3, h4, h5, h6, p, span, div, section, article, nav, header, footer, form, label, li'
+  const allElements = document.querySelectorAll(selector)
+  const intersecting = []
+
+  allElements.forEach(el => {
+    const rect = el.getBoundingClientRect()
+    // Check if element intersects with selection rectangle
+    if (rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top) {
+      // Skip if it's a parent of already-selected elements (prefer more specific)
+      const dominated = intersecting.some(other => el.contains(other.element))
+      if (!dominated && rect.width > 5 && rect.height > 5) {
+        intersecting.push({ element: el, rect })
+      }
+    }
+  })
+
+  return intersecting
+}
+
 // CSS injection for hover/selection effects
 // Inject CSS when DOM is ready
 function injectStyles() {
   const style = document.createElement('style')
   style.id = 'inspector-styles'
   style.textContent = `
+    /* Animated overlay for inspector/screenshot/move hover */
+    #cluso-hover-overlay {
+      position: fixed;
+      pointer-events: none;
+      border: 2px dashed #3b82f6;
+      border-radius: 8px;
+      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15);
+      z-index: 999998;
+      opacity: 0;
+      transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    #cluso-hover-overlay.visible {
+      opacity: 1;
+    }
+    #cluso-hover-overlay.screenshot-mode {
+      border-color: #9333ea;
+      box-shadow: 0 0 0 4px rgba(147, 51, 234, 0.15);
+      background-color: rgba(147, 51, 234, 0.05);
+    }
+    #cluso-hover-overlay.move-mode {
+      border-color: #f59e0b;
+      box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.15);
+    }
+
+    /* Animated overlay for selection */
+    #cluso-selection-overlay {
+      position: fixed;
+      pointer-events: none;
+      border: 3px solid #3b82f6;
+      border-radius: 8px;
+      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2), 0 4px 12px rgba(59, 130, 246, 0.3);
+      z-index: 999999;
+      opacity: 0;
+      transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    #cluso-selection-overlay.visible {
+      opacity: 1;
+    }
+
+    /* Rectangle drag selection */
+    #cluso-rect-selection {
+      position: fixed;
+      pointer-events: none;
+      border: 2px dashed #3b82f6;
+      border-radius: 4px;
+      background-color: rgba(59, 130, 246, 0.1);
+      z-index: 999997;
+      display: none;
+    }
+    #cluso-rect-selection.screenshot-mode {
+      border-color: #9333ea;
+      background-color: rgba(147, 51, 234, 0.1);
+    }
+
+    /* Legacy class support - keep for backwards compatibility */
     .inspector-hover-target {
       outline: 2px dashed #3b82f6 !important;
       outline-offset: -2px !important;
@@ -792,9 +941,15 @@ function isPartOfMoveOverlay(element) {
 document.addEventListener('mouseover', function(e) {
   if (!isInspectorActive && !isScreenshotActive && !isMoveActive) return
   if (isEditing) return // Don't highlight while inline editing
+  if (isRectSelecting) return // Don't hover while rect selecting
   if (isPartOfMoveOverlay(e.target)) return // Don't highlight move overlays
   e.stopPropagation()
 
+  // Update animated hover overlay
+  currentHovered = e.target
+  updateHoverOverlay(e.target)
+
+  // Also add legacy class for backwards compatibility
   if (isInspectorActive) {
     e.target.classList.add('inspector-hover-target')
   } else if (isScreenshotActive) {
@@ -822,6 +977,13 @@ document.addEventListener('mouseout', function(e) {
   if (isEditing) return // Don't process while inline editing
   if (isPartOfMoveOverlay(e.target)) return // Don't process move overlays
   e.stopPropagation()
+
+  // Only hide hover overlay if we're leaving the hovered element
+  if (e.target === currentHovered) {
+    currentHovered = null
+    updateHoverOverlay(null)
+  }
+
   e.target.classList.remove('inspector-hover-target')
   e.target.classList.remove('screenshot-hover-target')
   e.target.classList.remove('move-hover-target')
@@ -834,6 +996,7 @@ document.addEventListener('click', async function(e) {
   // Early return FIRST - don't intercept clicks when no mode is active
   if (!isInspectorActive && !isScreenshotActive && !isMoveActive) return
   if (isEditing) return // Don't select new elements while inline editing
+  if (isRectSelecting) return // Don't click while rect selecting
 
   // Only log and intercept if a mode is active
   console.log('[Inspector] Click intercepted, mode:', isInspectorActive ? 'inspector' : isScreenshotActive ? 'screenshot' : 'move')
@@ -857,6 +1020,9 @@ document.addEventListener('click', async function(e) {
     e.target.classList.add('inspector-selected-target')
     e.target.classList.remove('inspector-hover-target')
     currentSelected = e.target
+
+    // Update animated selection overlay
+    updateSelectionOverlay(e.target)
 
     const payload = {
       element: { ...summary, xpath, sourceLocation },
@@ -903,6 +1069,103 @@ document.addEventListener('click', async function(e) {
   }
 }, true)
 
+// Rectangle drag selection - mousedown to start
+// Hold Shift to start rectangle selection from anywhere
+document.addEventListener('mousedown', function(e) {
+  if (!isInspectorActive && !isScreenshotActive && !isMoveActive) return
+  if (e.button !== 0) return // Only left click
+  if (!e.shiftKey) return // Require Shift key for rect selection
+
+  e.preventDefault()
+  e.stopPropagation()
+
+  // Clear any text selection
+  window.getSelection()?.removeAllRanges()
+
+  // Disable text selection on body while dragging
+  document.body.style.userSelect = 'none'
+  document.body.style.webkitUserSelect = 'none'
+
+  isRectSelecting = true
+  rectStartX = e.clientX
+  rectStartY = e.clientY
+
+  ensureOverlays()
+  const rectEl = document.getElementById('cluso-rect-selection')
+  rectEl.style.left = rectStartX + 'px'
+  rectEl.style.top = rectStartY + 'px'
+  rectEl.style.width = '0px'
+  rectEl.style.height = '0px'
+  rectEl.style.display = 'block'
+  if (isScreenshotActive) {
+    rectEl.classList.add('screenshot-mode')
+  } else {
+    rectEl.classList.remove('screenshot-mode')
+  }
+
+  updateHoverOverlay(null) // Hide hover overlay while dragging
+}, true)
+
+// Rectangle drag selection - mousemove to resize
+document.addEventListener('mousemove', function(e) {
+  if (!isRectSelecting) return
+
+  e.preventDefault() // Prevent text selection while dragging
+
+  const rectEl = document.getElementById('cluso-rect-selection')
+  const left = Math.min(e.clientX, rectStartX)
+  const top = Math.min(e.clientY, rectStartY)
+  const width = Math.abs(e.clientX - rectStartX)
+  const height = Math.abs(e.clientY - rectStartY)
+
+  rectEl.style.left = left + 'px'
+  rectEl.style.top = top + 'px'
+  rectEl.style.width = width + 'px'
+  rectEl.style.height = height + 'px'
+}, true)
+
+// Rectangle drag selection - mouseup to finish
+document.addEventListener('mouseup', function(e) {
+  if (!isRectSelecting) return
+
+  isRectSelecting = false
+
+  // Re-enable text selection
+  document.body.style.userSelect = ''
+  document.body.style.webkitUserSelect = ''
+
+  const rectEl = document.getElementById('cluso-rect-selection')
+  rectEl.style.display = 'none'
+
+  const width = Math.abs(e.clientX - rectStartX)
+  const height = Math.abs(e.clientY - rectStartY)
+
+  // Only process if dragged a meaningful distance
+  if (width > 20 && height > 20) {
+    const elements = getElementsInRect(rectStartX, rectStartY, e.clientX, e.clientY)
+
+    if (elements.length > 0) {
+      // Collect all element data
+      const elementsData = elements.map(({ element, rect }) => ({
+        element: getElementSummary(element),
+        rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
+      }))
+
+      // Send rectangle selection to host
+      const messageType = isScreenshotActive ? 'screenshot-rect-select' : 'inspector-rect-select'
+      ipcRenderer.sendToHost(messageType, {
+        elements: elementsData,
+        selectionRect: {
+          left: Math.min(rectStartX, e.clientX),
+          top: Math.min(rectStartY, e.clientY),
+          width: width,
+          height: height
+        }
+      })
+    }
+  }
+}, true)
+
 // Listen for mode changes from host
 ipcRenderer.on('set-inspector-mode', (event, active) => {
   console.log('[Inspector] set-inspector-mode received:', active)
@@ -916,6 +1179,8 @@ ipcRenderer.on('set-inspector-mode', (event, active) => {
       currentSelected.classList.remove('inspector-drag-over')
       currentSelected = null
     }
+    currentHovered = null
+    hideAllOverlays()
     hideDropLabel()
   }
 })
@@ -930,6 +1195,10 @@ ipcRenderer.on('set-screenshot-mode', (event, active) => {
       currentSelected.classList.remove('inspector-selected-target')
       currentSelected = null
     }
+    updateSelectionOverlay(null)
+  }
+  if (!active) {
+    hideAllOverlays()
   }
 })
 
@@ -944,6 +1213,8 @@ ipcRenderer.on('set-move-mode', (event, active) => {
       currentSelected = null
     }
   } else {
+    currentHovered = null
+    hideAllOverlays()
     cleanupAllMoveOverlays()
   }
 })
@@ -955,6 +1226,8 @@ ipcRenderer.on('clear-selection', () => {
     currentSelected.classList.remove('inspector-selected-target')
     currentSelected = null
   }
+  currentHovered = null
+  hideAllOverlays()
 })
 
 // Highlight element by number - for voice control
@@ -976,6 +1249,9 @@ ipcRenderer.on('highlight-element-by-number', (event, elementNumber) => {
       element.classList.add('inspector-selected-target')
       currentSelected = element
       element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+
+      // Update animated selection overlay
+      updateSelectionOverlay(element)
 
       const summary = getElementSummary(element)
       const rect = element.getBoundingClientRect()
@@ -1022,6 +1298,9 @@ ipcRenderer.on('highlight-element-by-number', (event, elementNumber) => {
       element.classList.add('inspector-selected-target')
       currentSelected = element
       element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+
+      // Update animated selection overlay
+      updateSelectionOverlay(element)
 
       const summary = getElementSummary(element)
       const rect = element.getBoundingClientRect()
