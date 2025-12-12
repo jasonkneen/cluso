@@ -7403,6 +7403,10 @@ If you're not sure what the user wants, ask for clarification.
                   />
                 )}
                 nodeStyle={appSettings.nodeStyle || 'standard'}
+                elkAlgorithm={appSettings.elkAlgorithm || 'layered'}
+                elkDirection={appSettings.elkDirection || 'RIGHT'}
+                elkSpacing={appSettings.elkSpacing || 120}
+                elkNodeSpacing={appSettings.elkNodeSpacing || 60}
               />
             </div>
 
