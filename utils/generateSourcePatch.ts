@@ -264,7 +264,12 @@ async function selectMorphModel(input: string, apiKeyOverride?: string): Promise
 
     // Fallback for web builds: dynamic import (may fail in browser)
     console.log('[Source Patch] Morph router IPC not available; attempting local import (may fail in browser)')
-    const { MorphClient } = await import('@morphllm/morphsdk')
+    // Avoid bundling morphsdk into the renderer build (node-only deps like child_process).
+    // In web builds this will likely fail at runtime; that's fine since we fall back.
+    const morphsdkModule = '@morphllm/morphsdk'
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    const { MorphClient } = await import(/* @vite-ignore */ morphsdkModule)
     const morph = new MorphClient({ apiKey })
     const result = await morph.routers.anthropic.selectModel({
       input,
