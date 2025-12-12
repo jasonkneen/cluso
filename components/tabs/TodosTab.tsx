@@ -155,37 +155,32 @@ export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: Todo
 
   return (
     <div className={`flex-1 flex flex-col h-full overflow-hidden ${isDarkMode ? 'bg-neutral-800' : 'bg-white'}`}>
-      {/* Header */}
-      <div className={`px-4 py-3 border-b ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
+      {/* Compact Header */}
+      <div className={`px-2 py-1.5 border-b ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
         <div className="flex items-center justify-between">
-          <h2 className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-stone-800'}`}>
-            Todos
-          </h2>
-          <div className="flex items-center gap-2 text-sm">
-            <span className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'}>
-              {activeCount} active, {completedCount} completed
-            </span>
-            {projectPath && (
-              <button
-                onClick={scanAgentTodos}
-                disabled={isScanning}
-                className={`p-1 rounded transition-colors ${
-                  isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'
-                } ${isScanning ? 'animate-spin' : ''}`}
-                title="Refresh agent todos"
-              >
-                <RefreshCw size={14} />
-              </button>
-            )}
-          </div>
+          <span className={`text-[10px] ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
+            {activeCount} active, {completedCount} completed
+          </span>
+          {projectPath && (
+            <button
+              onClick={scanAgentTodos}
+              disabled={isScanning}
+              className={`p-0.5 rounded transition-colors ${
+                isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'
+              } ${isScanning ? 'animate-spin' : ''}`}
+              title="Refresh agent todos"
+            >
+              <RefreshCw size={10} />
+            </button>
+          )}
         </div>
 
         {/* Agent Filter Chips */}
         {Object.keys(agents).length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-3">
+          <div className="flex flex-wrap gap-1 mt-1.5">
             <button
               onClick={() => setAgentFilter(null)}
-              className={`px-2 py-1 text-[10px] font-medium rounded-full transition-colors ${
+              className={`px-1.5 py-0.5 text-[9px] font-medium rounded-full transition-colors ${
                 agentFilter === null
                   ? 'bg-neutral-500 text-white'
                   : isDarkMode
@@ -197,7 +192,7 @@ export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: Todo
             </button>
             <button
               onClick={() => setAgentFilter('user')}
-              className={`px-2 py-1 text-[10px] font-medium rounded-full transition-colors ${
+              className={`px-1.5 py-0.5 text-[9px] font-medium rounded-full transition-colors ${
                 agentFilter === 'user'
                   ? 'text-white'
                   : isDarkMode
@@ -214,7 +209,7 @@ export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: Todo
               <button
                 key={agentId}
                 onClick={() => setAgentFilter(agentId)}
-                className={`px-2 py-1 text-[10px] font-medium rounded-full transition-colors ${
+                className={`px-1.5 py-0.5 text-[9px] font-medium rounded-full transition-colors ${
                   agentFilter === agentId
                     ? 'text-white'
                     : isDarkMode
@@ -232,12 +227,12 @@ export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: Todo
         )}
 
         {/* Filters */}
-        <div className="flex gap-2 mt-3">
+        <div className="flex gap-1 mt-1.5">
           {(['all', 'active', 'completed'] as const).map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+              className={`px-2 py-0.5 text-[10px] font-medium rounded-full transition-colors ${
                 filter === f
                   ? isDarkMode
                     ? 'bg-blue-500 text-white'
@@ -253,9 +248,9 @@ export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: Todo
         </div>
       </div>
 
-      {/* Add Todo */}
-      <div className={`px-4 py-3 border-b ${isDarkMode ? 'border-neutral-700 bg-neutral-800/50' : 'border-stone-200 bg-white'}`}>
-        <div className="flex gap-2">
+      {/* Compact Add Todo */}
+      <div className={`px-2 py-1.5 border-b ${isDarkMode ? 'border-neutral-700 bg-neutral-800/50' : 'border-stone-200 bg-white'}`}>
+        <div className="flex gap-1.5">
           <input
             type="text"
             value={newTodoText}
@@ -264,7 +259,7 @@ export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: Todo
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleAddTodo()
             }}
-            className={`flex-1 px-3 py-2 text-sm rounded-lg outline-none ${
+            className={`flex-1 px-2 py-1 text-xs rounded outline-none ${
               isDarkMode
                 ? 'bg-neutral-700 text-white placeholder-neutral-400 border-neutral-600 focus:border-blue-500'
                 : 'bg-stone-50 text-stone-800 placeholder-stone-400 border-stone-200 focus:border-blue-500'
@@ -273,7 +268,7 @@ export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: Todo
           <select
             value={newTodoPriority}
             onChange={(e) => setNewTodoPriority(e.target.value as 'low' | 'medium' | 'high')}
-            className={`px-2 py-2 text-sm rounded-lg outline-none ${
+            className={`px-1.5 py-1 text-xs rounded outline-none ${
               isDarkMode
                 ? 'bg-neutral-700 text-white border-neutral-600'
                 : 'bg-stone-50 text-stone-800 border-stone-200'
@@ -286,19 +281,19 @@ export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: Todo
           <button
             onClick={handleAddTodo}
             disabled={!newTodoText.trim()}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-2 py-1 text-xs font-medium text-white bg-blue-500 rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Plus size={16} />
+            <Plus size={12} />
           </button>
         </div>
       </div>
 
       {/* Todo List */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+      <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {sortedItems.length === 0 ? (
-          <div className={`text-center py-12 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-            <CheckCircleIcon className="mx-auto mb-3" size={48} />
-            <p className="text-sm">
+          <div className={`text-center py-6 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+            <CheckCircleIcon className="mx-auto mb-2" size={32} />
+            <p className="text-xs">
               {filter === 'all' ? 'No tasks yet. Add one above!' : `No ${filter} tasks.`}
             </p>
           </div>
@@ -308,7 +303,7 @@ export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: Todo
             return (
               <div
                 key={item.id}
-                className={`group flex items-start gap-3 p-3 rounded-lg transition-all ${
+                className={`group flex items-start gap-2 p-1.5 rounded transition-all ${
                   isDarkMode
                     ? `bg-neutral-800 ${item.completed ? 'opacity-60' : ''}`
                     : `bg-white ${item.completed ? 'opacity-60' : ''}`
@@ -317,7 +312,7 @@ export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: Todo
                 {/* Checkbox */}
                 <button
                   onClick={() => handleToggleTodo(item.id)}
-                  className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
+                  className={`mt-0.5 flex-shrink-0 w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${
                     item.completed
                       ? 'bg-green-500 border-green-500 text-white'
                       : isDarkMode
@@ -325,14 +320,14 @@ export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: Todo
                         : 'border-stone-300 hover:border-green-500'
                   }`}
                 >
-                  {item.completed && <Check size={12} />}
+                  {item.completed && <Check size={8} />}
                 </button>
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     <span
-                      className={`text-sm ${
+                      className={`text-xs ${
                         item.completed
                           ? isDarkMode ? 'text-neutral-500 line-through' : 'text-stone-400 line-through'
                           : isDarkMode ? 'text-white' : 'text-stone-800'
@@ -340,15 +335,15 @@ export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: Todo
                     >
                       {item.text}
                     </span>
-                    <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${priority.bg} ${priority.text}`}>
+                    <span className={`px-1 py-px text-[8px] font-medium rounded ${priority.bg} ${priority.text}`}>
                       {priority.label}
                     </span>
                   </div>
-                  <div className={`flex items-center gap-2 mt-1 text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                  <div className={`flex items-center gap-1.5 mt-0.5 text-[9px] ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
                     {/* Agent chip */}
                     {item.agent && item.agent !== 'user' ? (
                       <span
-                        className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                        className="flex items-center gap-0.5 px-1 py-px rounded-full text-[8px] font-medium"
                         style={{
                           backgroundColor: `${agents[item.agent]?.color || AGENT_COLORS[item.agent] || '#6B7280'}20`,
                           color: agents[item.agent]?.color || AGENT_COLORS[item.agent] || '#6B7280',
@@ -357,31 +352,26 @@ export function TodosTab({ items, isDarkMode, onUpdateItems, projectPath }: Todo
                         {agents[item.agent]?.icon || '🤖'} {agents[item.agent]?.name || item.agent}
                       </span>
                     ) : (
-                      <span className="flex items-center gap-1">
-                        <User size={10} />
+                      <span className="flex items-center gap-0.5">
+                        <User size={8} />
                         You
                       </span>
                     )}
-                    <span className="flex items-center gap-1">
-                      <Clock size={10} />
+                    <span className="flex items-center gap-0.5">
+                      <Clock size={8} />
                       {new Date(item.createdAt).toLocaleDateString()}
                     </span>
-                    {item.source && item.source !== 'local' && (
-                      <span className={`text-[10px] ${isDarkMode ? 'text-neutral-600' : 'text-stone-300'}`}>
-                        {item.source}
-                      </span>
-                    )}
                   </div>
                 </div>
 
                 {/* Delete */}
                 <button
                   onClick={() => handleDeleteTodo(item.id)}
-                  className={`opacity-0 group-hover:opacity-100 p-1.5 rounded transition-opacity ${
+                  className={`opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity ${
                     isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-400'
                   }`}
                 >
-                  <Trash2 size={14} />
+                  <Trash2 size={10} />
                 </button>
               </div>
             )

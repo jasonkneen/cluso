@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback, useState } from 'react'
+import React, { useRef, useEffect, useCallback, useState, memo } from 'react'
 import { cn } from '@/lib/utils'
 import { Smartphone, Tablet, Monitor, RotateCcw, Lock, Unlock, Maximize2 } from 'lucide-react'
 import { BaseNode } from './BaseNode'
@@ -54,7 +54,7 @@ export interface DeviceNodeProps {
   onAddLinked?: (type: 'kanban' | 'todo' | 'notes') => void
 }
 
-export function DeviceNode({
+export const DeviceNode = memo(function DeviceNode({
   id,
   x,
   y,
@@ -318,4 +318,4 @@ export function DeviceNode({
       </div>
     </BaseNode>
   )
-}
+})

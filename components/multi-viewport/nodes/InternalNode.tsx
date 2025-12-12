@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { memo } from 'react'
 import { cn } from '@/lib/utils'
 import { KanbanSquare, ListTodo, StickyNote } from 'lucide-react'
 import { BaseNode } from './BaseNode'
@@ -38,7 +38,7 @@ export interface InternalNodeProps {
   children: React.ReactNode
 }
 
-export function InternalNode({
+export const InternalNode = memo(function InternalNode({
   id,
   x,
   y,
@@ -93,4 +93,4 @@ export function InternalNode({
       </div>
     </BaseNode>
   )
-}
+})

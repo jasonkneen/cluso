@@ -7,8 +7,7 @@ import { INJECTION_SCRIPT } from './utils/iframe-injection';
 import { SelectedElement, Message as ChatMessage, ToolUsage } from './types';
 import { TabState, createNewTab } from './types/tab';
 import { TabBar, Tab, TabType } from './components/TabBar';
-import { KanbanTab, TodosTab } from './components/tabs';
-import { NotesTab } from './components/schedule/notes';
+import { KanbanTab, TodosTab, NotesTab } from './components/tabs';
 import { NewTabPage, addToRecentProjects, getRecentProject } from './components/NewTabPage';
 import { KanbanColumn, TodoItem } from './types/tab';
 import { ProjectSetupFlow } from './components/ProjectSetupFlow';
@@ -778,15 +777,17 @@ export default function App() {
     }, 500);
   }, [updateCurrentTab]);
 
-  // Convert TabState to Tab for TabBar
-  const tabBarTabs: Tab[] = tabs.map(t => ({
-    id: t.id,
-    title: t.title || 'Cluso',
-    url: t.url,
-    favicon: t.favicon,
-    type: t.type || 'browser',
-    isProject: !!t.projectPath, // Mark project tabs with folder icon
-  }));
+  // Convert TabState to Tab for TabBar - only show browser tabs (kanban/todos/notes are internal windows)
+  const tabBarTabs: Tab[] = tabs
+    .filter(t => t.type === 'browser' || !t.type)
+    .map(t => ({
+      id: t.id,
+      title: t.title || 'Cluso',
+      url: t.url,
+      favicon: t.favicon,
+      type: t.type || 'browser',
+      isProject: !!t.projectPath, // Mark project tabs with folder icon
+    }));
 
   // Browser State
   const [urlInput, setUrlInput] = useState(DEFAULT_URL); // URL in address bar (editable)
