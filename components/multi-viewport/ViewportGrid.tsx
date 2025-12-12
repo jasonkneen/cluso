@@ -1,23 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import {
-  DndContext,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  DragEndEvent,
-  DragMoveEvent,
-  DragStartEvent,
-  useDraggable,
-  closestCenter,
-} from '@dnd-kit/core'
 import { cn } from '@/lib/utils'
-import { Plus, Smartphone, Tablet, Monitor, LayoutGrid, X, KanbanSquare, ListTodo, StickyNote } from 'lucide-react'
-import { ViewportItem, ViewportPerformanceWarning } from './ViewportItem'
-import { InternalWindowItem, getWindowConfig } from './InternalWindowItem'
-import { Viewport, DevicePreset, WindowType, DEVICE_PRESETS, getPresetById, getPresetsByType } from './types'
+import { DeviceNode } from './nodes/DeviceNode'
+import { InternalNode, getInternalWindowConfig } from './nodes/InternalNode'
+import { ConnectionLines } from './canvas/ConnectionLines'
+import { Viewport, WindowType, DEVICE_PRESETS, getPresetById, getPresetsByType } from './types'
 
-// Grid snap size
-const GRID_SNAP = 50
+const STORAGE_KEY = 'cluso-multi-viewport-config'
 
 interface ViewportGridProps {
   url: string
@@ -37,16 +25,16 @@ interface ViewportGridProps {
   renderKanban?: () => React.ReactNode
   renderTodo?: () => React.ReactNode
   renderNotes?: () => React.ReactNode
+  // External control refs for toolbar integration
+  controlsRef?: React.MutableRefObject<{
+    viewportCount: number
+    addDevice: (type: 'mobile' | 'tablet' | 'desktop') => void
+    addInternalWindow: (type: 'kanban' | 'todo' | 'notes') => void
+  } | null>
+  onViewportCountChange?: (count: number) => void
 }
 
-const STORAGE_KEY = 'cluso-multi-viewport-config'
-
-// Snap to grid
-function snapToGrid(value: number): number {
-  return Math.round(value / GRID_SNAP) * GRID_SNAP
-}
-
-// Load viewports from localStorage
+// Load/save viewports
 function loadViewports(): Viewport[] {
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
@@ -55,273 +43,37 @@ function loadViewports(): Viewport[] {
       if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed.map((v: Viewport, i: number) => ({
           ...v,
-          windowType: v.windowType || 'device', // Default to device for backwards compatibility
+          windowType: v.windowType || 'device',
           displayWidth: v.displayWidth || 400,
-          displayHeight: v.displayHeight || 250,
+          displayHeight: v.displayHeight || 300,
           x: v.x ?? (i % 3) * 420,
-          y: v.y ?? Math.floor(i / 3) * 280,
+          y: v.y ?? Math.floor(i / 3) * 320,
+          zIndex: v.zIndex ?? i + 1,
         }))
       }
     }
   } catch (e) {
-    console.error('[ViewportGrid] Failed to load viewports from localStorage:', e)
+    console.error('[ViewportGrid] Failed to load viewports:', e)
   }
-  // Default viewport
-  return [{ id: crypto.randomUUID(), windowType: 'device', devicePresetId: 'desktop', orientation: 'landscape', displayWidth: 600, displayHeight: 300, x: 0, y: 0 }]
+  return [{
+    id: crypto.randomUUID(),
+    windowType: 'device',
+    devicePresetId: 'desktop',
+    orientation: 'landscape',
+    displayWidth: 600,
+    displayHeight: 350,
+    x: 50,
+    y: 50,
+    zIndex: 1,
+  }]
 }
 
-// Save viewports to localStorage
 function saveViewports(viewports: Viewport[]) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(viewports))
   } catch (e) {
-    console.error('[ViewportGrid] Failed to save viewports to localStorage:', e)
+    console.error('[ViewportGrid] Failed to save viewports:', e)
   }
-}
-
-// Draggable wrapper for viewport items - free positioning
-function DraggableViewportItem({
-  viewport,
-  preset,
-  url,
-  isDarkMode,
-  isElectron,
-  webviewPreloadPath,
-  isPrimary,
-  onSetPrimary,
-  onNavigate,
-  isInspectorActive,
-  isScreenshotActive,
-  isMoveActive,
-  onInspectorHover,
-  onInspectorSelect,
-  onScreenshotSelect,
-  onConsoleLog,
-  onExpand,
-  onRemove,
-  onOrientationToggle,
-  onResize,
-  onAddLinkedWindow,
-}: {
-  viewport: Viewport
-  preset: DevicePreset
-  url: string
-  isDarkMode: boolean
-  isElectron: boolean
-  webviewPreloadPath?: string
-  isPrimary?: boolean
-  onSetPrimary?: () => void
-  onNavigate?: (url: string) => void
-  isInspectorActive?: boolean
-  isScreenshotActive?: boolean
-  isMoveActive?: boolean
-  onInspectorHover?: (element: unknown, rect: unknown, viewportId: string) => void
-  onInspectorSelect?: (element: unknown, rect: unknown, viewportId: string) => void
-  onScreenshotSelect?: (element: unknown, rect: unknown, viewportId: string) => void
-  onConsoleLog?: (level: string, message: string, viewportId: string) => void
-  onExpand: () => void
-  onRemove: () => void
-  onOrientationToggle: () => void
-  onResize: (width: number, height: number) => void
-  onAddLinkedWindow?: (windowType: 'kanban' | 'todo' | 'notes') => void
-}) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    isDragging,
-  } = useDraggable({ id: viewport.id })
-
-  // Absolute position + drag offset
-  const style: React.CSSProperties = {
-    position: 'absolute',
-    left: viewport.x ?? 0,
-    top: viewport.y ?? 0,
-    transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
-    opacity: isDragging ? 0.8 : 1,
-    zIndex: isDragging ? 100 : 1,
-    touchAction: 'none', // Prevents browser handling of touch/pointer events during drag
-    cursor: isDragging ? 'grabbing' : undefined,
-  }
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-    >
-      <ViewportItem
-        viewport={viewport}
-        preset={preset}
-        url={url}
-        isDarkMode={isDarkMode}
-        isElectron={isElectron}
-        webviewPreloadPath={webviewPreloadPath}
-        isExpanded={false}
-        isPrimary={isPrimary}
-        onSetPrimary={onSetPrimary}
-        onNavigate={onNavigate}
-        isInspectorActive={isInspectorActive}
-        isScreenshotActive={isScreenshotActive}
-        isMoveActive={isMoveActive}
-        onInspectorHover={onInspectorHover}
-        onInspectorSelect={onInspectorSelect}
-        onScreenshotSelect={onScreenshotSelect}
-        onConsoleLog={onConsoleLog}
-        onExpand={onExpand}
-        onCollapse={() => {}}
-        onRemove={onRemove}
-        onOrientationToggle={onOrientationToggle}
-        onResize={onResize}
-        dragHandleProps={listeners}
-        onAddLinkedWindow={onAddLinkedWindow}
-      />
-    </div>
-  )
-}
-
-// Draggable wrapper for internal windows (kanban, todo, notes)
-function DraggableInternalWindow({
-  viewport,
-  isDarkMode,
-  onRemove,
-  onResize,
-  linkedViewportName,
-  renderKanban,
-  renderTodo,
-  renderNotes,
-}: {
-  viewport: Viewport
-  isDarkMode: boolean
-  onRemove: () => void
-  onResize: (width: number, height: number) => void
-  linkedViewportName?: string
-  renderKanban?: () => React.ReactNode
-  renderTodo?: () => React.ReactNode
-  renderNotes?: () => React.ReactNode
-}) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    isDragging,
-  } = useDraggable({ id: viewport.id })
-
-  const style: React.CSSProperties = {
-    position: 'absolute',
-    left: viewport.x ?? 0,
-    top: viewport.y ?? 0,
-    transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
-    opacity: isDragging ? 0.8 : 1,
-    zIndex: isDragging ? 100 : 1,
-    touchAction: 'none',
-    cursor: isDragging ? 'grabbing' : undefined,
-  }
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-    >
-      <InternalWindowItem
-        viewport={viewport}
-        isDarkMode={isDarkMode}
-        onRemove={onRemove}
-        onResize={onResize}
-        dragHandleProps={listeners}
-        linkedViewportName={linkedViewportName}
-        renderKanban={renderKanban}
-        renderTodo={renderTodo}
-        renderNotes={renderNotes}
-      />
-    </div>
-  )
-}
-
-// Connection lines between linked items
-function ConnectionLines({
-  viewports,
-  isDarkMode,
-  activeDragId,
-  dragDelta,
-}: {
-  viewports: Viewport[]
-  isDarkMode: boolean
-  activeDragId?: string | null
-  dragDelta?: { x: number; y: number } | null
-}) {
-  // Find all linked windows and their source viewports
-  const connections = viewports
-    .filter(v => v.linkedToViewportId)
-    .map(linkedWindow => {
-      const sourceViewport = viewports.find(v => v.id === linkedWindow.linkedToViewportId)
-      if (!sourceViewport) return null
-
-      // Apply drag delta if this viewport is being dragged
-      const sourceDragOffset = activeDragId === sourceViewport.id && dragDelta ? dragDelta : { x: 0, y: 0 }
-      const targetDragOffset = activeDragId === linkedWindow.id && dragDelta ? dragDelta : { x: 0, y: 0 }
-
-      // Calculate connection points
-      // Source: right edge center
-      const sourceX = (sourceViewport.x ?? 0) + (sourceViewport.displayWidth ?? 400) + sourceDragOffset.x
-      const sourceY = (sourceViewport.y ?? 0) + (sourceViewport.displayHeight ?? 250) / 2 + sourceDragOffset.y
-
-      // Target: left edge center
-      const targetX = (linkedWindow.x ?? 0) + targetDragOffset.x
-      const targetY = (linkedWindow.y ?? 0) + (linkedWindow.displayHeight ?? 300) / 2 + targetDragOffset.y
-
-      return {
-        id: `${sourceViewport.id}-${linkedWindow.id}`,
-        sourceX,
-        sourceY,
-        targetX,
-        targetY,
-      }
-    })
-    .filter(Boolean) as { id: string; sourceX: number; sourceY: number; targetX: number; targetY: number }[]
-
-  if (connections.length === 0) return null
-
-  return (
-    <svg
-      className="absolute inset-0 pointer-events-none"
-      style={{ overflow: 'visible', zIndex: 0 }}
-    >
-      {connections.map(conn => {
-        // Calculate control points for a smooth bezier curve
-        const controlOffset = Math.min(Math.abs(conn.targetX - conn.sourceX) / 2, 50)
-
-        return (
-          <g key={conn.id}>
-            {/* Connection line */}
-            <path
-              d={`M ${conn.sourceX} ${conn.sourceY} C ${conn.sourceX + controlOffset} ${conn.sourceY}, ${conn.targetX - controlOffset} ${conn.targetY}, ${conn.targetX} ${conn.targetY}`}
-              stroke={isDarkMode ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.25)'}
-              strokeWidth={2}
-              strokeDasharray="4 4"
-              fill="none"
-            />
-            {/* Small circles at endpoints */}
-            <circle
-              cx={conn.sourceX}
-              cy={conn.sourceY}
-              r={3}
-              fill={isDarkMode ? 'rgba(59, 130, 246, 0.5)' : 'rgba(59, 130, 246, 0.4)'}
-            />
-            <circle
-              cx={conn.targetX}
-              cy={conn.targetY}
-              r={3}
-              fill={isDarkMode ? 'rgba(59, 130, 246, 0.5)' : 'rgba(59, 130, 246, 0.4)'}
-            />
-          </g>
-        )
-      })}
-    </svg>
-  )
 }
 
 export function ViewportGrid({
@@ -340,44 +92,37 @@ export function ViewportGrid({
   renderKanban,
   renderTodo,
   renderNotes,
+  controlsRef,
+  onViewportCountChange,
 }: ViewportGridProps) {
-  // State - load from localStorage on init
   const [viewports, setViewports] = useState<Viewport[]>(loadViewports)
   const [expandedViewportId, setExpandedViewportId] = useState<string | null>(null)
-  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false)
-  const [performanceWarningDismissed, setPerformanceWarningDismissed] = useState(false)
-  const isInitialMount = useRef(true)
-
-  // Primary viewport for synced navigation
   const [primaryViewportId, setPrimaryViewportId] = useState<string | null>(null)
   const [syncedUrl, setSyncedUrl] = useState<string>(url)
+  const [maxZIndex, setMaxZIndex] = useState(() => Math.max(...loadViewports().map(v => v.zIndex ?? 1), 1))
+  const maxZIndexRef = useRef(maxZIndex)
+  const isInitialMount = useRef(true)
 
-  // Track active drag for connection line updates
-  const [activeDragId, setActiveDragId] = useState<string | null>(null)
-  const [dragDelta, setDragDelta] = useState<{ x: number; y: number } | null>(null)
+  // Canvas zoom
+  const [scale, setScale] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const MIN_SCALE = 0.25
+  const MAX_SCALE = 2
 
-  // Only sync URL on initial mount - don't update when parent prop changes
-  // This prevents webview reloads when switching views
-  const initialUrlRef = useRef(url)
+  // Keep ref in sync with state
   useEffect(() => {
-    // Only set on first mount
+    maxZIndexRef.current = maxZIndex
+  }, [maxZIndex])
+
+  // Sync URL on mount only
+  useEffect(() => {
     if (!syncedUrl || syncedUrl === 'about:blank') {
       setSyncedUrl(url)
     }
-  }, []) // Empty deps - only on mount
-
-  // Handle primary viewport navigation - sync to all others
-  const handlePrimaryNavigate = useCallback((newUrl: string) => {
-    console.log('[ViewportGrid] Primary navigated to:', newUrl)
-    setSyncedUrl(newUrl)
   }, [])
 
-  // Set or unset primary viewport
-  const handleSetPrimary = useCallback((viewportId: string) => {
-    setPrimaryViewportId(prev => prev === viewportId ? null : viewportId)
-  }, [])
-
-  // Save viewports to localStorage when they change (skip initial mount)
+  // Save on change
   useEffect(() => {
     if (isInitialMount.current) {
       isInitialMount.current = false
@@ -386,122 +131,86 @@ export function ViewportGrid({
     saveViewports(viewports)
   }, [viewports])
 
-  // DnD sensors - pointer for free positioning
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    })
-  )
-
-  // ESC key handler for collapse
+  // Expose controls to parent via ref and notify count changes
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && expandedViewportId) {
-        setExpandedViewportId(null)
+    if (controlsRef) {
+      controlsRef.current = {
+        viewportCount: viewports.length,
+        addDevice,
+        addInternalWindow: (type) => addInternalWindow(type),
       }
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [expandedViewportId])
+    onViewportCountChange?.(viewports.length)
+  }, [viewports.length, controlsRef, onViewportCountChange])
 
-  // Close menu on outside click
-  useEffect(() => {
-    const handleClickOutside = () => setIsAddMenuOpen(false)
-    if (isAddMenuOpen) {
-      window.addEventListener('click', handleClickOutside)
-      return () => window.removeEventListener('click', handleClickOutside)
-    }
-  }, [isAddMenuOpen])
+  // Bring node to front - use ref to avoid stale closure
+  const bringToFront = useCallback((id: string) => {
+    const newZ = maxZIndexRef.current + 1
+    maxZIndexRef.current = newZ
+    setMaxZIndex(newZ)
+    setViewports(prev => prev.map(v =>
+      v.id === id ? { ...v, zIndex: newZ } : v
+    ))
+  }, [])
 
-  // Smart device selection - pick a device not already on canvas
-  const getNextDevice = useCallback((type: 'mobile' | 'tablet' | 'desktop'): { presetId: string; orientation: 'portrait' | 'landscape' } => {
-    const devicesOfType = getPresetsByType(type)
-    const existingCombos = new Set(
-      viewports
-        .filter(v => getPresetById(v.devicePresetId)?.type === type)
-        .map(v => `${v.devicePresetId}-${v.orientation}`)
-    )
+  // Handle primary navigation
+  const handlePrimaryNavigate = useCallback((newUrl: string) => {
+    setSyncedUrl(newUrl)
+  }, [])
 
-    // Try to find a device+orientation combo not already used
-    for (const preset of devicesOfType) {
-      // Try portrait first (except desktop which prefers landscape)
-      const firstOrientation = type === 'desktop' ? 'landscape' : 'portrait'
-      const secondOrientation = type === 'desktop' ? 'portrait' : 'landscape'
-
-      if (!existingCombos.has(`${preset.id}-${firstOrientation}`)) {
-        return { presetId: preset.id, orientation: firstOrientation }
-      }
-      if (!existingCombos.has(`${preset.id}-${secondOrientation}`)) {
-        return { presetId: preset.id, orientation: secondOrientation }
-      }
-    }
-
-    // All combos used, just pick first device with alternating orientation
-    const firstPreset = devicesOfType[0]
-    const sameDeviceCount = viewports.filter(v => v.devicePresetId === firstPreset.id).length
-    const orientation = type === 'desktop'
-      ? (sameDeviceCount % 2 === 0 ? 'landscape' : 'portrait')
-      : (sameDeviceCount % 2 === 0 ? 'portrait' : 'landscape')
-
-    return { presetId: firstPreset.id, orientation }
-  }, [viewports])
-
-  // Calculate next available position for new viewport
+  // Get next position for new node
   const getNextPosition = useCallback(() => {
-    if (viewports.length === 0) return { x: 0, y: 0 }
-
-    // Find rightmost edge of existing viewports
-    let maxRight = 0
-    let maxBottom = 0
-    viewports.forEach(v => {
-      const right = (v.x ?? 0) + (v.displayWidth ?? 400)
-      const bottom = (v.y ?? 0) + (v.displayHeight ?? 250)
-      if (right > maxRight) maxRight = right
-      if (bottom > maxBottom) maxBottom = bottom
-    })
-
-    // Place to the right with gap, or wrap to next row
-    const gap = GRID_SNAP
-    const newX = snapToGrid(maxRight + gap)
-
-    // If too far right (> 1200px), wrap to next row
-    if (newX > 1200) {
-      return { x: 0, y: snapToGrid(maxBottom + gap) }
-    }
-    return { x: newX, y: 0 }
+    if (viewports.length === 0) return { x: 50, y: 50 }
+    const lastViewport = viewports[viewports.length - 1]
+    const newX = (lastViewport.x ?? 0) + 50
+    const newY = (lastViewport.y ?? 0) + 50
+    return { x: newX > 800 ? 50 : newX, y: newY > 500 ? 50 : newY }
   }, [viewports])
 
-  // Viewport actions - add device viewport
-  const addViewport = useCallback((presetId: string, orientation?: 'portrait' | 'landscape') => {
-    const preset = getPresetById(presetId)
-    if (!preset) return
-
-    // Default sizes based on device type
-    const defaultWidth = preset.type === 'desktop' ? 600 : preset.type === 'tablet' ? 450 : 300
-    const defaultHeight = 250
+  // Add device viewport - use ref to avoid stale closure
+  const addDevice = useCallback((type: 'mobile' | 'tablet' | 'desktop') => {
+    const presets = getPresetsByType(type)
+    const preset = presets[0]
     const { x, y } = getNextPosition()
+    const newZ = maxZIndexRef.current + 1
+    maxZIndexRef.current = newZ
+    setMaxZIndex(newZ)
+
+    const defaultWidth = type === 'desktop' ? 600 : type === 'tablet' ? 450 : 320
+    const defaultHeight = type === 'desktop' ? 350 : type === 'tablet' ? 380 : 450
 
     setViewports(prev => [...prev, {
       id: crypto.randomUUID(),
       windowType: 'device',
-      devicePresetId: presetId,
-      orientation: orientation ?? (preset.type === 'desktop' ? 'landscape' : 'portrait'),
+      devicePresetId: preset.id,
+      orientation: type === 'desktop' ? 'landscape' : 'portrait',
       displayWidth: defaultWidth,
       displayHeight: defaultHeight,
       x,
       y,
+      zIndex: newZ,
     }])
-    setIsAddMenuOpen(false)
   }, [getNextPosition])
 
-  // Add internal window (kanban, todo, notes)
-  const addInternalWindow = useCallback((windowType: WindowType) => {
-    if (windowType === 'device') return // Use addViewport for devices
+  // Add internal window - use ref to avoid stale closure
+  const addInternalWindow = useCallback((windowType: Exclude<WindowType, 'device'>, linkedToId?: string) => {
+    const config = getInternalWindowConfig(windowType)
+    const { x, y } = linkedToId
+      ? (() => {
+          const source = viewports.find(v => v.id === linkedToId)
+          if (source) {
+            return {
+              x: (source.x ?? 0) + (source.displayWidth ?? 400) + 30,
+              y: source.y ?? 0
+            }
+          }
+          return getNextPosition()
+        })()
+      : getNextPosition()
 
-    const config = getWindowConfig(windowType)
-    const { x, y } = getNextPosition()
+    const newZ = maxZIndexRef.current + 1
+    maxZIndexRef.current = newZ
+    setMaxZIndex(newZ)
 
     setViewports(prev => [...prev, {
       id: crypto.randomUUID(),
@@ -510,443 +219,268 @@ export function ViewportGrid({
       displayHeight: config.defaultHeight,
       x,
       y,
+      zIndex: newZ,
+      linkedToViewportId: linkedToId,
     }])
-    setIsAddMenuOpen(false)
-  }, [getNextPosition])
+  }, [viewports, getNextPosition])
 
-  // Add linked internal window (spawned from a device viewport's "+" handle)
-  const addLinkedWindow = useCallback((sourceViewportId: string, windowType: 'kanban' | 'todo' | 'notes') => {
-    const sourceViewport = viewports.find(v => v.id === sourceViewportId)
-    if (!sourceViewport) return
+  // Update viewport
+  const updateViewport = useCallback((id: string, updates: Partial<Viewport>) => {
+    setViewports(prev => prev.map(v =>
+      v.id === id ? { ...v, ...updates } : v
+    ))
+  }, [])
 
-    const config = getWindowConfig(windowType)
-
-    // Position to the right of the source viewport
-    const sourceRight = (sourceViewport.x ?? 0) + (sourceViewport.displayWidth ?? 400)
-    const sourceTop = sourceViewport.y ?? 0
-    const gap = GRID_SNAP
-
-    setViewports(prev => [...prev, {
-      id: crypto.randomUUID(),
-      windowType,
-      displayWidth: config.defaultWidth,
-      displayHeight: config.defaultHeight,
-      x: snapToGrid(sourceRight + gap),
-      y: sourceTop,
-      linkedToViewportId: sourceViewportId,
-    }])
-  }, [viewports])
-
-  // Smart add - picks next device not on canvas
-  const addSmartViewport = useCallback((type: 'mobile' | 'tablet' | 'desktop') => {
-    const { presetId, orientation } = getNextDevice(type)
-    addViewport(presetId, orientation)
-  }, [getNextDevice, addViewport])
-
+  // Remove viewport
   const removeViewport = useCallback((id: string) => {
     setViewports(prev => prev.filter(v => v.id !== id))
-    if (expandedViewportId === id) {
-      setExpandedViewportId(null)
-    }
-  }, [expandedViewportId])
+    if (expandedViewportId === id) setExpandedViewportId(null)
+    if (primaryViewportId === id) setPrimaryViewportId(null)
+  }, [expandedViewportId, primaryViewportId])
 
+  // Toggle orientation
   const toggleOrientation = useCallback((id: string) => {
     setViewports(prev => prev.map(v =>
-      v.id === id
-        ? { ...v, orientation: v.orientation === 'portrait' ? 'landscape' : 'portrait' }
-        : v
+      v.id === id ? { ...v, orientation: v.orientation === 'portrait' ? 'landscape' : 'portrait' } : v
     ))
   }, [])
 
-  const updateViewportSize = useCallback((id: string, width: number, height: number) => {
-    setViewports(prev => prev.map(v =>
-      v.id === id
-        ? { ...v, displayWidth: width, displayHeight: height }
-        : v
-    ))
-  }, [])
-
-  // Drag start handler - track which item is being dragged
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveDragId(event.active.id as string)
-    setDragDelta({ x: 0, y: 0 })
-  }, [])
-
-  // Drag move handler - update delta for connection lines
-  const handleDragMove = useCallback((event: DragMoveEvent) => {
-    if (event.delta) {
-      setDragDelta({ x: event.delta.x, y: event.delta.y })
-    }
-  }, [])
-
-  // Drag end handler - update position with grid snap
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const { active, delta } = event
-
-    // Reset drag state
-    setActiveDragId(null)
-    setDragDelta(null)
-
-    if (!delta) return
-
-    setViewports(prev => prev.map(v => {
-      if (v.id === active.id) {
-        const newX = snapToGrid(Math.max(0, (v.x ?? 0) + delta.x))
-        const newY = snapToGrid(Math.max(0, (v.y ?? 0) + delta.y))
-        return { ...v, x: newX, y: newY }
-      }
-      return v
-    }))
-  }, [])
-
-  // Get preset for a device viewport (returns default for internal windows)
-  const getViewportPreset = (viewport: Viewport): DevicePreset => {
-    if (viewport.windowType !== 'device' || !viewport.devicePresetId) {
-      return DEVICE_PRESETS[0] // Default for internal windows
-    }
-    return getPresetById(viewport.devicePresetId) || DEVICE_PRESETS[0]
+  // Get linked viewport name
+  const getLinkedViewportName = (linkedToId?: string) => {
+    if (!linkedToId) return undefined
+    const linked = viewports.find(v => v.id === linkedToId)
+    if (!linked || linked.windowType !== 'device') return undefined
+    return getPresetById(linked.devicePresetId ?? '')?.name
   }
 
-  // Find expanded viewport if any
-  const expandedViewport = expandedViewportId ? viewports.find(v => v.id === expandedViewportId) : null
+  // Track scale/pan in refs for native event listener
+  const scaleRef = useRef(scale)
+  const panRef = useRef(pan)
+  useEffect(() => { scaleRef.current = scale }, [scale])
+  useEffect(() => { panRef.current = pan }, [pan])
+
+  // Use native wheel listener to capture events even over child elements
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        // Zoom around mouse position
+        e.preventDefault()
+        e.stopPropagation()
+        const rect = canvas.getBoundingClientRect()
+
+        // Mouse position relative to canvas container
+        const mouseX = e.clientX - rect.left
+        const mouseY = e.clientY - rect.top
+
+        // Calculate new scale
+        const delta = e.deltaY > 0 ? 0.9 : 1.1
+        const currentScale = scaleRef.current
+        const currentPan = panRef.current
+        const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, currentScale * delta))
+
+        // Adjust pan so the point under the mouse stays in place
+        const canvasX = (mouseX - currentPan.x) / currentScale
+        const canvasY = (mouseY - currentPan.y) / currentScale
+        const newPanX = mouseX - canvasX * newScale
+        const newPanY = mouseY - canvasY * newScale
+
+        setScale(newScale)
+        setPan({ x: newPanX, y: newPanY })
+      } else {
+        // Pan with scroll
+        setPan(prev => ({
+          x: prev.x - e.deltaX,
+          y: prev.y - e.deltaY,
+        }))
+      }
+    }
+
+    canvas.addEventListener('wheel', handleWheel, { passive: false, capture: true })
+    return () => canvas.removeEventListener('wheel', handleWheel, { capture: true })
+  }, [])
+
+  // Middle mouse or space+left mouse pan
+  const [isPanning, setIsPanning] = useState(false)
+  const [isSpaceDown, setIsSpaceDown] = useState(false)
+  const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
+
+  // Space key detection
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat) {
+        setIsSpaceDown(true)
+      }
+    }
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpaceDown(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [])
+
+  // Pan handlers
+  const handlePanStart = useCallback((e: React.MouseEvent) => {
+    // Middle mouse (1), right mouse (2), or left mouse + space
+    if (e.button === 1 || e.button === 2 || (e.button === 0 && isSpaceDown)) {
+      e.preventDefault()
+      setIsPanning(true)
+      panStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        panX: pan.x,
+        panY: pan.y,
+      }
+    }
+  }, [isSpaceDown, pan])
+
+  const handlePanMove = useCallback((e: React.MouseEvent) => {
+    if (!isPanning) return
+    const deltaX = e.clientX - panStartRef.current.x
+    const deltaY = e.clientY - panStartRef.current.y
+    setPan({
+      x: panStartRef.current.panX + deltaX,
+      y: panStartRef.current.panY + deltaY,
+    })
+  }, [isPanning])
+
+  const handlePanEnd = useCallback(() => {
+    setIsPanning(false)
+  }, [])
+
+  // Reset zoom
+  const resetZoom = useCallback(() => {
+    setScale(1)
+    setPan({ x: 0, y: 0 })
+  }, [])
 
   return (
     <div
+      ref={canvasRef}
       className={cn(
-        "h-full flex flex-col relative",
-        isDarkMode ? "bg-neutral-900" : "bg-stone-100"
+        "h-full w-full relative overflow-hidden",
+        isDarkMode ? "bg-neutral-900" : "bg-stone-100",
+        isSpaceDown && "cursor-grab",
+        isPanning && "cursor-grabbing"
       )}
-      style={{ userSelect: 'none' }}
+      style={{ userSelect: isPanning ? 'none' : 'auto' }}
+      onMouseDown={handlePanStart}
+      onMouseMove={handlePanMove}
+      onMouseUp={handlePanEnd}
+      onMouseLeave={handlePanEnd}
+      onContextMenu={(e) => e.preventDefault()}
     >
-      {/* Floating toolbar - top right */}
-      <div className={cn(
-        "absolute top-2 right-2 z-40 flex items-center gap-1 px-1.5 py-1 rounded-lg shadow-lg border",
-        isDarkMode ? "bg-neutral-800/95 border-neutral-700" : "bg-white/95 border-stone-200"
-      )}>
-        <LayoutGrid size={10} className={isDarkMode ? "text-neutral-500" : "text-stone-400"} />
-        <span className={cn(
-          "text-[10px] px-1 rounded",
-          isDarkMode ? "bg-neutral-700 text-neutral-400" : "bg-stone-200 text-stone-500"
-        )}>
-          {viewports.length}
-        </span>
+      {/* Canvas - GPU accelerated transforms */}
+      <div
+        className="absolute inset-0"
+        style={{
+          transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${scale})`,
+          transformOrigin: 'top left',
+          willChange: 'transform',
+          backfaceVisibility: 'hidden',
+        }}
+      >
+        <div className="relative min-w-[2000px] min-h-[1500px]">
+          {/* Connection lines */}
+          <ConnectionLines viewports={viewports} isDarkMode={isDarkMode} />
 
-        <div className="w-px h-3 mx-0.5 bg-neutral-600" />
-
-        {/* Quick add buttons */}
-        <button
-          onClick={() => addSmartViewport('desktop')}
-          className={cn(
-            "p-1 rounded transition-colors",
-            isDarkMode
-              ? "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700"
-              : "text-stone-400 hover:text-stone-700 hover:bg-stone-200"
-          )}
-          title="Add Desktop"
-        >
-          <Monitor size={11} />
-        </button>
-        <button
-          onClick={() => addSmartViewport('tablet')}
-          className={cn(
-            "p-1 rounded transition-colors",
-            isDarkMode
-              ? "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700"
-              : "text-stone-400 hover:text-stone-700 hover:bg-stone-200"
-          )}
-          title="Add Tablet"
-        >
-          <Tablet size={11} />
-        </button>
-        <button
-          onClick={() => addSmartViewport('mobile')}
-          className={cn(
-            "p-1 rounded transition-colors",
-            isDarkMode
-              ? "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700"
-              : "text-stone-400 hover:text-stone-700 hover:bg-stone-200"
-          )}
-          title="Add Mobile"
-        >
-          <Smartphone size={11} />
-        </button>
-
-        <div className="w-px h-3 mx-0.5 bg-neutral-600" />
-
-        {/* Internal window buttons */}
-        <button
-          onClick={() => addInternalWindow('kanban')}
-          className={cn(
-            "p-1 rounded transition-colors",
-            isDarkMode
-              ? "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700"
-              : "text-stone-400 hover:text-stone-700 hover:bg-stone-200"
-          )}
-          title="Add Kanban"
-        >
-          <KanbanSquare size={11} />
-        </button>
-        <button
-          onClick={() => addInternalWindow('todo')}
-          className={cn(
-            "p-1 rounded transition-colors",
-            isDarkMode
-              ? "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700"
-              : "text-stone-400 hover:text-stone-700 hover:bg-stone-200"
-          )}
-          title="Add Todo"
-        >
-          <ListTodo size={11} />
-        </button>
-        <button
-          onClick={() => addInternalWindow('notes')}
-          className={cn(
-            "p-1 rounded transition-colors",
-            isDarkMode
-              ? "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700"
-              : "text-stone-400 hover:text-stone-700 hover:bg-stone-200"
-          )}
-          title="Add Notes"
-        >
-          <StickyNote size={11} />
-        </button>
-
-        {/* Add dropdown */}
-        <div className="relative">
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              setIsAddMenuOpen(!isAddMenuOpen)
-            }}
-            className={cn(
-              "p-1 rounded transition-colors",
-              isDarkMode
-                ? "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700"
-                : "text-stone-400 hover:text-stone-700 hover:bg-stone-200"
-            )}
-            title="More devices"
-          >
-            <Plus size={11} />
-          </button>
-
-          {isAddMenuOpen && (
-            <div
-              className={cn(
-                "absolute right-0 top-full mt-1 w-48 rounded-lg shadow-xl border z-50 py-1 max-h-80 overflow-y-auto",
-                isDarkMode
-                  ? "bg-neutral-800 border-neutral-700"
-                  : "bg-white border-stone-200"
-              )}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Mobile devices */}
-              <div className={cn(
-                "px-2 py-1 text-[10px] font-medium uppercase tracking-wider",
-                isDarkMode ? "text-neutral-500" : "text-stone-400"
-              )}>
-                Mobile
-              </div>
-              {getPresetsByType('mobile').map(preset => (
-                <button
-                  key={preset.id}
-                  onClick={() => addViewport(preset.id)}
-                  className={cn(
-                    "w-full flex items-center justify-between px-2 py-1 text-xs",
-                    isDarkMode
-                      ? "text-neutral-200 hover:bg-neutral-700"
-                      : "text-stone-700 hover:bg-stone-100"
-                  )}
-                >
-                  <span>{preset.name}</span>
-                  <span className={cn("text-[10px]", isDarkMode ? "text-neutral-500" : "text-stone-400")}>
-                    {preset.width}×{preset.height}
-                  </span>
-                </button>
-              ))}
-
-              <div className={cn("my-1 border-t", isDarkMode ? "border-neutral-700" : "border-stone-200")} />
-
-              {/* Tablet devices */}
-              <div className={cn(
-                "px-2 py-1 text-[10px] font-medium uppercase tracking-wider",
-                isDarkMode ? "text-neutral-500" : "text-stone-400"
-              )}>
-                Tablet
-              </div>
-              {getPresetsByType('tablet').map(preset => (
-                <button
-                  key={preset.id}
-                  onClick={() => addViewport(preset.id)}
-                  className={cn(
-                    "w-full flex items-center justify-between px-2 py-1 text-xs",
-                    isDarkMode
-                      ? "text-neutral-200 hover:bg-neutral-700"
-                      : "text-stone-700 hover:bg-stone-100"
-                  )}
-                >
-                  <span>{preset.name}</span>
-                  <span className={cn("text-[10px]", isDarkMode ? "text-neutral-500" : "text-stone-400")}>
-                    {preset.width}×{preset.height}
-                  </span>
-                </button>
-              ))}
-
-              <div className={cn("my-1 border-t", isDarkMode ? "border-neutral-700" : "border-stone-200")} />
-
-              {/* Desktop devices */}
-              <div className={cn(
-                "px-2 py-1 text-[10px] font-medium uppercase tracking-wider",
-                isDarkMode ? "text-neutral-500" : "text-stone-400"
-              )}>
-                Desktop
-              </div>
-              {getPresetsByType('desktop').map(preset => (
-                <button
-                  key={preset.id}
-                  onClick={() => addViewport(preset.id)}
-                  className={cn(
-                    "w-full flex items-center justify-between px-2 py-1 text-xs",
-                    isDarkMode
-                      ? "text-neutral-200 hover:bg-neutral-700"
-                      : "text-stone-700 hover:bg-stone-100"
-                  )}
-                >
-                  <span>{preset.name}</span>
-                  <span className={cn("text-[10px]", isDarkMode ? "text-neutral-500" : "text-stone-400")}>
-                    {preset.width}×{preset.height}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="w-px h-3 mx-0.5 bg-neutral-600" />
-
-        {/* Close button */}
-        {onClose && (
-          <button
-            onClick={onClose}
-            className={cn(
-              "p-1 rounded transition-colors",
-              isDarkMode
-                ? "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700"
-                : "text-stone-400 hover:text-stone-700 hover:bg-stone-200"
-            )}
-            title="Exit Multi-Viewport"
-          >
-            <X size={11} />
-          </button>
-        )}
-      </div>
-
-      {/* Performance warning */}
-      {!performanceWarningDismissed && viewports.length >= 6 && (
-        <div className="absolute top-2 left-2 z-40">
-          <ViewportPerformanceWarning
-            count={viewports.length}
-            isDarkMode={isDarkMode}
-            onDismiss={() => setPerformanceWarningDismissed(true)}
-          />
-        </div>
-      )}
-
-      {/* Viewport canvas - free positioning */}
-      <div className="flex-1 overflow-auto p-2">
-        <DndContext
-          sensors={sensors}
-          onDragStart={handleDragStart}
-          onDragMove={handleDragMove}
-          onDragEnd={handleDragEnd}
-        >
-          <div className={cn(
-            "relative w-full h-full min-h-[600px] transition-all duration-200",
-            expandedViewport && "blur-sm pointer-events-none"
-          )}>
-            {/* Connection lines between linked items */}
-            <ConnectionLines
-              viewports={viewports}
-              isDarkMode={isDarkMode}
-              activeDragId={activeDragId}
-              dragDelta={dragDelta}
-            />
-
-            {viewports.map(viewport => (
-              viewport.windowType === 'device' ? (
-                <DraggableViewportItem
+          {/* Nodes */}
+          {viewports.map(viewport => {
+            if (viewport.windowType === 'device') {
+              const preset = getPresetById(viewport.devicePresetId ?? 'desktop') ?? DEVICE_PRESETS[0]
+              return (
+                <DeviceNode
                   key={viewport.id}
-                  viewport={viewport}
-                  preset={getViewportPreset(viewport)}
+                  id={viewport.id}
+                  x={viewport.x ?? 0}
+                  y={viewport.y ?? 0}
+                  width={viewport.displayWidth ?? 400}
+                  height={viewport.displayHeight ?? 300}
+                  zIndex={viewport.zIndex ?? 1}
+                  preset={preset}
+                  orientation={viewport.orientation ?? 'portrait'}
                   url={syncedUrl}
                   isDarkMode={isDarkMode}
                   isElectron={isElectron}
                   webviewPreloadPath={webviewPreloadPath}
                   isPrimary={primaryViewportId === viewport.id}
-                  onSetPrimary={() => handleSetPrimary(viewport.id)}
-                  onNavigate={primaryViewportId === viewport.id ? handlePrimaryNavigate : undefined}
                   isInspectorActive={isInspectorActive}
                   isScreenshotActive={isScreenshotActive}
                   isMoveActive={isMoveActive}
-                  onInspectorHover={onInspectorHover}
-                  onInspectorSelect={onInspectorSelect}
-                  onScreenshotSelect={onScreenshotSelect}
-                  onConsoleLog={onConsoleLog}
-                  onExpand={() => setExpandedViewportId(viewport.id)}
+                  onInspectorHover={(el, rect) => onInspectorHover?.(el, rect, viewport.id)}
+                  onInspectorSelect={(el, rect) => onInspectorSelect?.(el, rect, viewport.id)}
+                  onScreenshotSelect={(el, rect) => onScreenshotSelect?.(el, rect, viewport.id)}
+                  onConsoleLog={(level, msg) => onConsoleLog?.(level, msg, viewport.id)}
+                  onMove={(x, y) => updateViewport(viewport.id, { x, y })}
+                  onResize={(w, h) => updateViewport(viewport.id, { displayWidth: w, displayHeight: h })}
                   onRemove={() => removeViewport(viewport.id)}
+                  onFocus={() => bringToFront(viewport.id)}
                   onOrientationToggle={() => toggleOrientation(viewport.id)}
-                  onResize={(width, height) => updateViewportSize(viewport.id, width, height)}
-                  onAddLinkedWindow={(windowType) => addLinkedWindow(viewport.id, windowType)}
-                />
-              ) : (
-                <DraggableInternalWindow
-                  key={viewport.id}
-                  viewport={viewport}
-                  isDarkMode={isDarkMode}
-                  onRemove={() => removeViewport(viewport.id)}
-                  onResize={(width, height) => updateViewportSize(viewport.id, width, height)}
-                  linkedViewportName={
-                    viewport.linkedToViewportId
-                      ? getPresetById(viewports.find(v => v.id === viewport.linkedToViewportId)?.devicePresetId ?? '')?.name
-                      : undefined
-                  }
-                  renderKanban={renderKanban}
-                  renderTodo={renderTodo}
-                  renderNotes={renderNotes}
+                  onSetPrimary={() => setPrimaryViewportId(prev => prev === viewport.id ? null : viewport.id)}
+                  onNavigate={primaryViewportId === viewport.id ? handlePrimaryNavigate : undefined}
+                  onExpand={() => setExpandedViewportId(viewport.id)}
+                  onAddLinked={(type) => addInternalWindow(type, viewport.id)}
                 />
               )
-            ))}
-          </div>
-        </DndContext>
+            } else {
+              // Internal window (kanban, todo, notes)
+              const renderContent = () => {
+                switch (viewport.windowType) {
+                  case 'kanban': return renderKanban?.()
+                  case 'todo': return renderTodo?.()
+                  case 'notes': return renderNotes?.()
+                  default: return null
+                }
+              }
 
-        {/* Expanded viewport overlay */}
-        {expandedViewport && (
-          <div className="absolute inset-4 z-50 flex flex-col rounded-xl overflow-hidden shadow-2xl">
-            <ViewportItem
-              viewport={expandedViewport}
-              preset={getViewportPreset(expandedViewport)}
-              url={syncedUrl}
-              isDarkMode={isDarkMode}
-              isElectron={isElectron}
-              webviewPreloadPath={webviewPreloadPath}
-              isExpanded={true}
-              isPrimary={primaryViewportId === expandedViewport.id}
-              onSetPrimary={() => handleSetPrimary(expandedViewport.id)}
-              onNavigate={primaryViewportId === expandedViewport.id ? handlePrimaryNavigate : undefined}
-              isInspectorActive={isInspectorActive}
-              isScreenshotActive={isScreenshotActive}
-              isMoveActive={isMoveActive}
-              onInspectorHover={onInspectorHover}
-              onInspectorSelect={onInspectorSelect}
-              onScreenshotSelect={onScreenshotSelect}
-              onConsoleLog={onConsoleLog}
-              onExpand={() => {}}
-              onCollapse={() => setExpandedViewportId(null)}
-              onRemove={() => removeViewport(expandedViewport.id)}
-              onOrientationToggle={() => toggleOrientation(expandedViewport.id)}
-            />
-          </div>
-        )}
+              return (
+                <InternalNode
+                  key={viewport.id}
+                  id={viewport.id}
+                  x={viewport.x ?? 0}
+                  y={viewport.y ?? 0}
+                  width={viewport.displayWidth ?? 350}
+                  height={viewport.displayHeight ?? 400}
+                  zIndex={viewport.zIndex ?? 1}
+                  windowType={viewport.windowType as Exclude<WindowType, 'device'>}
+                  linkedViewportName={getLinkedViewportName(viewport.linkedToViewportId)}
+                  isDarkMode={isDarkMode}
+                  onMove={(x, y) => updateViewport(viewport.id, { x, y })}
+                  onResize={(w, h) => updateViewport(viewport.id, { displayWidth: w, displayHeight: h })}
+                  onRemove={() => removeViewport(viewport.id)}
+                  onFocus={() => bringToFront(viewport.id)}
+                >
+                  {renderContent()}
+                </InternalNode>
+              )
+            }
+          })}
+        </div>
       </div>
+
+      {/* Zoom indicator */}
+      {scale !== 1 && (
+        <button
+          onClick={resetZoom}
+          className={cn(
+            "absolute bottom-4 right-4 px-2 py-1 rounded-lg text-xs font-medium transition-all",
+            isDarkMode
+              ? "bg-neutral-800 text-neutral-300 hover:bg-neutral-700 border border-neutral-700"
+              : "bg-white text-stone-600 hover:bg-stone-50 border border-stone-200 shadow-sm"
+          )}
+          title="Reset zoom (click to reset)"
+        >
+          {Math.round(scale * 100)}%
+        </button>
+      )}
     </div>
   )
 }

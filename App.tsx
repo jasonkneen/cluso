@@ -108,6 +108,10 @@ import {
   Hammer,
   Bot,
   LayoutGrid,
+  ScreenShare,
+  KanbanSquare,
+  ListTodo,
+  StickyNote,
 } from 'lucide-react';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
@@ -821,6 +825,7 @@ export default function App() {
 
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isFloatingToolbarVisible, setIsFloatingToolbarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(420);
   const [isResizing, setIsResizing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -1487,6 +1492,12 @@ export default function App() {
 
   // Multi-viewport mode (shows multiple device viewports simultaneously)
   const [isMultiViewportMode, setIsMultiViewportMode] = useState(false)
+  const [viewportCount, setViewportCount] = useState(0)
+  const viewportControlsRef = useRef<{
+    viewportCount: number
+    addDevice: (type: 'mobile' | 'tablet' | 'desktop') => void
+    addInternalWindow: (type: 'kanban' | 'todo' | 'notes') => void
+  } | null>(null)
 
   // Zoom options for device preview
   type ZoomLevel = 'fit' | 'actual' | '50' | '75' | '100' | '125' | '150'
@@ -7105,20 +7116,15 @@ If you're not sure what the user wants, ask for clarification.
             <Move size={16} />
           </button>
 
-          {/* DevTools Toggle */}
+          {/* Floating Toolbar Toggle */}
           <button
-            onClick={() => {
-              const webview = webviewRefs.current.get(activeTabId);
-              if (webview) {
-                webview.openDevTools();
-              }
-            }}
-            data-control-id="devtools-button"
+            onClick={() => setIsFloatingToolbarVisible(!isFloatingToolbarVisible)}
+            data-control-id="toolbar-toggle-button"
             data-control-type="button"
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'}`}
-            title="Open Webview DevTools"
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isFloatingToolbarVisible ? (isDarkMode ? 'bg-neutral-700 text-neutral-200' : 'bg-stone-200 text-stone-700') : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500')}`}
+            title={isFloatingToolbarVisible ? 'Hide toolbar' : 'Show toolbar'}
           >
-            <Code2 size={16} />
+            <Wrench size={16} />
           </button>
 
           {/* Cluso Agent Toggle */}
@@ -7361,6 +7367,8 @@ If you're not sure what the user wants, ask for clarification.
                   }])
                 }}
                 onClose={() => setIsMultiViewportMode(false)}
+                controlsRef={viewportControlsRef}
+                onViewportCountChange={setViewportCount}
                 renderKanban={() => (
                   <KanbanTab
                     columns={activeTab.kanbanData?.columns || [
@@ -7462,16 +7470,95 @@ If you're not sure what the user wants, ask for clarification.
             })()
           )}
 
-            {/* Floating Toolbar when sidebar collapsed */}
-            {!isSidebarOpen && (
+            {/* Floating Toolbar - always visible when enabled */}
+            {isFloatingToolbarVisible && (
                 <div className={`absolute bottom-8 left-1/2 transform -translate-x-1/2 flex items-center gap-1 backdrop-blur shadow-2xl p-2 rounded-full z-40 ${isDarkMode ? 'bg-neutral-800/90 border border-neutral-700/50' : 'bg-white/90 border border-stone-200/50'}`}>
-                    <button
-                        onClick={() => setIsScreenSharing(!isScreenSharing)}
-                        className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isScreenSharing ? 'bg-green-100 text-green-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500')}`}
-                        title="Toggle Screen Share"
-                    >
-                        <Monitor size={16} />
-                    </button>
+                    {/* Canvas controls - only shown in multi-viewport mode */}
+                    {isMultiViewportMode && (
+                      <>
+                        {/* Viewport count */}
+                        <div className={`flex items-center gap-1 px-2 py-1 rounded-full ${isDarkMode ? 'bg-neutral-700' : 'bg-stone-100'}`}>
+                          <LayoutGrid size={12} className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'} />
+                          <span className={`text-xs font-medium ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>
+                            {viewportCount}
+                          </span>
+                        </div>
+
+                        <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
+
+                        {/* Add device buttons */}
+                        <button
+                          onClick={() => viewportControlsRef.current?.addDevice('desktop')}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
+                          title="Add Desktop"
+                        >
+                          <ScreenShare size={16} />
+                        </button>
+                        <button
+                          onClick={() => viewportControlsRef.current?.addDevice('tablet')}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
+                          title="Add Tablet"
+                        >
+                          <Tablet size={16} />
+                        </button>
+                        <button
+                          onClick={() => viewportControlsRef.current?.addDevice('mobile')}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
+                          title="Add Mobile"
+                        >
+                          <Smartphone size={16} />
+                        </button>
+
+                        <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
+
+                        {/* Add internal window buttons */}
+                        <button
+                          onClick={() => viewportControlsRef.current?.addInternalWindow('kanban')}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
+                          title="Add Kanban"
+                        >
+                          <KanbanSquare size={16} />
+                        </button>
+                        <button
+                          onClick={() => viewportControlsRef.current?.addInternalWindow('todo')}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
+                          title="Add Todo"
+                        >
+                          <ListTodo size={16} />
+                        </button>
+                        <button
+                          onClick={() => viewportControlsRef.current?.addInternalWindow('notes')}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
+                          title="Add Notes"
+                        >
+                          <StickyNote size={16} />
+                        </button>
+
+                        <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
+
+                        {/* Exit canvas mode */}
+                        <button
+                          onClick={() => setIsMultiViewportMode(false)}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-red-400' : 'hover:bg-stone-100 text-red-500'}`}
+                          title="Exit Canvas"
+                        >
+                          <X size={16} />
+                        </button>
+
+                        <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
+                      </>
+                    )}
+
+                    {/* Screen share - only in single viewport mode */}
+                    {!isMultiViewportMode && (
+                      <button
+                          onClick={() => setIsScreenSharing(!isScreenSharing)}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isScreenSharing ? 'bg-green-100 text-green-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500')}`}
+                          title="Toggle Screen Share"
+                      >
+                          <Monitor size={16} />
+                      </button>
+                    )}
 
                     <button
                         onClick={() => {
