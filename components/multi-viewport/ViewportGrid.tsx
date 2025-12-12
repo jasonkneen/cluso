@@ -126,6 +126,7 @@ export function ViewportGrid({
   const [maxZIndex, setMaxZIndex] = useState(() => Math.max(...loadViewports().map(v => v.zIndex ?? 1), 1))
   const maxZIndexRef = useRef(maxZIndex)
   const isInitialMount = useRef(true)
+  const saveTimerRef = useRef<number | null>(null)
 
   // Canvas zoom
   const [scale, setScale] = useState(1)
@@ -154,8 +155,22 @@ export function ViewportGrid({
       isInitialMount.current = false
       return
     }
-    saveViewports(viewports)
-  }, [viewports])
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current)
+    }
+
+    saveTimerRef.current = window.setTimeout(() => {
+      saveViewports(viewports)
+      onViewportsChange?.(viewports)
+    }, 250)
+
+    return () => {
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+      }
+    }
+  }, [viewports, onViewportsChange])
 
   // Bring node to front - use ref to avoid stale closure
   const bringToFront = useCallback((id: string) => {

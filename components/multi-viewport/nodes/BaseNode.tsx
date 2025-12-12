@@ -68,6 +68,28 @@ export const BaseNode = memo(function BaseNode({
   const [showLinkDropdown, setShowLinkDropdown] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const pendingUpdateRef = useRef<{ x?: number; y?: number; width?: number; height?: number } | null>(null)
+  const updateRafRef = useRef<number | null>(null)
+
+  const flushPendingUpdate = useCallback(() => {
+    updateRafRef.current = null
+    const pending = pendingUpdateRef.current
+    if (!pending) return
+    pendingUpdateRef.current = null
+
+    if (pending.width !== undefined || pending.height !== undefined) {
+      onResize(pending.width ?? width, pending.height ?? height)
+    }
+    if (pending.x !== undefined || pending.y !== undefined) {
+      onMove(pending.x ?? x, pending.y ?? y)
+    }
+  }, [onMove, onResize, x, y, width, height])
+
+  const scheduleUpdate = useCallback((updates: { x?: number; y?: number; width?: number; height?: number }) => {
+    pendingUpdateRef.current = { ...(pendingUpdateRef.current ?? {}), ...updates }
+    if (updateRafRef.current !== null) return
+    updateRafRef.current = window.requestAnimationFrame(flushPendingUpdate)
+  }, [flushPendingUpdate])
 
   // Handle hover with delay for hiding (so toolbar doesn't disappear too fast)
   const handleMouseEnter = useCallback(() => {
@@ -93,6 +115,10 @@ export const BaseNode = memo(function BaseNode({
       if (hoverTimeoutRef.current) {
         clearTimeout(hoverTimeoutRef.current)
       }
+      if (updateRafRef.current !== null) {
+        window.cancelAnimationFrame(updateRafRef.current)
+        updateRafRef.current = null
+      }
     }
   }, [])
 
@@ -108,7 +134,9 @@ export const BaseNode = memo(function BaseNode({
   }, [showLinkDropdown])
 
   // Smooth drag handler - accounts for canvas scale
-  const handleDragStart = useCallback((e: React.MouseEvent) => {
+  const handleDragStart = useCallback((e: React.PointerEvent) => {
+    if (!e.isPrimary) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
     e.preventDefault()
     e.stopPropagation()
     onFocus()
@@ -121,36 +149,49 @@ export const BaseNode = memo(function BaseNode({
 
     setIsDragging(true)
 
-    const handleMouseMove = (moveEvent: MouseEvent) => {
+    const handlePointerMove = (moveEvent: PointerEvent) => {
       // Divide by scale to account for canvas zoom
       const deltaX = (moveEvent.clientX - startX) / scale
       const deltaY = (moveEvent.clientY - startY) / scale
       const newX = startNodeX + deltaX
       const newY = startNodeY + deltaY
-      onMove(newX, newY)
+      scheduleUpdate({ x: newX, y: newY })
     }
 
-    const handleMouseUp = () => {
+    const handlePointerUp = () => {
       setIsDragging(false)
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-      document.removeEventListener('mouseleave', handleMouseUp)
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
+      window.removeEventListener('blur', handlePointerUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
+      flushPendingUpdate()
     }
 
-    document.body.style.cursor = 'grabbing'
+    if (e.pointerType === 'mouse') {
+      document.body.style.cursor = 'grabbing'
+    }
     document.body.style.userSelect = 'none'
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-    // Also cleanup if mouse leaves the document (prevents sticky)
-    document.addEventListener('mouseleave', handleMouseUp)
-  }, [x, y, onMove, onFocus, canvasScale])
+
+    try {
+      ;(e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId)
+    } catch {
+      // Ignore failures (e.g. if element is gone)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
+    window.addEventListener('blur', handlePointerUp)
+  }, [x, y, onFocus, canvasScale, scheduleUpdate, flushPendingUpdate])
 
   // Smooth resize handler - accounts for canvas scale
   const createResizeHandler = useCallback((
     direction: 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
-  ) => (e: React.MouseEvent) => {
+  ) => (e: React.PointerEvent) => {
+    if (!e.isPrimary) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
     e.preventDefault()
     e.stopPropagation()
     onFocus()
@@ -165,7 +206,7 @@ export const BaseNode = memo(function BaseNode({
 
     setIsResizing(true)
 
-    const handleMouseMove = (moveEvent: MouseEvent) => {
+    const handlePointerMove = (moveEvent: PointerEvent) => {
       // Divide by scale to account for canvas zoom
       const deltaX = (moveEvent.clientX - startX) / scale
       const deltaY = (moveEvent.clientY - startY) / scale
@@ -233,19 +274,18 @@ export const BaseNode = memo(function BaseNode({
         }
       }
 
-      onResize(newWidth, newHeight)
-      if (newX !== startNodeX || newY !== startNodeY) {
-        onMove(newX, newY)
-      }
+      scheduleUpdate({ width: newWidth, height: newHeight, x: newX, y: newY })
     }
 
-    const handleMouseUp = () => {
+    const handlePointerUp = () => {
       setIsResizing(false)
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-      document.removeEventListener('mouseleave', handleMouseUp)
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
+      window.removeEventListener('blur', handlePointerUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
+      flushPendingUpdate()
     }
 
     const cursors: Record<string, string> = {
@@ -254,34 +294,41 @@ export const BaseNode = memo(function BaseNode({
       ne: 'nesw-resize', sw: 'nesw-resize',
       nw: 'nwse-resize', se: 'nwse-resize',
     }
-    document.body.style.cursor = cursors[direction]
+    if (e.pointerType === 'mouse') {
+      document.body.style.cursor = cursors[direction]
+    }
     document.body.style.userSelect = 'none'
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-    // Also cleanup if mouse leaves the document (prevents sticky)
-    document.addEventListener('mouseleave', handleMouseUp)
-  }, [x, y, width, height, onMove, onResize, onFocus, lockedAspectRatio, canvasScale])
+    try {
+      ;(e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId)
+    } catch {
+      // Ignore
+    }
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
+    window.addEventListener('blur', handlePointerUp)
+  }, [x, y, width, height, onFocus, lockedAspectRatio, canvasScale, scheduleUpdate, flushPendingUpdate])
 
   // Resize handles (used in both modes)
   const resizeHandles = (
     <>
       {/* Edges */}
-      <div onMouseDown={createResizeHandler('n')} className="absolute -top-1 left-2 right-2 h-2 cursor-ns-resize" />
-      <div onMouseDown={createResizeHandler('s')} className="absolute -bottom-1 left-2 right-2 h-2 cursor-ns-resize" />
-      <div onMouseDown={createResizeHandler('e')} className="absolute top-2 bottom-2 -right-1 w-2 cursor-ew-resize" />
-      <div onMouseDown={createResizeHandler('w')} className="absolute top-2 bottom-2 -left-1 w-2 cursor-ew-resize" />
+      <div onPointerDown={createResizeHandler('n')} className="absolute -top-1 left-2 right-2 h-2 cursor-ns-resize" />
+      <div onPointerDown={createResizeHandler('s')} className="absolute -bottom-1 left-2 right-2 h-2 cursor-ns-resize" />
+      <div onPointerDown={createResizeHandler('e')} className="absolute top-2 bottom-2 -right-1 w-2 cursor-ew-resize" />
+      <div onPointerDown={createResizeHandler('w')} className="absolute top-2 bottom-2 -left-1 w-2 cursor-ew-resize" />
       {/* Corners */}
-      <div onMouseDown={createResizeHandler('nw')} className="absolute -top-1 -left-1 w-3 h-3 cursor-nwse-resize" />
-      <div onMouseDown={createResizeHandler('ne')} className="absolute -top-1 -right-1 w-3 h-3 cursor-nesw-resize" />
-      <div onMouseDown={createResizeHandler('sw')} className="absolute -bottom-1 -left-1 w-3 h-3 cursor-nesw-resize" />
-      <div onMouseDown={createResizeHandler('se')} className="absolute -bottom-1 -right-1 w-3 h-3 cursor-nwse-resize" />
+      <div onPointerDown={createResizeHandler('nw')} className="absolute -top-1 -left-1 w-3 h-3 cursor-nwse-resize" />
+      <div onPointerDown={createResizeHandler('ne')} className="absolute -top-1 -right-1 w-3 h-3 cursor-nesw-resize" />
+      <div onPointerDown={createResizeHandler('sw')} className="absolute -bottom-1 -left-1 w-3 h-3 cursor-nesw-resize" />
+      <div onPointerDown={createResizeHandler('se')} className="absolute -bottom-1 -right-1 w-3 h-3 cursor-nwse-resize" />
     </>
   )
 
   // Visual corner indicator (used in both modes)
   const cornerIndicator = (
     <div
-      onMouseDown={createResizeHandler('se')}
+      onPointerDown={createResizeHandler('se')}
       className={cn(
         "absolute bottom-0 right-0 w-3 h-3 cursor-nwse-resize opacity-50 hover:opacity-100 transition-opacity",
         isDarkMode ? "text-neutral-500" : "text-stone-400"
@@ -431,7 +478,7 @@ export const BaseNode = memo(function BaseNode({
         >
           {/* Drag handle */}
           <div
-            onMouseDown={handleDragStart}
+            onPointerDown={handleDragStart}
             className="cursor-grab active:cursor-grabbing p-0.5"
           >
             <GripVertical size={10} className={isDarkMode ? "text-neutral-500" : "text-stone-400"} />
@@ -486,7 +533,7 @@ export const BaseNode = memo(function BaseNode({
 
       {/* Title bar */}
       <div
-        onMouseDown={handleDragStart}
+        onPointerDown={handleDragStart}
         className={cn(
           "flex items-center gap-2 px-2 py-1.5 rounded-t-xl cursor-grab active:cursor-grabbing select-none",
           isDarkMode ? "bg-neutral-800 border-b border-neutral-700" : "bg-stone-50 border-b border-stone-200"
