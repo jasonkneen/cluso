@@ -451,7 +451,7 @@ export function ViewportGrid({
     setPan({ x: panX, y: panY })
   }, [viewports])
 
-  // Expose controls to parent via ref and notify count/viewport changes
+  // Expose controls to parent via ref
   useEffect(() => {
     if (controlsRef) {
       controlsRef.current = {
@@ -465,9 +465,13 @@ export function ViewportGrid({
         focusViewport: bringToFront,
       }
     }
+  }, [viewports, controlsRef, addDevice, addInternalWindow, addTerminal, autoLayout, fitView, bringToFront])
+
+  // Notify parent when viewport count changes (separate effect to avoid loops)
+  useEffect(() => {
     onViewportCountChange?.(viewports.length)
     onViewportsChange?.(viewports)
-  }, [viewports, controlsRef, onViewportCountChange, onViewportsChange, addDevice, addInternalWindow, addTerminal, autoLayout, fitView, bringToFront])
+  }, [viewports.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
