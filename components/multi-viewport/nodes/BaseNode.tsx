@@ -107,7 +107,7 @@ export const BaseNode = memo(function BaseNode({
     }
   }, [showLinkDropdown])
 
-  // Smooth drag handler
+  // Smooth drag handler - accounts for canvas scale
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -117,12 +117,14 @@ export const BaseNode = memo(function BaseNode({
     const startY = e.clientY
     const startNodeX = x
     const startNodeY = y
+    const scale = canvasScale
 
     setIsDragging(true)
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      const deltaX = moveEvent.clientX - startX
-      const deltaY = moveEvent.clientY - startY
+      // Divide by scale to account for canvas zoom
+      const deltaX = (moveEvent.clientX - startX) / scale
+      const deltaY = (moveEvent.clientY - startY) / scale
       const newX = startNodeX + deltaX
       const newY = startNodeY + deltaY
       onMove(newX, newY)
@@ -132,6 +134,7 @@ export const BaseNode = memo(function BaseNode({
       setIsDragging(false)
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('mouseleave', handleMouseUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
@@ -140,9 +143,11 @@ export const BaseNode = memo(function BaseNode({
     document.body.style.userSelect = 'none'
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
-  }, [x, y, onMove, onFocus])
+    // Also cleanup if mouse leaves the document (prevents sticky)
+    document.addEventListener('mouseleave', handleMouseUp)
+  }, [x, y, onMove, onFocus, canvasScale])
 
-  // Smooth resize handler
+  // Smooth resize handler - accounts for canvas scale
   const createResizeHandler = useCallback((
     direction: 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
   ) => (e: React.MouseEvent) => {
@@ -156,12 +161,14 @@ export const BaseNode = memo(function BaseNode({
     const startHeight = height
     const startNodeX = x
     const startNodeY = y
+    const scale = canvasScale
 
     setIsResizing(true)
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      const deltaX = moveEvent.clientX - startX
-      const deltaY = moveEvent.clientY - startY
+      // Divide by scale to account for canvas zoom
+      const deltaX = (moveEvent.clientX - startX) / scale
+      const deltaY = (moveEvent.clientY - startY) / scale
 
       let newWidth = startWidth
       let newHeight = startHeight
@@ -236,6 +243,7 @@ export const BaseNode = memo(function BaseNode({
       setIsResizing(false)
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('mouseleave', handleMouseUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
@@ -250,7 +258,9 @@ export const BaseNode = memo(function BaseNode({
     document.body.style.userSelect = 'none'
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
-  }, [x, y, width, height, onMove, onResize, onFocus, lockedAspectRatio])
+    // Also cleanup if mouse leaves the document (prevents sticky)
+    document.addEventListener('mouseleave', handleMouseUp)
+  }, [x, y, width, height, onMove, onResize, onFocus, lockedAspectRatio, canvasScale])
 
   // Resize handles (used in both modes)
   const resizeHandles = (
