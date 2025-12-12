@@ -8,10 +8,14 @@ export interface DevicePreset {
   type: 'mobile' | 'tablet' | 'desktop'
 }
 
+// Window types - device viewports or internal app windows
+export type WindowType = 'device' | 'kanban' | 'todo' | 'notes'
+
 export interface Viewport {
   id: string
-  devicePresetId: string
-  orientation: 'portrait' | 'landscape'
+  windowType: WindowType // Type of window
+  devicePresetId?: string // Only for device type
+  orientation?: 'portrait' | 'landscape' // Only for device type
   displayWidth?: number // Custom display width (for resizing)
   displayHeight?: number // Custom display height
   x?: number // Position on canvas

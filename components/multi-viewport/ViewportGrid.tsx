@@ -9,9 +9,10 @@ import {
   closestCenter,
 } from '@dnd-kit/core'
 import { cn } from '@/lib/utils'
-import { Plus, Smartphone, Tablet, Monitor, LayoutGrid, X } from 'lucide-react'
+import { Plus, Smartphone, Tablet, Monitor, LayoutGrid, X, KanbanSquare, ListTodo, StickyNote } from 'lucide-react'
 import { ViewportItem, ViewportPerformanceWarning } from './ViewportItem'
-import { Viewport, DevicePreset, DEVICE_PRESETS, getPresetById, getPresetsByType } from './types'
+import { InternalWindowItem, getWindowConfig } from './InternalWindowItem'
+import { Viewport, DevicePreset, WindowType, DEVICE_PRESETS, getPresetById, getPresetsByType } from './types'
 
 // Grid snap size
 const GRID_SNAP = 50
@@ -30,6 +31,10 @@ interface ViewportGridProps {
   onScreenshotSelect?: (element: unknown, rect: unknown, viewportId: string) => void
   onConsoleLog?: (level: string, message: string, viewportId: string) => void
   onClose?: () => void
+  // Internal window render functions
+  renderKanban?: () => React.ReactNode
+  renderTodo?: () => React.ReactNode
+  renderNotes?: () => React.ReactNode
 }
 
 const STORAGE_KEY = 'cluso-multi-viewport-config'
@@ -48,6 +53,7 @@ function loadViewports(): Viewport[] {
       if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed.map((v: Viewport, i: number) => ({
           ...v,
+          windowType: v.windowType || 'device', // Default to device for backwards compatibility
           displayWidth: v.displayWidth || 400,
           displayHeight: v.displayHeight || 250,
           x: v.x ?? (i % 3) * 420,
@@ -59,7 +65,7 @@ function loadViewports(): Viewport[] {
     console.error('[ViewportGrid] Failed to load viewports from localStorage:', e)
   }
   // Default viewport
-  return [{ id: crypto.randomUUID(), devicePresetId: 'desktop', orientation: 'landscape', displayWidth: 600, displayHeight: 300, x: 0, y: 0 }]
+  return [{ id: crypto.randomUUID(), windowType: 'device', devicePresetId: 'desktop', orientation: 'landscape', displayWidth: 600, displayHeight: 300, x: 0, y: 0 }]
 }
 
 // Save viewports to localStorage
@@ -131,6 +137,8 @@ function DraggableViewportItem({
     transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
     opacity: isDragging ? 0.8 : 1,
     zIndex: isDragging ? 100 : 1,
+    touchAction: 'none', // Prevents browser handling of touch/pointer events during drag
+    cursor: isDragging ? 'grabbing' : undefined,
   }
 
   return (
@@ -168,6 +176,63 @@ function DraggableViewportItem({
   )
 }
 
+// Draggable wrapper for internal windows (kanban, todo, notes)
+function DraggableInternalWindow({
+  viewport,
+  isDarkMode,
+  onRemove,
+  onResize,
+  renderKanban,
+  renderTodo,
+  renderNotes,
+}: {
+  viewport: Viewport
+  isDarkMode: boolean
+  onRemove: () => void
+  onResize: (width: number, height: number) => void
+  renderKanban?: () => React.ReactNode
+  renderTodo?: () => React.ReactNode
+  renderNotes?: () => React.ReactNode
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    isDragging,
+  } = useDraggable({ id: viewport.id })
+
+  const style: React.CSSProperties = {
+    position: 'absolute',
+    left: viewport.x ?? 0,
+    top: viewport.y ?? 0,
+    transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+    opacity: isDragging ? 0.8 : 1,
+    zIndex: isDragging ? 100 : 1,
+    touchAction: 'none',
+    cursor: isDragging ? 'grabbing' : undefined,
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+    >
+      <InternalWindowItem
+        viewport={viewport}
+        isDarkMode={isDarkMode}
+        onRemove={onRemove}
+        onResize={onResize}
+        dragHandleProps={listeners}
+        renderKanban={renderKanban}
+        renderTodo={renderTodo}
+        renderNotes={renderNotes}
+      />
+    </div>
+  )
+}
+
 export function ViewportGrid({
   url,
   isDarkMode,
@@ -193,10 +258,15 @@ export function ViewportGrid({
   const [primaryViewportId, setPrimaryViewportId] = useState<string | null>(null)
   const [syncedUrl, setSyncedUrl] = useState<string>(url)
 
-  // Keep syncedUrl in sync with parent url prop when it changes
+  // Only sync URL on initial mount - don't update when parent prop changes
+  // This prevents webview reloads when switching views
+  const initialUrlRef = useRef(url)
   useEffect(() => {
-    setSyncedUrl(url)
-  }, [url])
+    // Only set on first mount
+    if (!syncedUrl || syncedUrl === 'about:blank') {
+      setSyncedUrl(url)
+    }
+  }, []) // Empty deps - only on mount
 
   // Handle primary viewport navigation - sync to all others
   const handlePrimaryNavigate = useCallback((newUrl: string) => {
@@ -218,7 +288,7 @@ export function ViewportGrid({
     saveViewports(viewports)
   }, [viewports])
 
-  // DnD sensors - pointer only for free positioning
+  // DnD sensors - pointer for free positioning
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -380,10 +450,13 @@ export function ViewportGrid({
   const expandedViewport = expandedViewportId ? viewports.find(v => v.id === expandedViewportId) : null
 
   return (
-    <div className={cn(
-      "h-full flex flex-col relative",
-      isDarkMode ? "bg-neutral-900" : "bg-stone-100"
-    )}>
+    <div
+      className={cn(
+        "h-full flex flex-col relative",
+        isDarkMode ? "bg-neutral-900" : "bg-stone-100"
+      )}
+      style={{ userSelect: 'none' }}
+    >
       {/* Floating toolbar - top right */}
       <div className={cn(
         "absolute top-2 right-2 z-40 flex items-center gap-1 px-1.5 py-1 rounded-lg shadow-lg border",

@@ -7313,8 +7313,15 @@ If you're not sure what the user wants, ask for clarification.
               </div>
             )}
 
-            {/* Multi-Viewport Mode */}
-            {isMultiViewportMode ? (
+            {/* Multi-Viewport Mode - always mounted, hidden when inactive to preserve webviews */}
+            <div
+              className="absolute inset-0"
+              style={{
+                opacity: isMultiViewportMode ? 1 : 0,
+                pointerEvents: isMultiViewportMode ? 'auto' : 'none',
+                zIndex: isMultiViewportMode ? 10 : -1,
+              }}
+            >
               <ViewportGrid
                 url={activeTab.url || ''}
                 isDarkMode={isDarkMode}
@@ -7355,7 +7362,10 @@ If you're not sure what the user wants, ask for clarification.
                 }}
                 onClose={() => setIsMultiViewportMode(false)}
               />
-            ) : isElectron && webviewPreloadPath ? (
+            </div>
+
+            {/* Single Viewport Mode */}
+            {!isMultiViewportMode && isElectron && webviewPreloadPath ? (
               /* Render a webview for each tab - only active one is visible */
               <>
                 {tabs.filter(tab => tab.url).map(tab => (

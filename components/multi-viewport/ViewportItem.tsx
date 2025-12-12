@@ -341,9 +341,20 @@ export function ViewportItem({
     }
 
     const handleDidNavigate = (event: { url: string }) => {
-      console.log(`[ViewportItem:${viewport.id}] Navigated to:`, event.url)
+      console.log(`[ViewportItem:${viewport.id}] Navigated to:`, event.url, 'isPrimary:', isPrimaryRef.current)
       // If this is the primary viewport, broadcast navigation to others
       if (isPrimaryRef.current && onNavigateRef.current && event.url) {
+        console.log(`[ViewportItem:${viewport.id}] Broadcasting URL to other viewports:`, event.url)
+        onNavigateRef.current(event.url)
+      }
+    }
+
+    // Also handle in-page navigation (SPA client-side routing)
+    const handleDidNavigateInPage = (event: { url: string; isMainFrame: boolean }) => {
+      if (!event.isMainFrame) return
+      console.log(`[ViewportItem:${viewport.id}] In-page navigation to:`, event.url, 'isPrimary:', isPrimaryRef.current)
+      if (isPrimaryRef.current && onNavigateRef.current && event.url) {
+        console.log(`[ViewportItem:${viewport.id}] Broadcasting in-page URL:`, event.url)
         onNavigateRef.current(event.url)
       }
     }
@@ -369,6 +380,7 @@ export function ViewportItem({
 
     webview.addEventListener('dom-ready', handleDomReady)
     webview.addEventListener('did-navigate', handleDidNavigate)
+    webview.addEventListener('did-navigate-in-page', handleDidNavigateInPage as unknown as (...args: unknown[]) => void)
     webview.addEventListener('ipc-message', handleIpcMessage as unknown as (...args: unknown[]) => void)
 
     // Check if already ready (webview may have loaded before listener attached)
@@ -385,16 +397,30 @@ export function ViewportItem({
     return () => {
       webview.removeEventListener('dom-ready', handleDomReady)
       webview.removeEventListener('did-navigate', handleDidNavigate)
+      webview.removeEventListener('did-navigate-in-page', handleDidNavigateInPage as unknown as (...args: unknown[]) => void)
       webview.removeEventListener('ipc-message', handleIpcMessage as unknown as (...args: unknown[]) => void)
     }
   }, [viewport.id, webviewMounted])
 
-  // Handle URL changes - only after webview is ready
+  // Handle URL changes - only load if URL meaningfully changed
+  const lastLoadedUrlRef = useRef<string>('')
   useEffect(() => {
     if (webviewRef.current && url && isWebviewReady) {
+      // Skip if we already loaded this URL
+      if (lastLoadedUrlRef.current === url) {
+        return
+      }
       try {
         const currentUrl = webviewRef.current.getURL?.()
-        if (currentUrl && currentUrl !== url) {
+        // Only reload if the webview's actual URL differs from target
+        if (currentUrl && currentUrl !== url && url !== 'about:blank') {
+          console.log(`[ViewportItem:${viewport.id}] Loading URL:`, url, 'was:', currentUrl)
+          lastLoadedUrlRef.current = url
+          webviewRef.current.loadURL?.(url)
+        } else if (!currentUrl || currentUrl === 'about:blank') {
+          // Initial load
+          console.log(`[ViewportItem:${viewport.id}] Initial URL load:`, url)
+          lastLoadedUrlRef.current = url
           webviewRef.current.loadURL?.(url)
         }
       } catch (e) {
@@ -402,16 +428,28 @@ export function ViewportItem({
         console.log('[ViewportItem] Webview not ready for URL sync')
       }
     }
-  }, [url, isWebviewReady])
+  }, [url, isWebviewReady, viewport.id])
 
   // Sync inspector modes to webview when they change
   useEffect(() => {
-    if (webviewRef.current?.send && isWebviewReady) {
-      webviewRef.current.send('set-inspector-mode', isInspectorActive || false)
-      webviewRef.current.send('set-screenshot-mode', isScreenshotActive || false)
-      webviewRef.current.send('set-move-mode', isMoveActive || false)
+    const webview = webviewRef.current
+    if (!webview?.send) {
+      console.log(`[ViewportItem:${viewport.id}] No webview.send available`)
+      return
     }
-  }, [isInspectorActive, isScreenshotActive, isMoveActive, isWebviewReady])
+
+    console.log(`[ViewportItem:${viewport.id}] Syncing inspector modes:`, {
+      isInspectorActive,
+      isScreenshotActive,
+      isMoveActive,
+      isWebviewReady
+    })
+
+    // Send even if not "ready" - the webview might still accept messages
+    webview.send('set-inspector-mode', isInspectorActive || false)
+    webview.send('set-screenshot-mode', isScreenshotActive || false)
+    webview.send('set-move-mode', isMoveActive || false)
+  }, [isInspectorActive, isScreenshotActive, isMoveActive, isWebviewReady, viewport.id])
 
   if (isExpanded) {
     return (
@@ -508,7 +546,7 @@ export function ViewportItem({
       className={cn(
         "flex flex-col rounded-xl overflow-hidden transition-shadow hover:shadow-lg relative",
         isPrimary
-          ? "ring-2 ring-blue-500 border-2 border-blue-500 shadow-lg shadow-blue-500/20"
+          ? "ring-1 ring-blue-500 border border-blue-500/50"
           : "border",
         !isPrimary && (isDarkMode
           ? "bg-neutral-800 border-neutral-700"
@@ -522,6 +560,8 @@ export function ViewportItem({
         height: localSize.height,
         flexShrink: 0,
         flexGrow: 0,
+        contain: 'layout style paint',
+        isolation: 'isolate',
       }}
     >
       {/* Resize handles */}
@@ -538,17 +578,15 @@ export function ViewportItem({
         "flex items-center justify-between px-2 py-1 border-b",
         isDarkMode ? "bg-neutral-800 border-neutral-700" : "bg-stone-50 border-stone-200"
       )}>
-        <div className="flex items-center gap-1.5">
-          {/* Drag handle */}
-          <div
-            {...dragHandleProps}
-            className={cn(
-              "cursor-grab active:cursor-grabbing p-0.5 rounded hover:bg-opacity-50",
-              isDarkMode ? "hover:bg-neutral-700" : "hover:bg-stone-200"
-            )}
-          >
-            <GripVertical size={12} className={isDarkMode ? "text-neutral-500" : "text-stone-400"} />
-          </div>
+        <div
+          {...dragHandleProps}
+          className={cn(
+            "flex items-center gap-1.5 cursor-grab active:cursor-grabbing",
+            isDarkMode ? "hover:bg-neutral-700/50" : "hover:bg-stone-200/50"
+          )}
+        >
+          {/* Drag handle icon */}
+          <GripVertical size={12} className={isDarkMode ? "text-neutral-500" : "text-stone-400"} />
 
           <DeviceIcon size={12} className={isDarkMode ? "text-neutral-400" : "text-stone-500"} />
           <span className={cn(

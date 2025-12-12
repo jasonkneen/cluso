@@ -26,6 +26,14 @@ const registerTabDataHandlers = require('./ipc/tab-data-handlers.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
+// GPU optimization for multi-viewport rendering
+// Enable hardware acceleration and GPU compositing for webviews
+app.commandLine.appendSwitch('enable-gpu-rasterization')
+app.commandLine.appendSwitch('enable-zero-copy')
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+// Increase GPU memory for multiple webviews
+app.commandLine.appendSwitch('gpu-rasterization-msaa-sample-count', '0')
+
 // Suppress Electron security warnings in dev mode
 // These warnings are expected when using dynamic script injection for React fiber extraction
 // The warnings don't appear in production builds
