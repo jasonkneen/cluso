@@ -27,3 +27,4 @@ dist-ssr
 /website/.mgrep-local
 /.vite
 /.claudelet/2025-12-12
+/.mgrep-local/vectors

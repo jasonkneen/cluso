@@ -641,10 +641,18 @@ export function createControlTools(registry: ControlRegistryContextType) {
               await new Promise(r => setTimeout(r, step.duration || 1000))
               break
             case 'speak':
-              if (step.text && 'speechSynthesis' in window) {
-                const utterance = new SpeechSynthesisUtterance(step.text)
-                speechSynthesis.speak(utterance)
-                await new Promise<void>(r => { utterance.onend = () => r() })
+              if (step.text) {
+                try {
+                  const { speakWithGemini } = await import('../../services/geminiTTS')
+                  await speakWithGemini(step.text)
+                } catch (err) {
+                  console.error('[Controllable] Gemini TTS failed, using browser fallback:', err)
+                  // Fallback to browser TTS
+                  if ('speechSynthesis' in window) {
+                    const utterance = new SpeechSynthesisUtterance(step.text)
+                    await new Promise<void>(r => { utterance.onend = () => r(); speechSynthesis.speak(utterance) })
+                  }
+                }
               }
               break
           }

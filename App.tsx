@@ -2199,6 +2199,109 @@ export default function App() {
     return { success: true };
   }, [tabs, handleNewTab]);
 
+  // Handle find_element_by_text tool - searches page for elements by visible text content
+  const handleFindElementByText = useCallback(async (
+    searchText: string,
+    elementType?: string
+  ): Promise<{ success: boolean; matches?: Array<{ elementNumber: number; text: string; tagName: string }>; error?: string }> => {
+    console.log('[AI] Finding elements by text:', searchText, 'type:', elementType);
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      return { success: false, error: 'Webview not ready' };
+    }
+
+    const searchCode = `
+      (function() {
+        const searchText = ${JSON.stringify(searchText.toLowerCase())};
+        const elementType = ${elementType ? JSON.stringify(elementType.toLowerCase()) : 'null'};
+
+        // Get all visible elements with text content
+        const allElements = Array.from(document.querySelectorAll('*'));
+        const matches = [];
+        let elementNumber = 0;
+
+        // Store elements for later highlighting
+        const numberedElements = [];
+
+        for (const el of allElements) {
+          // Skip invisible elements
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+
+          // Skip non-interactive elements (unless they have meaningful text)
+          const tagName = el.tagName.toLowerCase();
+          const interactiveTags = ['button', 'a', 'input', 'select', 'textarea', 'label', 'span', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div', 'li'];
+          if (!interactiveTags.includes(tagName)) continue;
+
+          // Filter by element type if specified
+          if (elementType && tagName !== elementType) continue;
+
+          // Get text content (direct text, not from children)
+          let text = '';
+          if (tagName === 'input') {
+            text = el.value || el.placeholder || el.getAttribute('aria-label') || '';
+          } else {
+            // Get direct text content
+            text = Array.from(el.childNodes)
+              .filter(n => n.nodeType === Node.TEXT_NODE)
+              .map(n => n.textContent)
+              .join(' ').trim();
+            // If no direct text, try innerText but limit to prevent huge strings
+            if (!text) {
+              text = (el.innerText || '').substring(0, 100);
+            }
+          }
+
+          // Also check aria-label and title
+          const ariaLabel = el.getAttribute('aria-label') || '';
+          const title = el.getAttribute('title') || '';
+          const combinedText = (text + ' ' + ariaLabel + ' ' + title).toLowerCase();
+
+          // Check for match (case-insensitive, partial match)
+          if (combinedText.includes(searchText)) {
+            elementNumber++;
+            numberedElements.push(el);
+            matches.push({
+              elementNumber,
+              text: text.trim().substring(0, 100) || ariaLabel || title || tagName,
+              tagName: tagName.toUpperCase()
+            });
+
+            // Limit to 20 matches
+            if (matches.length >= 20) break;
+          }
+        }
+
+        // Store for highlighting
+        window.__numberedElements = numberedElements;
+
+        // Add number badges to matched elements
+        document.querySelectorAll('.element-number-badge').forEach(b => b.remove());
+        numberedElements.forEach((el, i) => {
+          const badge = document.createElement('div');
+          badge.className = 'element-number-badge';
+          badge.textContent = String(i + 1);
+          badge.style.cssText = 'position:absolute;background:#3b82f6;color:white;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;z-index:99999;pointer-events:none;';
+          const rect = el.getBoundingClientRect();
+          badge.style.top = (rect.top + window.scrollY - 15) + 'px';
+          badge.style.left = (rect.left + window.scrollX) + 'px';
+          document.body.appendChild(badge);
+        });
+
+        return { success: true, matches };
+      })()
+    `;
+
+    try {
+      const result = await webview.executeJavaScript(searchCode);
+      console.log('[AI] Find by text result:', result);
+      return result;
+    } catch (err) {
+      console.error('[AI] Find by text error:', err);
+      return { success: false, error: (err as Error).message };
+    }
+  }, [isWebviewReady, activeTabId]);
+
   // Handle get_page_elements tool - scans page for interactive elements
   // Supports hierarchical focusing: if an element is focused, only shows children of that element
   // showBadges: when false, doesn't create visual number badges (used for background context priming)
@@ -2947,6 +3050,7 @@ export default function App() {
   }, [showFileBrowser]);
 
   // Handle instant code updates from Gemini's update_ui tool
+  // IMPORTANT: Only updates the selected element if one exists, not the entire page
   const handleCodeUpdate = useCallback((html: string) => {
     console.log('[InstantEdit] Applying HTML update to DOM');
     const webview = webviewRefs.current.get(activeTabId);
@@ -2955,32 +3059,92 @@ export default function App() {
       return;
     }
 
-    // Inject HTML into the webview instantly
-    const injectCode = `
-      (function() {
-        try {
-          // Replace entire document with new HTML
-          document.documentElement.innerHTML = \`${html.replace(/`/g, '\\`')}\`;
-          return { success: true, message: 'HTML updated' };
-        } catch (err) {
-          return { success: false, error: err.message };
-        }
-      })()
-    `;
+    // Validate HTML before injection - basic checks
+    const trimmedHtml = html.trim();
+    if (!trimmedHtml) {
+      console.error('[InstantEdit] Empty HTML provided');
+      return;
+    }
+
+    // Check for obviously dangerous patterns (security)
+    const dangerousPatterns = [
+      /<script[^>]*>[\s\S]*?<\/script>/gi,  // Script tags
+      /javascript:/gi,                        // javascript: URLs
+      /on\w+\s*=/gi,                          // Event handlers like onclick=
+      /data:text\/html/gi,                    // Data URLs
+    ];
+
+    let sanitizedHtml = trimmedHtml;
+    let hadDangerousContent = false;
+    for (const pattern of dangerousPatterns) {
+      if (pattern.test(sanitizedHtml)) {
+        console.warn('[InstantEdit] Removed potentially dangerous content:', pattern);
+        sanitizedHtml = sanitizedHtml.replace(pattern, '');
+        hadDangerousContent = true;
+      }
+    }
+
+    // If we have a selected element, ONLY update that element
+    // Otherwise, update the entire document (legacy behavior)
+    const currentSelectedElement = selectedElementRef.current;
+
+    let injectCode: string;
+    if (currentSelectedElement?.xpath) {
+      // Targeted update - only change the selected element
+      console.log('[InstantEdit] Targeted update for element:', currentSelectedElement.tagName, currentSelectedElement.xpath);
+      injectCode = `
+        (function() {
+          try {
+            const xpath = '${currentSelectedElement.xpath.replace(/'/g, "\\'")}';
+            const el = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+            if (!el) {
+              return { success: false, error: 'Selected element not found in DOM' };
+            }
+            // Update only the outerHTML of the selected element
+            el.outerHTML = \`${sanitizedHtml.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`;
+            return { success: true, message: 'Element updated', targeted: true };
+          } catch (err) {
+            return { success: false, error: err.message };
+          }
+        })()
+      `;
+    } else {
+      // Full page update (only if no element selected)
+      console.log('[InstantEdit] Full page update (no element selected)');
+      injectCode = `
+        (function() {
+          try {
+            // Replace entire document with new HTML
+            document.documentElement.innerHTML = \`${sanitizedHtml.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`;
+            return { success: true, message: 'Page updated', targeted: false };
+          } catch (err) {
+            return { success: false, error: err.message };
+          }
+        })()
+      `;
+    }
 
     webview.executeJavaScript(injectCode)
-      .then((result: { success: boolean; message?: string; error?: string }) => {
+      .then((result: { success: boolean; message?: string; error?: string; targeted?: boolean }) => {
         if (result?.success) {
-          console.log('[InstantEdit] HTML applied to DOM successfully');
-          // Show success message
+          console.log('[InstantEdit] HTML applied to DOM successfully, targeted:', result.targeted);
+          const updateType = result.targeted ? 'element' : 'page';
           setMessages(prev => [...prev, {
             id: Date.now().toString(),
             role: 'system',
-            content: '✓ UI updated instantly',
+            content: hadDangerousContent
+              ? `✓ ${updateType} updated (unsafe content removed)`
+              : `✓ ${updateType} updated`,
             timestamp: new Date()
           }]);
         } else {
           console.error('[InstantEdit] Failed to apply HTML:', result?.error);
+          setMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            role: 'system',
+            content: `✗ Update failed: ${result?.error || 'Unknown error'}`,
+            timestamp: new Date()
+          }]);
         }
       })
       .catch((err: Error) => {
@@ -3022,6 +3186,7 @@ export default function App() {
     onClearFocus: handleClearFocus,
     onSetViewport: handleSetViewport,
     onSwitchTab: handleSwitchTab,
+    onFindElementByText: handleFindElementByText,
     selectedElement: selectedElement,
     // Pass Google API key from settings
     googleApiKey: appSettings.providers.find(p => p.id === 'google')?.apiKey,

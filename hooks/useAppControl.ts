@@ -468,14 +468,22 @@ export function useAppControl() {
           await wait(action.duration || 1000)
           break
         case 'speak':
-          // TTS integration - could use Web Speech API or AI voice
-          if (action.text && 'speechSynthesis' in window) {
-            const utterance = new SpeechSynthesisUtterance(action.text)
-            speechSynthesis.speak(utterance)
-            // Wait for speech to complete
-            await new Promise<void>(resolve => {
-              utterance.onend = () => resolve()
-            })
+          // Use Gemini TTS instead of browser speechSynthesis
+          if (action.text) {
+            try {
+              const { speakWithGemini } = await import('../services/geminiTTS')
+              await speakWithGemini(action.text)
+            } catch (err) {
+              console.error('[AppControl] Gemini TTS failed:', err)
+              // Fallback to browser TTS if Gemini fails
+              if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(action.text)
+                await new Promise<void>(resolve => {
+                  utterance.onend = () => resolve()
+                  speechSynthesis.speak(utterance)
+                })
+              }
+            }
           }
           break
       }
@@ -569,7 +577,7 @@ export function useAppControl() {
     },
     speak: {
       name: 'speak',
-      description: 'Speak a message using text-to-speech',
+      description: 'Speak a message using Gemini TTS (AI voice)',
       parameters: {
         type: 'object',
         properties: {
@@ -577,13 +585,21 @@ export function useAppControl() {
         },
         required: ['message']
       },
-      execute: (args: { message: string }) => {
-        if ('speechSynthesis' in window) {
-          const utterance = new SpeechSynthesisUtterance(args.message)
-          speechSynthesis.speak(utterance)
+      execute: async (args: { message: string }) => {
+        try {
+          const { speakWithGemini } = await import('../services/geminiTTS')
+          await speakWithGemini(args.message)
           return true
+        } catch (err) {
+          console.error('[AppControl] speak tool - Gemini TTS failed:', err)
+          // Fallback to browser TTS
+          if ('speechSynthesis' in window) {
+            const utterance = new SpeechSynthesisUtterance(args.message)
+            speechSynthesis.speak(utterance)
+            return true
+          }
+          return false
         }
-        return false
       }
     },
     get_ui_elements: {

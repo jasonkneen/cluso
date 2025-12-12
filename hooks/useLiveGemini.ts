@@ -32,6 +32,7 @@ interface UseLiveGeminiParams {
   onClearFocus?: () => Promise<{ success: boolean }>;
   onSetViewport?: (mode: 'mobile' | 'tablet' | 'desktop') => Promise<{ success: boolean }>;
   onSwitchTab?: (type: 'browser' | 'kanban' | 'todos' | 'notes') => Promise<{ success: boolean }>;
+  onFindElementByText?: (searchText: string, elementType?: string) => Promise<{ success: boolean; matches?: Array<{ elementNumber: number; text: string; tagName: string }>; error?: string }>;
   selectedElement?: SelectedElement | null;
   // Context for logging
   projectFolder?: string;
@@ -133,6 +134,35 @@ User: "select the image" → YOU: get_page_elements("images")
       },
     },
     required: [],
+  },
+};
+
+const findElementByTextTool: FunctionDeclaration = {
+  name: 'find_element_by_text',
+  description: `🔎 TEXT SEARCH - Find elements by their visible text content.
+
+USE THIS WHEN user says things like:
+- "find the Book a Demo button" → find_element_by_text("Book a Demo")
+- "click the Sign Up link" → find_element_by_text("Sign Up")
+- "select the Learn More button" → find_element_by_text("Learn More")
+
+This searches ALL visible text on the page and returns matching elements with their numbers.
+The search is case-insensitive and matches partial text.
+
+After finding matches, use highlight_element_by_number() to highlight the result.`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      searchText: {
+        type: Type.STRING,
+        description: 'The text to search for (case-insensitive, partial match)',
+      },
+      elementType: {
+        type: Type.STRING,
+        description: 'Optional: limit search to specific element types - "button", "link", "heading", "any" (default)',
+      },
+    },
+    required: ['searchText'],
   },
 };
 
@@ -556,7 +586,7 @@ TRIGGERS:
   },
 };
 
-export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, onOpenItem, onOpenFile, onOpenFolder, onBrowserBack, onCloseBrowser, onApproveChange, onRejectChange, onUndoChange, onHighlightByNumber, onClearFocus, onSetViewport, onSwitchTab, selectedElement, projectFolder, currentUrl, googleApiKey, selectedModelId }: UseLiveGeminiParams) {
+export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onFindElementByText, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, onOpenItem, onOpenFile, onOpenFolder, onBrowserBack, onCloseBrowser, onApproveChange, onRejectChange, onUndoChange, onHighlightByNumber, onClearFocus, onSetViewport, onSwitchTab, selectedElement, projectFolder, currentUrl, googleApiKey, selectedModelId }: UseLiveGeminiParams) {
   const [streamState, setStreamState] = useState<StreamState>({
     isConnected: false,
     isStreaming: false,
@@ -712,7 +742,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
           },
-          tools: [{ functionDeclarations: [updateUiTool, selectElementTool, executeCodeTool, confirmSelectionTool, getPageElementsTool, patchSourceFileTool, listFilesTool, readFileTool, clickElementTool, navigateTool, scrollTool, openFileBrowserItemTool, openFileTool, openFolderTool, fileBrowserBackTool, closeFileBrowserTool, approveCchangeTool, rejectChangeTool, undoChangeTool, highlightByNumberTool, clearFocusTool, setViewportTool, switchTabTool] }],
+          tools: [{ functionDeclarations: [updateUiTool, selectElementTool, executeCodeTool, confirmSelectionTool, getPageElementsTool, findElementByTextTool, patchSourceFileTool, listFilesTool, readFileTool, clickElementTool, navigateTool, scrollTool, openFileBrowserItemTool, openFileTool, openFolderTool, fileBrowserBackTool, closeFileBrowserTool, approveCchangeTool, rejectChangeTool, undoChangeTool, highlightByNumberTool, clearFocusTool, setViewportTool, switchTabTool] }],
           systemInstruction: `You are a specialized AI UI Engineer with voice control, file browsing, element selection, and browser navigation.
 
           You can see the user's screen or video feed if enabled.
@@ -883,6 +913,7 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                       onExecuteCode,
                       onConfirmSelection,
                       onGetPageElements,
+                      onFindElementByText,
                       onPatchSourceFile,
                       onListFiles,
                       onReadFile,
@@ -898,6 +929,9 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                       onRejectChange,
                       onUndoChange,
                       onHighlightByNumber,
+                      onClearFocus,
+                      onSetViewport,
+                      onSwitchTab,
                     };
 
                     // Convert to typed tool calls

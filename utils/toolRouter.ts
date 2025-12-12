@@ -27,6 +27,9 @@ export interface ToolArgs {
   reason?: string
   mode?: string
   type?: string
+  // Text search args
+  searchText?: string
+  elementType?: string
 }
 
 // Tool call from Gemini
@@ -68,6 +71,7 @@ export interface ToolHandlers {
   onClearFocus?: () => Promise<{ success: boolean }>
   onSetViewport?: (mode: 'mobile' | 'tablet' | 'desktop') => Promise<{ success: boolean }>
   onSwitchTab?: (type: 'browser' | 'kanban' | 'todos' | 'notes') => Promise<{ success: boolean }>
+  onFindElementByText?: (searchText: string, elementType?: string) => Promise<{ success: boolean; matches?: Array<{ elementNumber: number; text: string; tagName: string }>; error?: string }>
 }
 
 // Function to send response back to Gemini session
@@ -532,6 +536,45 @@ const toolHandlerRegistry: Record<string, ToolHandler> = {
       })
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to switch tab'
+      sendResponse(call.id, call.name, { error: errorMsg })
+    }
+  },
+
+  find_element_by_text: async (call, handlers, sendResponse) => {
+    const { searchText, elementType } = call.args
+    if (!handlers.onFindElementByText) {
+      sendResponse(call.id, call.name, { error: 'find_element_by_text not available' })
+      return
+    }
+    if (!searchText) {
+      sendResponse(call.id, call.name, { error: 'find_element_by_text requires searchText' })
+      return
+    }
+    try {
+      const result = await withTimeout(
+        handlers.onFindElementByText(searchText, elementType),
+        TIMEOUTS.TOOL_CALL,
+        'find_element_by_text'
+      )
+      if (result.success && result.matches && result.matches.length > 0) {
+        const matchList = result.matches.map(m =>
+          `[${m.elementNumber}] <${m.tagName}> "${m.text.substring(0, 50)}${m.text.length > 50 ? '...' : ''}"`
+        ).join('\n')
+        sendResponse(call.id, call.name, {
+          result: `Found ${result.matches.length} element(s) matching "${searchText}":\n${matchList}\n\nUse highlight_element_by_number to select one.`,
+          matches: result.matches,
+        })
+      } else if (result.success && (!result.matches || result.matches.length === 0)) {
+        sendResponse(call.id, call.name, {
+          result: `No elements found matching "${searchText}". Try a different search term or use get_page_elements() to see all available elements.`,
+        })
+      } else {
+        sendResponse(call.id, call.name, { error: result.error || 'Failed to search for elements' })
+      }
+    } catch (err) {
+      const errorMsg = err instanceof TimeoutError
+        ? err.message
+        : (err instanceof Error ? err.message : 'Failed to find elements by text')
       sendResponse(call.id, call.name, { error: errorMsg })
     }
   },
