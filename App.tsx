@@ -846,6 +846,7 @@ export default function App() {
   const [isLayersLoading, setIsLayersLoading] = useState(false);
   const [multiViewportData, setMultiViewportData] = useState<Array<{ id: string; windowType: string; devicePresetId?: string }>>([]);
   const [selectedLayerElementNumber, setSelectedLayerElementNumber] = useState<number | null>(null)
+  const [selectedLayerElementName, setSelectedLayerElementName] = useState<string | null>(null)
   const selectedLayerElementNumberRef = useRef<number | null>(null)
   useEffect(() => { selectedLayerElementNumberRef.current = selectedLayerElementNumber }, [selectedLayerElementNumber])
 
@@ -2563,6 +2564,7 @@ export default function App() {
 
     if (node.elementNumber) {
       setSelectedLayerElementNumber(node.elementNumber)
+      setSelectedLayerElementName(node.name || null)
 
       // Highlight in webview
       const webview = webviewRefs.current.get(activeTabId);
@@ -2638,6 +2640,7 @@ export default function App() {
             return {
               success: true,
               styles: {
+                className: (el.className || ''),
                 x: transform.x,
                 y: transform.y,
                 rotation: transform.rotation,
@@ -2719,6 +2722,9 @@ export default function App() {
       } catch (err) {
         console.error('[Layers] Highlight error:', err);
       }
+    } else {
+      setSelectedLayerElementNumber(null)
+      setSelectedLayerElementName(null)
     }
   }, [activeTabId, isMultiViewportMode]);
 
@@ -2737,6 +2743,7 @@ export default function App() {
 
     const s = elementStylesRef.current
     const payload = JSON.stringify({
+      className: s.className,
       x: s.x,
       y: s.y,
       rotation: s.rotation,
@@ -2761,6 +2768,10 @@ export default function App() {
           const el = map.get(${elementNumber});
           if (!el) return { success: false, error: 'Element not found' };
           const s = ${payload};
+
+          if (typeof s.className === 'string') {
+            el.className = s.className;
+          }
 
           el.style.width = s.width + 'px';
           el.style.height = s.height + 'px';
@@ -7758,6 +7769,8 @@ If you're not sure what the user wants, ask for clarification.
               panelBg={panelBg}
               panelBorder={panelBorder}
               isLoading={isLayersLoading}
+              selectedElementName={selectedLayerElementName}
+              selectedElementNumber={selectedLayerElementNumber}
               styles={elementStyles}
               onStyleChange={handleElementStyleChange}
             />

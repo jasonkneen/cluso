@@ -14,6 +14,7 @@ interface LayersPanelProps {
   isLoading?: boolean
   className?: string
   style?: CSSProperties
+  embedded?: boolean
 }
 
 export const LayersPanel = ({
@@ -28,16 +29,27 @@ export const LayersPanel = ({
   isLoading = false,
   className,
   style,
+  embedded = false,
 }: LayersPanelProps) => {
   return (
     <div
-      className={`flex flex-col rounded-xl shadow-sm flex-shrink-0 border ${className || ''}`}
+      className={[
+        'flex flex-col flex-shrink-0',
+        embedded ? '' : 'rounded-xl shadow-sm border',
+        className || '',
+      ].join(' ')}
       style={{
-        width,
-        minWidth: 200,
-        maxWidth: 400,
-        backgroundColor: panelBg,
-        borderColor: panelBorder,
+        ...(embedded
+          ? {
+              backgroundColor: panelBg,
+            }
+          : {
+              width,
+              minWidth: 200,
+              maxWidth: 400,
+              backgroundColor: panelBg,
+              borderColor: panelBorder,
+            }),
         ...style,
       }}
     >
@@ -85,7 +97,7 @@ export const LayersPanel = ({
       </div>
 
       {/* Footer with element count */}
-      {treeData && (
+      {treeData && !embedded && (
         <div
           className={`h-8 border-t flex items-center px-3 text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}
           style={{ borderColor: panelBorder }}

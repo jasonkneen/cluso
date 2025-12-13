@@ -14,14 +14,12 @@ import {
   FlipVertical2,
   Grid3X3,
   LayoutTemplate,
-  Monitor,
   Plus,
   RotateCcw,
-  Smartphone,
-  Tablet,
   ChevronDown,
 } from 'lucide-react'
 import type { ElementStyles } from '../types/elementStyles'
+import { Textarea } from './ui/textarea'
 
 interface PropertiesPanelProps {
   styles: ElementStyles
@@ -29,15 +27,31 @@ interface PropertiesPanelProps {
   isDarkMode: boolean
   panelBg: string
   panelBorder: string
+  embedded?: boolean
+  selectedElementName?: string | null
+  selectedElementNumber?: number | null
 }
 
-export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChange, isDarkMode, panelBg, panelBorder }) => {
-  const [activeTab, setActiveTab] = useState<'design' | 'css'>('design')
+export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
+  styles,
+  onChange,
+  isDarkMode,
+  panelBg,
+  panelBorder,
+  embedded = false,
+  selectedElementName,
+  selectedElementNumber,
+}) => {
+  const [activeTab, setActiveTab] = useState<'design' | 'css' | 'tailwind'>('design')
+  const hasSelection = !!selectedElementNumber
 
   const cssContent = useMemo(() => {
-    const transform = `rotate(${styles.rotation}deg) translate(${styles.x}px, ${styles.y}px)`
+    const transform = `translate(${styles.x}px, ${styles.y}px) rotate(${styles.rotation}deg)`
     return `
 .element {
+  /* Tailwind / classes */
+  /* className: ${styles.className} */
+
   /* Position */
   position: relative;
   width: ${styles.width}px;
@@ -70,14 +84,23 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
 
   return (
     <div
-      className="flex flex-col h-full border rounded-xl overflow-hidden"
-      style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+      className={[
+        'flex flex-col h-full',
+        embedded ? '' : 'border rounded-xl overflow-hidden',
+      ].join(' ')}
+      style={embedded ? undefined : { backgroundColor: panelBg, borderColor: panelBorder }}
     >
       {/* Tab Header */}
       <div className="p-2 border-b" style={{ borderColor: panelBorder }}>
-        <div className="flex items-center p-1 bg-neutral-900 rounded-md border border-border">
-          {(['Design', 'CSS'] as const).map((tab) => {
-            const tabKey = tab.toLowerCase() as 'design' | 'css'
+        <div
+          className={[
+            'flex items-center p-1 rounded-md border',
+            isDarkMode ? 'bg-neutral-900' : 'bg-stone-100',
+          ].join(' ')}
+          style={{ borderColor: panelBorder }}
+        >
+          {(['Design', 'CSS', 'Tailwind'] as const).map((tab) => {
+            const tabKey = tab.toLowerCase() as 'design' | 'css' | 'tailwind'
             return (
               <button
                 key={tab}
@@ -85,8 +108,12 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
                 className={[
                   'flex-1 py-1 text-xs font-medium rounded-sm transition-all',
                   activeTab === tabKey
-                    ? 'bg-neutral-700 text-white shadow-sm'
-                    : 'text-neutral-500 hover:text-neutral-300',
+                    ? isDarkMode
+                      ? 'bg-neutral-700 text-white shadow-sm'
+                      : 'bg-white text-stone-900 shadow-sm'
+                    : isDarkMode
+                      ? 'text-neutral-500 hover:text-neutral-300'
+                      : 'text-stone-500 hover:text-stone-700',
                 ].join(' ')}
               >
                 {tab}
@@ -96,12 +123,16 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
         </div>
       </div>
 
-      {activeTab === 'design' ? (
+      {!hasSelection ? (
+        <div className={`flex-1 p-3 text-sm ${isDarkMode ? 'text-neutral-500' : 'text-stone-500'}`}>
+          Select an element in Layers to edit its properties.
+        </div>
+      ) : activeTab === 'design' ? (
         <div className="flex-1 overflow-y-auto">
           <Section title="Position" defaultOpen isDarkMode={isDarkMode} panelBorder={panelBorder}>
             <div className="grid grid-cols-2 gap-2 mb-2">
-              <NumberInput label="X" value={styles.x} onChange={handleNumber('x')} suffix="px" />
-              <NumberInput label="Y" value={styles.y} onChange={handleNumber('y')} suffix="px" />
+              <NumberInput label="X" value={styles.x} onChange={handleNumber('x')} suffix="px" disabled={!hasSelection} />
+              <NumberInput label="Y" value={styles.y} onChange={handleNumber('y')} suffix="px" disabled={!hasSelection} />
             </div>
             <div className="flex items-center gap-2">
               <NumberInput
@@ -110,15 +141,16 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
                 onChange={handleNumber('rotation')}
                 suffix="°"
                 containerClassName="flex-1"
+                disabled={!hasSelection}
               />
               <div className="flex gap-1">
-                <ToggleButton className="w-7 h-7" title="Rotate">
+                <ToggleButton className="w-7 h-7" title="Rotate" disabled>
                   <RotateCcw size={12} />
                 </ToggleButton>
-                <ToggleButton className="w-7 h-7" title="Flip horizontal">
+                <ToggleButton className="w-7 h-7" title="Flip horizontal" disabled>
                   <FlipHorizontal2 size={12} />
                 </ToggleButton>
-                <ToggleButton className="w-7 h-7" title="Flip vertical">
+                <ToggleButton className="w-7 h-7" title="Flip vertical" disabled>
                   <FlipVertical2 size={12} />
                 </ToggleButton>
               </div>
@@ -133,6 +165,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
                   active={styles.display === 'block'}
                   onClick={() => onChange('display', 'block')}
                   title="Block"
+                  disabled={!hasSelection}
                 >
                   <LayoutTemplate size={14} />
                 </ToggleButton>
@@ -143,6 +176,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
                     onChange('flexDirection', 'row')
                   }}
                   title="Flex row"
+                  disabled={!hasSelection}
                 >
                   <Columns size={14} />
                 </ToggleButton>
@@ -153,6 +187,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
                     onChange('flexDirection', 'column')
                   }}
                   title="Flex column"
+                  disabled={!hasSelection}
                 >
                   <div className="rotate-90">
                     <Columns size={14} />
@@ -162,6 +197,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
                   active={styles.display === 'grid'}
                   onClick={() => onChange('display', 'grid')}
                   title="Grid"
+                  disabled={!hasSelection}
                 >
                   <Grid3X3 size={14} />
                 </ToggleButton>
@@ -171,8 +207,8 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
             <div className="mb-3">
               <div className="text-[10px] text-neutral-500 font-medium uppercase mb-1.5">Dimensions</div>
               <div className="grid grid-cols-2 gap-2">
-                <NumberInput label="W" value={styles.width} onChange={handleNumber('width')} suffix="px" />
-                <NumberInput label="H" value={styles.height} onChange={handleNumber('height')} suffix="px" />
+                <NumberInput label="W" value={styles.width} onChange={handleNumber('width')} suffix="px" disabled={!hasSelection} />
+                <NumberInput label="H" value={styles.height} onChange={handleNumber('height')} suffix="px" disabled={!hasSelection} />
               </div>
             </div>
 
@@ -188,6 +224,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
                         onClick={() => onChange('justifyContent', v)}
                         className="flex-1"
                         title={`justify-content: ${v}`}
+                        disabled={!hasSelection}
                       >
                         {v === 'flex-start' && <AlignLeft size={12} />}
                         {v === 'center' && <AlignCenter size={12} />}
@@ -204,6 +241,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
                         onClick={() => onChange('alignItems', v)}
                         className="flex-1"
                         title={`align-items: ${v}`}
+                        disabled={!hasSelection}
                       >
                         {v === 'flex-start' && <AlignStartVertical size={12} />}
                         {v === 'center' && <AlignCenterVertical size={12} />}
@@ -214,7 +252,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-neutral-500 font-medium uppercase w-8">Gap</span>
-                  <NumberInput value={styles.gap} onChange={handleNumber('gap')} suffix="px" />
+                  <NumberInput value={styles.gap} onChange={handleNumber('gap')} suffix="px" disabled={!hasSelection} />
                 </div>
               </div>
             )}
@@ -222,7 +260,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
             <div className="mb-3">
               <div className="flex items-center justify-between mb-1.5">
                 <div className="text-[10px] text-neutral-500 font-medium uppercase">Padding</div>
-                <ToggleButton className="h-4 w-4" title="Padding mode">
+                <ToggleButton className="h-4 w-4" title="Padding mode" disabled>
                   <BoxSelect size={10} />
                 </ToggleButton>
               </div>
@@ -233,6 +271,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
                   onChange={handleNumber('padding')}
                   placeholder="All"
                   suffix="px"
+                  disabled={!hasSelection}
                 />
               </div>
             </div>
@@ -250,12 +289,9 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
             panelBorder={panelBorder}
             actions={(
               <div className="flex gap-1">
-                <button className="text-neutral-400 hover:text-white p-1" title="Pointer">
-                  <Smartphone size={12} />
-                </button>
-                <button className="text-neutral-400 hover:text-white p-1" title="Preview">
-                  <Eye size={12} />
-                </button>
+                <div className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-500'}`}>
+                  {selectedElementName ? selectedElementName : `Element ${selectedElementNumber}`}
+                </div>
               </div>
             )}
           >
@@ -269,20 +305,22 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
                   suffix="%"
                   max={100}
                   min={0}
+                  disabled={!hasSelection}
                 />
               </div>
               <div>
                 <div className="text-[10px] text-neutral-500 font-medium uppercase mb-1.5">Corner Radius</div>
                 <div className="flex gap-2">
                   <NumberInput
-                    label={<Monitor size={10} />}
+                    label={<BoxSelect size={10} />}
                     value={styles.borderRadius}
                     onChange={handleNumber('borderRadius')}
                     suffix="px"
                     containerClassName="flex-1"
+                    disabled={!hasSelection}
                   />
-                  <ToggleButton className="h-7 w-7 bg-neutral-800 border border-neutral-700" title="Radius presets">
-                    <Tablet size={12} />
+                  <ToggleButton className="h-7 w-7 bg-neutral-800 border border-neutral-700" title="Radius presets" disabled>
+                    <BoxSelect size={12} />
                   </ToggleButton>
                 </div>
               </div>
@@ -303,6 +341,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
                     type="color"
                     value={styles.backgroundColor}
                     onChange={(e) => handleText('backgroundColor')(e.target.value)}
+                    disabled={!hasSelection}
                     className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[150%] h-[150%] p-0 m-0 border-0 cursor-pointer"
                   />
                 </div>
@@ -311,6 +350,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
                     type="text"
                     value={styles.backgroundColor}
                     onChange={(e) => handleText('backgroundColor')(e.target.value)}
+                    disabled={!hasSelection}
                     className="bg-transparent w-full text-xs text-neutral-300 outline-none font-mono uppercase"
                   />
                 </div>
@@ -325,6 +365,19 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({ styles, onChan
 
           <Section title="Border" isDarkMode={isDarkMode} panelBorder={panelBorder} actions={<Plus size={12} className="text-neutral-500 hover:text-white cursor-pointer" />} />
           <Section title="Shadow & Blur" isDarkMode={isDarkMode} panelBorder={panelBorder} actions={<Plus size={12} className="text-neutral-500 hover:text-white cursor-pointer" />} />
+        </div>
+      ) : activeTab === 'tailwind' ? (
+        <div className="flex-1 p-3 overflow-auto">
+          <div className={`text-xs mb-2 ${isDarkMode ? 'text-neutral-500' : 'text-stone-500'}`}>
+            Edits `className` on the selected element (live in the webview).
+          </div>
+          <Textarea
+            value={styles.className}
+            onChange={(e) => handleText('className')(e.target.value)}
+            className="min-h-40 font-mono text-xs"
+            placeholder="e.g. flex items-center gap-2 bg-blue-500 text-white"
+            disabled={!hasSelection}
+          />
         </div>
       ) : (
         <div className="flex-1 p-3 font-mono text-xs text-blue-300 overflow-auto select-text">
@@ -379,15 +432,18 @@ const ToggleButton: React.FC<{
   onClick?: () => void
   className?: string
   title?: string
+  disabled?: boolean
   children: React.ReactNode
-}> = ({ active, onClick, className = '', title, children }) => (
+}> = ({ active, onClick, className = '', title, disabled, children }) => (
   <button
     type="button"
     title={title}
     onClick={onClick}
+    disabled={disabled}
     className={[
       'h-7 rounded-sm flex items-center justify-center transition-all border border-transparent',
       active ? 'bg-neutral-700 text-white' : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800',
+      disabled ? 'opacity-50 cursor-not-allowed hover:bg-transparent hover:text-neutral-400' : '',
       className,
     ].join(' ')}
   >
@@ -439,4 +495,3 @@ const Checkbox: React.FC<{ label: string; checked?: boolean }> = ({ label, check
 )
 
 export default PropertiesPanel
-

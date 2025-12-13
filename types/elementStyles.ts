@@ -1,6 +1,8 @@
 export type ElementDisplay = 'block' | 'flex' | 'grid'
 
 export interface ElementStyles {
+  className: string
+
   x: number
   y: number
   width: number
@@ -21,6 +23,8 @@ export interface ElementStyles {
 }
 
 export const DEFAULT_ELEMENT_STYLES: ElementStyles = {
+  className: '',
+
   x: 0,
   y: 0,
   width: 300,
@@ -39,4 +43,3 @@ export const DEFAULT_ELEMENT_STYLES: ElementStyles = {
   opacity: 100,
   borderRadius: 0,
 }
-

@@ -16,6 +16,9 @@ interface LeftSidebarProps {
   onRefresh: () => void
   isLoading?: boolean
 
+  selectedElementName?: string | null
+  selectedElementNumber?: number | null
+
   styles: ElementStyles
   onStyleChange: (key: keyof ElementStyles, value: ElementStyles[keyof ElementStyles]) => void
 }
@@ -32,6 +35,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onSelect,
   onRefresh,
   isLoading,
+  selectedElementName,
+  selectedElementNumber,
   styles,
   onStyleChange,
 }) => {
@@ -85,29 +90,34 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   }, [treeHeight])
 
   return (
-    <div ref={containerRef} className="flex flex-col h-full flex-shrink-0" style={{ width }}>
-      <div className="flex-shrink-0" style={{ height: treeHeight }}>
-        <div className="h-full">
-          <LayersPanel
-            width={width}
-            treeData={treeData}
-            selectedId={selectedId}
-            onSelect={onSelect}
-            onRefresh={onRefresh}
-            isDarkMode={isDarkMode}
-            panelBg={panelBg}
-            panelBorder={panelBorder}
-            isLoading={isLoading}
-            className="h-full"
-            style={{ width: '100%', height: '100%' }}
-          />
-        </div>
+    <div
+      ref={containerRef}
+      className="flex flex-col h-full flex-shrink-0 rounded-xl shadow-sm border overflow-hidden"
+      style={{ width, backgroundColor: panelBg, borderColor: panelBorder }}
+    >
+      <div className="flex-shrink-0 min-h-0" style={{ height: treeHeight }}>
+        <LayersPanel
+          width={width}
+          treeData={treeData}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          onRefresh={onRefresh}
+          isDarkMode={isDarkMode}
+          panelBg={panelBg}
+          panelBorder={panelBorder}
+          isLoading={isLoading}
+          embedded
+          className="h-full"
+          style={{ width: '100%', height: '100%' }}
+        />
       </div>
 
       <div
-        className={`h-2 cursor-row-resize flex-shrink-0 flex items-center justify-center ${
-          isDarkMode ? 'bg-neutral-900 hover:bg-neutral-800' : 'bg-stone-100 hover:bg-stone-200'
-        }`}
+        className={[
+          'h-2 cursor-row-resize flex-shrink-0 flex items-center justify-center border-y',
+          isDarkMode ? 'bg-neutral-900/50 hover:bg-neutral-900' : 'bg-stone-100 hover:bg-stone-200',
+        ].join(' ')}
+        style={{ borderColor: panelBorder }}
         onPointerDown={handleDividerPointerDown}
         title="Drag to resize panels"
       >
@@ -121,6 +131,9 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           isDarkMode={isDarkMode}
           panelBg={panelBg}
           panelBorder={panelBorder}
+          embedded
+          selectedElementName={selectedElementName ?? null}
+          selectedElementNumber={selectedElementNumber ?? null}
         />
       </div>
     </div>
@@ -128,4 +141,3 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
 }
 
 export default LeftSidebar
-
