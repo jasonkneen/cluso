@@ -11,6 +11,8 @@ let toolbarContainer: HTMLDivElement | null = null
 let currentMode: 'none' | 'screen' | 'select' | 'move' = 'none'
 let isMicActive = false
 let isToolbarVisible = false
+let isChatOpen = false
+let selectedElements: Array<{ id: string; tagName: string; label: string }> = []
 
 const TOOLBAR_STYLES = `
 ${INSPECTOR_OVERLAY_STYLES}
@@ -151,6 +153,202 @@ ${INSPECTOR_OVERLAY_STYLES}
 #cluso-toolbar .connection-dot.disconnected {
   background: #f59e0b;
 }
+
+/* Chat Panel */
+#cluso-chat-panel {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(10px);
+  width: 380px;
+  max-height: 0;
+  overflow: hidden;
+  background: rgba(15, 15, 15, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  margin-bottom: 8px;
+  opacity: 0;
+  transition: max-height 0.3s ease, opacity 0.2s ease, transform 0.3s ease;
+}
+
+#cluso-chat-panel.open {
+  max-height: 400px;
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+#cluso-chat-panel .chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+#cluso-chat-panel .chat-header h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 0;
+}
+
+#cluso-chat-panel .chat-header button {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#cluso-chat-panel .chat-header button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+#cluso-chat-panel .chips-container {
+  padding: 12px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 44px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+#cluso-chat-panel .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  font-size: 12px;
+  color: #60a5fa;
+}
+
+#cluso-chat-panel .chip .chip-tag {
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+#cluso-chat-panel .chip .chip-label {
+  color: rgba(255, 255, 255, 0.7);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#cluso-chat-panel .chip .chip-remove {
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+#cluso-chat-panel .chip .chip-remove:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+#cluso-chat-panel .empty-state {
+  padding: 16px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 12px;
+}
+
+#cluso-chat-panel .chat-input-container {
+  padding: 12px 16px;
+  display: flex;
+  gap: 8px;
+}
+
+#cluso-chat-panel .chat-input {
+  flex: 1;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: white;
+  font-size: 13px;
+  outline: none;
+}
+
+#cluso-chat-panel .chat-input:focus {
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+#cluso-chat-panel .chat-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+#cluso-chat-panel .send-button {
+  width: 38px;
+  height: 38px;
+  border: none;
+  background: #3b82f6;
+  color: white;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+
+#cluso-chat-panel .send-button:hover {
+  background: #2563eb;
+}
+
+#cluso-chat-panel .send-button:disabled {
+  background: rgba(59, 130, 246, 0.3);
+  cursor: not-allowed;
+}
+
+/* Chat toggle button in toolbar */
+#cluso-toolbar .chat-toggle {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  position: relative;
+}
+
+#cluso-toolbar .chat-toggle .badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  background: #3b82f6;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+
+#cluso-toolbar .chat-toggle.has-items {
+  color: #3b82f6;
+}
 `
 
 const ICONS = {
@@ -158,13 +356,59 @@ const ICONS = {
   select: `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"/></svg>`,
   move: `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>`,
   mic: `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>`,
+  chat: `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>`,
+  close: `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>`,
+  send: `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>`,
+}
+
+/**
+ * Create the chat panel HTML
+ */
+function createChatPanelHTML(): string {
+  const chipsHTML = selectedElements.length > 0
+    ? selectedElements.map(el => `
+        <div class="chip" data-id="${el.id}">
+          <span class="chip-tag">&lt;${el.tagName}&gt;</span>
+          <span class="chip-label">${el.label}</span>
+          <button class="chip-remove" data-id="${el.id}" title="Remove">
+            ${ICONS.close}
+          </button>
+        </div>
+      `).join('')
+    : '<div class="empty-state">Select elements to add them here</div>'
+
+  return `
+    <div id="cluso-chat-panel" data-cluso-ui="1">
+      <div class="chat-header">
+        <h3>Selected Elements</h3>
+        <button id="cluso-chat-close" title="Close">
+          ${ICONS.close}
+        </button>
+      </div>
+      <div class="chips-container" id="cluso-chips">
+        ${chipsHTML}
+      </div>
+      <div class="chat-input-container">
+        <input type="text" class="chat-input" id="cluso-chat-input" placeholder="Ask about these elements..." />
+        <button class="send-button" id="cluso-chat-send" title="Send">
+          ${ICONS.send}
+        </button>
+      </div>
+    </div>
+  `
 }
 
 /**
  * Create the toolbar HTML
  */
 function createToolbarHTML(isConnected: boolean): string {
+  const badgeHTML = selectedElements.length > 0
+    ? `<span class="badge">${selectedElements.length}</span>`
+    : ''
+  const hasItemsClass = selectedElements.length > 0 ? 'has-items' : ''
+
   return `
+    ${createChatPanelHTML()}
     <div id="cluso-toolbar" data-cluso-ui="1">
       <div class="cluso-logo">C</div>
       <div class="toolbar-group">
@@ -179,6 +423,10 @@ function createToolbarHTML(isConnected: boolean): string {
         </button>
       </div>
       <div class="separator"></div>
+      <button id="cluso-btn-chat" class="chat-toggle ${hasItemsClass}" title="View selected elements">
+        ${ICONS.chat}
+        ${badgeHTML}
+      </button>
       <button id="cluso-btn-mic" class="mic-button" title="Voice input">
         ${ICONS.mic}
       </button>
@@ -245,6 +493,85 @@ export function toggleToolbar(): boolean {
 }
 
 /**
+ * Toggle chat panel visibility
+ */
+function toggleChat(): void {
+  const panel = document.getElementById('cluso-chat-panel')
+  if (!panel) return
+
+  isChatOpen = !isChatOpen
+  panel.classList.toggle('open', isChatOpen)
+
+  if (isChatOpen) {
+    // Focus the input when opening
+    setTimeout(() => {
+      const input = document.getElementById('cluso-chat-input') as HTMLInputElement
+      input?.focus()
+    }, 100)
+  }
+}
+
+/**
+ * Update the chips display
+ */
+function updateChipsDisplay(): void {
+  const chipsContainer = document.getElementById('cluso-chips')
+  const chatToggle = document.getElementById('cluso-btn-chat')
+
+  if (chipsContainer) {
+    if (selectedElements.length > 0) {
+      chipsContainer.innerHTML = selectedElements.map(el => `
+        <div class="chip" data-id="${el.id}">
+          <span class="chip-tag">&lt;${el.tagName}&gt;</span>
+          <span class="chip-label">${el.label}</span>
+          <button class="chip-remove" data-id="${el.id}" title="Remove">
+            ${ICONS.close}
+          </button>
+        </div>
+      `).join('')
+
+      // Re-attach remove listeners
+      chipsContainer.querySelectorAll('.chip-remove').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation()
+          const id = (btn as HTMLElement).dataset.id
+          if (id) removeSelectedElement(id)
+        })
+      })
+    } else {
+      chipsContainer.innerHTML = '<div class="empty-state">Select elements to add them here</div>'
+    }
+  }
+
+  // Update badge
+  if (chatToggle) {
+    const existingBadge = chatToggle.querySelector('.badge')
+    if (selectedElements.length > 0) {
+      chatToggle.classList.add('has-items')
+      if (existingBadge) {
+        existingBadge.textContent = String(selectedElements.length)
+      } else {
+        const badge = document.createElement('span')
+        badge.className = 'badge'
+        badge.textContent = String(selectedElements.length)
+        chatToggle.appendChild(badge)
+      }
+    } else {
+      chatToggle.classList.remove('has-items')
+      existingBadge?.remove()
+    }
+  }
+}
+
+/**
+ * Remove a selected element by ID
+ */
+function removeSelectedElement(id: string): void {
+  selectedElements = selectedElements.filter(el => el.id !== id)
+  updateChipsDisplay()
+}
+
+/**
  * Attach event listeners to toolbar buttons
  */
 function attachEventListeners(): void {
@@ -252,17 +579,63 @@ function attachEventListeners(): void {
   const btnSelect = document.getElementById('cluso-btn-select')
   const btnMove = document.getElementById('cluso-btn-move')
   const btnMic = document.getElementById('cluso-btn-mic')
+  const btnChat = document.getElementById('cluso-btn-chat')
+  const btnChatClose = document.getElementById('cluso-chat-close')
+  const btnChatSend = document.getElementById('cluso-chat-send')
+  const chatInput = document.getElementById('cluso-chat-input') as HTMLInputElement
 
   btnScreen?.addEventListener('click', () => toggleMode('screen'))
   btnSelect?.addEventListener('click', () => toggleMode('select'))
   btnMove?.addEventListener('click', () => toggleMode('move'))
   btnMic?.addEventListener('click', toggleMic)
+  btnChat?.addEventListener('click', toggleChat)
+  btnChatClose?.addEventListener('click', toggleChat)
 
-  // ESC key to cancel mode
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && currentMode !== 'none') {
-      setMode('none')
+  // Chat input handling
+  chatInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleChatSend()
     }
+  })
+  btnChatSend?.addEventListener('click', handleChatSend)
+
+  // Chip remove buttons
+  document.querySelectorAll('.chip-remove').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      const id = (btn as HTMLElement).dataset.id
+      if (id) removeSelectedElement(id)
+    })
+  })
+
+  // ESC key to cancel mode or close chat
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (isChatOpen) {
+        toggleChat()
+      } else if (currentMode !== 'none') {
+        setMode('none')
+      }
+    }
+  })
+}
+
+/**
+ * Handle sending a chat message
+ */
+function handleChatSend(): void {
+  const input = document.getElementById('cluso-chat-input') as HTMLInputElement
+  if (!input?.value.trim()) return
+
+  const message = input.value.trim()
+  input.value = ''
+
+  // Send to background for processing
+  chrome.runtime.sendMessage({
+    type: 'chat-message',
+    message,
+    elements: selectedElements,
   })
 }
 
@@ -352,4 +725,58 @@ export function isVisible(): boolean {
  */
 export function getMode(): string {
   return currentMode
+}
+
+/**
+ * Add a selected element to the chat panel
+ */
+export function addSelectedElement(element: {
+  tagName: string
+  id?: string
+  className?: string
+  text?: string
+}): void {
+  // Generate a unique ID for this selection
+  const uniqueId = `el-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+
+  // Create a label from the element info
+  let label = ''
+  if (element.id) {
+    label = `#${element.id}`
+  } else if (element.className) {
+    const firstClass = element.className.split(' ')[0]
+    label = `.${firstClass}`
+  } else if (element.text) {
+    label = element.text.substring(0, 20) + (element.text.length > 20 ? '...' : '')
+  } else {
+    label = element.tagName.toLowerCase()
+  }
+
+  selectedElements.push({
+    id: uniqueId,
+    tagName: element.tagName.toLowerCase(),
+    label,
+  })
+
+  updateChipsDisplay()
+
+  // Auto-open chat panel when first element is added
+  if (selectedElements.length === 1 && !isChatOpen) {
+    toggleChat()
+  }
+}
+
+/**
+ * Clear all selected elements
+ */
+export function clearSelectedElements(): void {
+  selectedElements = []
+  updateChipsDisplay()
+}
+
+/**
+ * Get selected elements count
+ */
+export function getSelectedElementsCount(): number {
+  return selectedElements.length
 }

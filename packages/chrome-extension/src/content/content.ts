@@ -17,6 +17,8 @@ import {
   toggleToolbar,
   updateConnectionStatus,
   isVisible as isToolbarVisible,
+  addSelectedElement,
+  clearSelectedElements,
 } from './toolbar'
 
 // Track inspector state
@@ -115,6 +117,15 @@ function handleClick(event: MouseEvent): void {
   chrome.runtime.sendMessage({
     type: 'element-selected',
     element: elementInfo,
+  })
+
+  // Add to floating toolbar's chat panel
+  const htmlEl = target as HTMLElement
+  addSelectedElement({
+    tagName: target.tagName,
+    id: target.id || undefined,
+    className: target.className || undefined,
+    text: htmlEl.innerText?.substring(0, 50) || undefined,
   })
 
   // Show selection overlay
@@ -268,6 +279,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     case 'clear-selection':
       clearSelection()
+      clearSelectedElements()
       sendResponse({ success: true })
       break
 
