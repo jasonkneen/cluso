@@ -1,0 +1,35 @@
+{
+  "name": "@ai-cluso/shared-inspector",
+  "version": "1.0.0",
+  "description": "DOM inspection and element selection for ai-cluso applications",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./scripts": {
+      "types": "./dist/scripts.d.ts",
+      "import": "./dist/scripts.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@ai-cluso/shared-types": "file:../shared-types"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

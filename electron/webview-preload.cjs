@@ -437,6 +437,7 @@ let isScreenshotActive = false
 let isMoveActive = false
 let multipleMatches = [] // Store multiple AI-selected elements
 let numberBadges = [] // Store number badge elements
+let selectionTrackRaf = null // requestAnimationFrame id for selection tracking
 
 // Move mode state - support multiple overlays
 let moveOverlays = [] // Array of { overlay, element, originalRect, elementData, positionLabel, initialScrollX, initialScrollY }
@@ -455,20 +456,24 @@ let rectStartY = 0
 let currentHovered = null
 
 // --- Animated Overlay Helper Functions ---
+function markClusoUi(el) {
+  try {
+    if (!el || !el.setAttribute) return
+    el.setAttribute('data-cluso-ui', '1')
+  } catch (e) {}
+}
+
 function ensureOverlays() {
   if (!document.getElementById('cluso-hover-overlay')) {
     const hover = document.createElement('div')
     hover.id = 'cluso-hover-overlay'
+    markClusoUi(hover)
     document.body.appendChild(hover)
-  }
-  if (!document.getElementById('cluso-selection-overlay')) {
-    const sel = document.createElement('div')
-    sel.id = 'cluso-selection-overlay'
-    document.body.appendChild(sel)
   }
   if (!document.getElementById('cluso-rect-selection')) {
     const rect = document.createElement('div')
     rect.id = 'cluso-rect-selection'
+    markClusoUi(rect)
     document.body.appendChild(rect)
   }
 }
@@ -485,6 +490,7 @@ function updateHoverOverlay(element) {
   const overlay = document.getElementById('cluso-hover-overlay')
   if (!element) {
     overlay.classList.remove('visible')
+    overlay.classList.remove('selected')
     return
   }
   const rect = element.getBoundingClientRect()
@@ -496,15 +502,68 @@ function updateHoverOverlay(element) {
 }
 
 function updateSelectionOverlay(element) {
+  // Intentionally disabled: we use the single dotted overlay (#cluso-hover-overlay)
+  // for selection so we don't mutate target elements or show a "double selector".
+}
+
+function renderInspectorOverlay() {
   ensureOverlays()
-  const overlay = document.getElementById('cluso-selection-overlay')
-  if (!element) {
+  const overlay = document.getElementById('cluso-hover-overlay')
+  if (!overlay) return
+
+  const target = currentHovered || currentSelected
+  if (!target) {
     overlay.classList.remove('visible')
+    overlay.classList.remove('selected')
     return
   }
-  const rect = element.getBoundingClientRect()
-  positionOverlay(overlay, rect)
+
+  try {
+    const rect = target.getBoundingClientRect()
+    positionOverlay(overlay, rect)
+  } catch (e) {
+    // ignore
+  }
+
+  overlay.classList.remove('screenshot-mode', 'move-mode')
+  if (isScreenshotActive) overlay.classList.add('screenshot-mode')
+  if (isMoveActive) overlay.classList.add('move-mode')
+
+  // "Selected" styling only when we're showing the selected element (not a different hover target).
+  const showSelected = !!(isInspectorActive && currentSelected && (!currentHovered || currentHovered === currentSelected))
+  overlay.classList.toggle('selected', showSelected)
   overlay.classList.add('visible')
+}
+
+function startSelectionTracking() {
+  if (selectionTrackRaf != null) return
+  const tick = () => {
+    // Stop if inspector is off, or nothing to track
+    if (!isInspectorActive || (!currentSelected && !currentHovered)) {
+      stopSelectionTracking()
+      return
+    }
+    try {
+      const target = currentHovered || currentSelected
+      if (target && document.contains(target)) {
+        renderInspectorOverlay()
+      } else {
+        if (target === currentHovered) currentHovered = null
+        if (target === currentSelected) currentSelected = null
+        if (!currentSelected && !currentHovered) stopSelectionTracking()
+      }
+    } catch (e) {}
+    selectionTrackRaf = requestAnimationFrame(tick)
+  }
+  selectionTrackRaf = requestAnimationFrame(tick)
+}
+
+function stopSelectionTracking() {
+  if (selectionTrackRaf == null) return
+  try {
+    cancelAnimationFrame(selectionTrackRaf)
+  } catch (e) {}
+  selectionTrackRaf = null
 }
 
 function hideAllOverlays() {
@@ -547,6 +606,7 @@ function getElementsInRect(x1, y1, x2, y2) {
 function injectStyles() {
   const style = document.createElement('style')
   style.id = 'inspector-styles'
+  markClusoUi(style)
   style.textContent = `
     /* Animated overlay for inspector/screenshot/move hover */
     #cluso-hover-overlay {
@@ -557,10 +617,15 @@ function injectStyles() {
       box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15);
       z-index: 999998;
       opacity: 0;
-      transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+      transition: opacity 120ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 120ms cubic-bezier(0.4, 0, 0.2, 1), border-color 120ms cubic-bezier(0.4, 0, 0.2, 1), border-width 120ms cubic-bezier(0.4, 0, 0.2, 1);
     }
     #cluso-hover-overlay.visible {
       opacity: 1;
+    }
+    #cluso-hover-overlay.selected {
+      opacity: 1;
+      border-width: 3px;
+      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.18), 0 4px 12px rgba(59, 130, 246, 0.22);
     }
     #cluso-hover-overlay.screenshot-mode {
       border-color: #9333ea;
@@ -581,7 +646,7 @@ function injectStyles() {
       box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2), 0 4px 12px rgba(59, 130, 246, 0.3);
       z-index: 999999;
       opacity: 0;
-      transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+      transition: opacity 120ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 120ms cubic-bezier(0.4, 0, 0.2, 1), border-color 120ms cubic-bezier(0.4, 0, 0.2, 1), border-width 120ms cubic-bezier(0.4, 0, 0.2, 1);
     }
     #cluso-selection-overlay.visible {
       opacity: 1;
@@ -602,38 +667,7 @@ function injectStyles() {
       background-color: rgba(147, 51, 234, 0.1);
     }
 
-    /* Legacy class support - keep for backwards compatibility */
-    .inspector-hover-target {
-      outline: 2px dashed #3b82f6 !important;
-      outline-offset: -2px !important;
-      cursor: crosshair !important;
-      position: relative;
-      z-index: 10000;
-    }
-    .inspector-selected-target {
-      position: relative !important;
-      z-index: 9999 !important;
-    }
-    .inspector-selected-target::before {
-      content: '';
-      position: absolute;
-      top: -2px;
-      left: -2px;
-      right: -2px;
-      bottom: -2px;
-      border: 2px dashed rgba(59, 130, 246, 0.8);
-      pointer-events: none;
-      z-index: -1;
-      border-radius: 4px;
-    }
-    .screenshot-hover-target {
-      outline: 2px dashed #9333ea !important;
-      outline-offset: -2px !important;
-      cursor: crosshair !important;
-      background-color: rgba(147, 51, 234, 0.1) !important;
-      position: relative;
-      z-index: 10000;
-    }
+    /* Selection is indicated by the overlay (not by mutating target elements). */
     .element-number-badge {
       position: absolute;
       bottom: -10px;
@@ -947,16 +981,8 @@ document.addEventListener('mouseover', function(e) {
 
   // Update animated hover overlay
   currentHovered = e.target
-  updateHoverOverlay(e.target)
-
-  // Also add legacy class for backwards compatibility
-  if (isInspectorActive) {
-    e.target.classList.add('inspector-hover-target')
-  } else if (isScreenshotActive) {
-    e.target.classList.add('screenshot-hover-target')
-  } else if (isMoveActive) {
-    e.target.classList.add('move-hover-target')
-  }
+  renderInspectorOverlay()
+  if (isInspectorActive) startSelectionTracking()
 
   // Send hover info to host for element label display
   const summary = getElementSummary(e.target)
@@ -981,12 +1007,12 @@ document.addEventListener('mouseout', function(e) {
   // Only hide hover overlay if we're leaving the hovered element
   if (e.target === currentHovered) {
     currentHovered = null
-    updateHoverOverlay(null)
+    if (isInspectorActive && currentSelected) {
+      renderInspectorOverlay()
+    } else {
+      updateHoverOverlay(null)
+    }
   }
-
-  e.target.classList.remove('inspector-hover-target')
-  e.target.classList.remove('screenshot-hover-target')
-  e.target.classList.remove('move-hover-target')
 
   // Clear hover info
   ipcRenderer.sendToHost('inspector-hover-end')
@@ -1014,15 +1040,14 @@ document.addEventListener('click', async function(e) {
   console.log('[Inspector] Element selected:', summary.tagName, summary.id || summary.className, 'source:', sourceLocation?.summary || 'none')
 
   if (isInspectorActive) {
-    if (currentSelected) {
-      currentSelected.classList.remove('inspector-selected-target')
-    }
-    e.target.classList.add('inspector-selected-target')
-    e.target.classList.remove('inspector-hover-target')
     currentSelected = e.target
-
-    // Update animated selection overlay
-    updateSelectionOverlay(e.target)
+    currentHovered = null
+    // Use the single dotted overlay as the selection indicator (avoid mutating page DOM/classes)
+    ensureOverlays()
+    const overlay = document.getElementById('cluso-hover-overlay')
+    if (overlay) overlay.classList.add('selected')
+    renderInspectorOverlay()
+    startSelectionTracking()
 
     const payload = {
       element: { ...summary, xpath, sourceLocation },
@@ -1038,8 +1063,6 @@ document.addEventListener('click', async function(e) {
     console.log('[Inspector] Sending inspector-select:', payload.element.tagName, 'source:', payload.element.sourceLocation?.summary || 'none')
     ipcRenderer.sendToHost('inspector-select', payload)
   } else if (isScreenshotActive) {
-    e.target.classList.remove('screenshot-hover-target')
-
     const payload = {
       element: { ...summary, xpath, sourceLocation },
       rect: {
@@ -1171,15 +1194,37 @@ ipcRenderer.on('set-inspector-mode', (event, active) => {
   console.log('[Inspector] set-inspector-mode received:', active)
   isInspectorActive = active
   if (active) isScreenshotActive = false
+  // Ensure no legacy solid selection overlay remains visible/attached
+  try {
+    const sel = document.getElementById('cluso-selection-overlay')
+    if (sel) sel.remove()
+  } catch (e) {}
+  // Ensure we never leave marker classes on the page DOM
+  try {
+    document.querySelectorAll('.inspector-hover-target,.inspector-selected-target,.screenshot-hover-target,.move-hover-target')
+      .forEach(el => {
+        el.classList.remove('inspector-hover-target', 'inspector-selected-target', 'screenshot-hover-target', 'move-hover-target')
+      })
+  } catch (e) {}
+
+  // Set a global cursor for modes without mutating individual page nodes
+  try {
+    if (active) document.documentElement.style.cursor = 'crosshair'
+    else if (!isScreenshotActive && !isMoveActive) document.documentElement.style.cursor = ''
+  } catch (e) {}
 
   if (!active) {
     // Clean up all inspector UI when turning off
     if (currentSelected) {
-      currentSelected.classList.remove('inspector-selected-target')
       currentSelected.classList.remove('inspector-drag-over')
       currentSelected = null
     }
     currentHovered = null
+    stopSelectionTracking()
+    try {
+      const hover = document.getElementById('cluso-hover-overlay')
+      if (hover) hover.classList.remove('selected')
+    } catch (e) {}
     hideAllOverlays()
     hideDropLabel()
   }
@@ -1192,11 +1237,14 @@ ipcRenderer.on('set-screenshot-mode', (event, active) => {
     isInspectorActive = false
     // DON'T disable move mode or cleanup overlays - allow screenshot with moved elements
     if (currentSelected) {
-      currentSelected.classList.remove('inspector-selected-target')
       currentSelected = null
     }
     updateSelectionOverlay(null)
   }
+  try {
+    if (active) document.documentElement.style.cursor = 'crosshair'
+    else if (!isInspectorActive && !isMoveActive) document.documentElement.style.cursor = ''
+  } catch (e) {}
   if (!active) {
     hideAllOverlays()
   }
@@ -1209,7 +1257,6 @@ ipcRenderer.on('set-move-mode', (event, active) => {
     isInspectorActive = false
     // DON'T disable screenshot mode - allow both to work together
     if (currentSelected) {
-      currentSelected.classList.remove('inspector-selected-target')
       currentSelected = null
     }
   } else {
@@ -1217,17 +1264,62 @@ ipcRenderer.on('set-move-mode', (event, active) => {
     hideAllOverlays()
     cleanupAllMoveOverlays()
   }
+  try {
+    if (active) document.documentElement.style.cursor = 'move'
+    else if (!isInspectorActive && !isScreenshotActive) document.documentElement.style.cursor = ''
+  } catch (e) {}
 })
 
 // Clear selection on request
 ipcRenderer.on('clear-selection', () => {
   clearNumberBadges()
   if (currentSelected) {
-    currentSelected.classList.remove('inspector-selected-target')
     currentSelected = null
   }
   currentHovered = null
+  stopSelectionTracking()
+  try {
+    const hover = document.getElementById('cluso-hover-overlay')
+    if (hover) hover.classList.remove('selected')
+  } catch (e) {}
   hideAllOverlays()
+})
+
+// Select a layer element by elementNumber (from Layers panel) and mirror as an inspector selection
+ipcRenderer.on('select-layer-element-by-number', async (_event, elementNumber) => {
+  try {
+    const map = window.__layersElements
+    if (!map || !(map instanceof Map)) return
+    const el = map.get(elementNumber)
+    if (!el) return
+
+    currentSelected = el
+    ensureOverlays()
+    try {
+      const overlay = document.getElementById('cluso-hover-overlay')
+      if (overlay) overlay.classList.add('selected')
+    } catch (e) {}
+    updateHoverOverlay(el)
+    startSelectionTracking()
+    try {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    } catch (e) {}
+
+    // Send back a standard inspector-select payload so the host stays in sync
+    const summary = getElementSummary(el)
+    const rect = el.getBoundingClientRect()
+    const xpath = getXPath(el)
+    const sourceLocation = await getSourceLocation(el)
+    ipcRenderer.sendToHost('inspector-select', {
+      element: { ...summary, xpath, sourceLocation },
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+      rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+      source: 'layers',
+    })
+  } catch (e) {
+    console.warn('[Inspector] select-layer-element-by-number failed:', e?.message || e)
+  }
 })
 
 // Highlight element by number - for voice control
@@ -1240,18 +1332,15 @@ ipcRenderer.on('highlight-element-by-number', (event, elementNumber) => {
     if (index >= 0 && index < multipleMatches.length) {
       const element = multipleMatches[index]
 
-      // Clear previous selection highlight (keep numbers visible)
-      if (currentSelected && currentSelected !== element) {
-        currentSelected.classList.remove('inspector-selected-target')
-      }
-
-      // Highlight the selected element
-      element.classList.add('inspector-selected-target')
       currentSelected = element
+      ensureOverlays()
+      try {
+        const overlay = document.getElementById('cluso-hover-overlay')
+        if (overlay) overlay.classList.add('selected')
+      } catch (e) {}
+      updateHoverOverlay(element)
+      startSelectionTracking()
       element.scrollIntoView({ behavior: 'smooth', block: 'center' })
-
-      // Update animated selection overlay
-      updateSelectionOverlay(element)
 
       const summary = getElementSummary(element)
       const rect = element.getBoundingClientRect()
@@ -1295,12 +1384,15 @@ ipcRenderer.on('highlight-element-by-number', (event, elementNumber) => {
     const index = elementNumber - 1
     if (index >= 0 && index < multipleMatches.length) {
       const element = multipleMatches[index]
-      element.classList.add('inspector-selected-target')
       currentSelected = element
+      ensureOverlays()
+      try {
+        const overlay = document.getElementById('cluso-hover-overlay')
+        if (overlay) overlay.classList.add('selected')
+      } catch (e) {}
+      updateHoverOverlay(element)
+      startSelectionTracking()
       element.scrollIntoView({ behavior: 'smooth', block: 'center' })
-
-      // Update animated selection overlay
-      updateSelectionOverlay(element)
 
       const summary = getElementSummary(element)
       const rect = element.getBoundingClientRect()
@@ -1324,7 +1416,6 @@ ipcRenderer.on('highlight-element-by-number', (event, elementNumber) => {
 function clearNumberBadges() {
   numberBadges.forEach(badge => badge.remove())
   numberBadges = []
-  multipleMatches.forEach(el => el.classList.remove('inspector-selected-target'))
   multipleMatches = []
 }
 
@@ -1333,6 +1424,7 @@ function createNumberBadge(number) {
   const badge = document.createElement('div')
   badge.className = 'element-number-badge'
   badge.textContent = number
+  markClusoUi(badge)
   return badge
 }
 
@@ -1867,9 +1959,13 @@ ipcRenderer.on('select-element-by-selector', async (event, selector) => {
     // Clear previous selections
     clearNumberBadges()
     if (currentSelected) {
-      currentSelected.classList.remove('inspector-selected-target')
       currentSelected = null
     }
+    stopSelectionTracking()
+    try {
+      const hover = document.getElementById('cluso-hover-overlay')
+      if (hover) hover.classList.remove('selected')
+    } catch (e) {}
 
     // Find ALL matching elements
     const elements = document.querySelectorAll(selector)
@@ -1889,7 +1985,6 @@ ipcRenderer.on('select-element-by-selector', async (event, selector) => {
     const elementsData = []
     for (let index = 0; index < multipleMatches.length; index++) {
       const element = multipleMatches[index]
-      element.classList.add('inspector-selected-target')
 
       // Create and position number badge
       const badge = createNumberBadge(index + 1)
@@ -1956,6 +2051,7 @@ function showDropLabel(element, action) {
   if (!dropLabel) {
     dropLabel = document.createElement('div')
     dropLabel.className = 'drop-zone-label'
+    markClusoUi(dropLabel)
     document.body.appendChild(dropLabel)
   }
 
@@ -1980,6 +2076,7 @@ function createEditToolbar(element) {
 
   editToolbar = document.createElement('div')
   editToolbar.className = 'inspector-edit-toolbar'
+  markClusoUi(editToolbar)
 
   const acceptBtn = document.createElement('button')
   acceptBtn.className = 'inspector-edit-btn accept'
@@ -2201,6 +2298,7 @@ function createMoveOverlay(element, summary, xpath, sourceLocation) {
   // Create floating overlay
   const overlay = document.createElement('div')
   overlay.className = 'move-floating-overlay'
+  markClusoUi(overlay)
   overlay.style.left = rect.left + 'px'
   overlay.style.top = rect.top + 'px'
   overlay.style.width = rect.width + 'px'
@@ -2249,6 +2347,7 @@ function createMoveOverlay(element, summary, xpath, sourceLocation) {
     const handle = document.createElement('div')
     handle.className = 'move-resize-handle ' + pos
     handle.dataset.handle = pos
+    markClusoUi(handle)
     overlay.appendChild(handle)
   })
 
@@ -2257,6 +2356,7 @@ function createMoveOverlay(element, summary, xpath, sourceLocation) {
   // Create position label
   const positionLabel = document.createElement('div')
   positionLabel.className = 'move-position-label'
+  markClusoUi(positionLabel)
   document.body.appendChild(positionLabel)
 
   // Store overlay data with initial scroll position

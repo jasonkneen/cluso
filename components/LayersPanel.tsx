@@ -81,19 +81,25 @@ export const LayersPanel = ({
       {/* Content */}
       <div className="relative flex-1">
         <div className="absolute inset-0 overflow-y-auto overflow-x-hidden">
-          {isLoading ? (
-            <div className={`flex items-center justify-center h-32 text-sm ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-              Scanning elements...
-            </div>
-          ) : (
-            <ComponentTree
-              data={treeData}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              isDarkMode={isDarkMode}
-            />
-          )}
+          <ComponentTree
+            data={treeData}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            isDarkMode={isDarkMode}
+          />
         </div>
+        {isLoading && (
+          <div className="absolute inset-x-0 top-0 pointer-events-none">
+            <div
+              className={[
+                'mx-2 mt-2 rounded-md px-2 py-1 text-xs border backdrop-blur',
+                isDarkMode ? 'bg-black/30 text-neutral-300 border-white/10' : 'bg-white/70 text-stone-600 border-black/10',
+              ].join(' ')}
+            >
+              Scanning elements…
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Footer with element count */}

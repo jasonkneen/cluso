@@ -1,5 +1,99 @@
+/**
+ * Element selection and source mapping types
+ * Extracted from ai-cluso/types.ts for shared use
+ */
+
+/**
+ * Source location info for a React component
+ */
+export interface ComponentSource {
+  name: string
+  file: string
+  line: number
+  column: number
+}
+
+/**
+ * Source info extracted from an element (React fiber or RSC)
+ */
+export interface ElementSourceInfo {
+  sources: ComponentSource[]
+  summary: string // e.g., "App.tsx (45-120)"
+  isRSC?: boolean // True if source info came from RSC payload (Server Components)
+  componentStack?: ReactComponentInfo[]
+}
+
+/**
+ * React component info extracted from React fiber
+ * Based on bippy/react-grab patterns
+ */
+export interface ReactComponentInfo {
+  componentName: string | null
+  fileName: string | null
+  lineNumber: number | null
+  columnNumber: number | null
+  isServer?: boolean
+}
+
+/**
+ * Selected element information from the DOM inspector
+ */
+export interface SelectedElement {
+  tagName: string
+  text?: string
+  id?: string
+  className?: string
+  xpath?: string
+  outerHTML?: string
+  attributes?: Record<string, string>
+  computedStyle?: {
+    display?: string
+    position?: string
+    visibility?: string
+    color?: string
+    backgroundColor?: string
+    fontSize?: string
+  }
+  sourceLocation?: ElementSourceInfo | null
+  x?: number
+  y?: number
+  rect?: {
+    top: number
+    left: number
+    width: number
+    height: number
+  }
+  // Move mode - target position for repositioning
+  targetPosition?: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }
+  originalPosition?: {
+    top: number
+    left: number
+    width: number
+    height: number
+  }
+  // React fiber extraction (bippy-based) - rich component context
+  componentStack?: ReactComponentInfo[]
+  componentName?: string | null
+  fileName?: string | null
+  lineNumber?: number | null
+  columnNumber?: number | null
+  fullContext?: string | null // Formatted like react-grab output
+  hasFiber?: boolean
+}
+
+/**
+ * Element display type for styling
+ */
 export type ElementDisplay = 'block' | 'flex' | 'grid'
 
+/**
+ * Complete element styles for UI editor
+ */
 export interface ElementStyles {
   className: string
   cssOverrides: Record<string, string>
@@ -58,6 +152,9 @@ export interface ElementStyles {
   blur: number
 }
 
+/**
+ * Default element styles
+ */
 export const DEFAULT_ELEMENT_STYLES: ElementStyles = {
   className: '',
   cssOverrides: {},

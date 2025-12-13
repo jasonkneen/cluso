@@ -28,6 +28,10 @@
   "dependencies": {
     "@ai-cluso/fast-apply": "file:packages/fast-apply",
     "@ai-cluso/mgrep-local": "file:packages/mgrep-local",
+    "@ai-cluso/shared-audio": "file:packages/shared-audio",
+    "@ai-cluso/shared-inspector": "file:packages/shared-inspector",
+    "@ai-cluso/shared-tools": "file:packages/shared-tools",
+    "@ai-cluso/shared-types": "file:packages/shared-types",
     "@ai-sdk/anthropic": "^2.0.50",
     "@ai-sdk/google": "^2.0.44",
     "@ai-sdk/mcp": "^0.0.11",

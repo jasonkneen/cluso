@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Frame, FileText, Box, Type, MousePointer, Link2, FormInput, Image, List } from 'lucide-react'
 
 // Utility function for class names
@@ -66,16 +66,19 @@ interface TreeItemProps {
   onSelect: (node: TreeNode) => void
   selectedId: string | null
   isDarkMode: boolean
+  getIsExpanded: (id: string, level: number) => boolean
+  onToggleExpand: (id: string) => void
 }
 
-const TreeItem = ({ node, level, onSelect, selectedId, isDarkMode }: TreeItemProps) => {
-  const [isExpanded, setIsExpanded] = useState(level < 2) // Auto-expand first 2 levels
+const TreeItem = ({ node, level, onSelect, selectedId, isDarkMode, getIsExpanded, onToggleExpand }: TreeItemProps) => {
   const hasChildren = node.children && node.children.length > 0
   const isSelected = selectedId === node.id
+  const isExpanded = getIsExpanded(node.id, level)
 
   return (
     <>
       <div
+        data-tree-node-id={node.id}
         className={cn(
           'flex items-center gap-1 px-2 py-1 cursor-pointer text-sm rounded transition-colors',
           isSelected
@@ -93,7 +96,7 @@ const TreeItem = ({ node, level, onSelect, selectedId, isDarkMode }: TreeItemPro
           <button
             onClick={(e) => {
               e.stopPropagation()
-              setIsExpanded(!isExpanded)
+              onToggleExpand(node.id)
             }}
             className="flex items-center justify-center w-4 h-4 flex-shrink-0 opacity-60 hover:opacity-100"
           >
@@ -132,6 +135,8 @@ const TreeItem = ({ node, level, onSelect, selectedId, isDarkMode }: TreeItemPro
               onSelect={onSelect}
               selectedId={selectedId}
               isDarkMode={isDarkMode}
+              getIsExpanded={getIsExpanded}
+              onToggleExpand={onToggleExpand}
             />
           ))}
         </div>
@@ -141,8 +146,84 @@ const TreeItem = ({ node, level, onSelect, selectedId, isDarkMode }: TreeItemPro
 }
 
 export const ComponentTree = ({ data, selectedId, onSelect, isDarkMode = false }: ComponentTreeProps) => {
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
+  const seededRootIdRef = useRef<string | null>(null)
+
+  const autoExpandedIds = useMemo(() => {
+    if (!data) return new Set<string>()
+    const set = new Set<string>()
+    const visit = (node: TreeNode, level: number) => {
+      if (level < 2) set.add(node.id)
+      if (node.children) node.children.forEach(child => visit(child, level + 1))
+    }
+    visit(data, 0)
+    return set
+  }, [data])
+
+  const findPathToId = useMemo(() => {
+    if (!data) return null
+    const dfs = (node: TreeNode, targetId: string): string[] | null => {
+      if (node.id === targetId) return [node.id]
+      if (!node.children) return null
+      for (const child of node.children) {
+        const childPath = dfs(child, targetId)
+        if (childPath) return [node.id, ...childPath]
+      }
+      return null
+    }
+    return (targetId: string) => dfs(data, targetId)
+  }, [data])
+
+  useEffect(() => {
+    if (!data) return
+    if (seededRootIdRef.current === data.id) return
+    seededRootIdRef.current = data.id
+    setExpandedIds(new Set(autoExpandedIds))
+  }, [data, autoExpandedIds])
+
+  useEffect(() => {
+    if (!data) return
+    if (!selectedId) return
+    if (!findPathToId) return
+    const path = findPathToId(selectedId)
+    if (!path || path.length === 0) return
+
+    // Expand all ancestors so the selected node becomes visible.
+    setExpandedIds(prev => {
+      const next = new Set(prev)
+      // include root + all ancestors
+      for (const id of path.slice(0, -1)) next.add(id)
+      return next
+    })
+
+    // Scroll selected node into view (best-effort).
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-tree-node-id="${CSS.escape(selectedId)}"]`)
+      if (el && 'scrollIntoView' in el) {
+        try {
+          ;(el as HTMLElement).scrollIntoView({ block: 'nearest' })
+        } catch (e) {}
+      }
+    })
+  }, [data, selectedId, findPathToId])
+
   const handleSelect = (node: TreeNode) => {
     onSelect?.(node)
+  }
+
+  const handleToggleExpand = (id: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const isNodeExpanded = (node: TreeNode, level: number) => {
+    if (expandedIds.has(node.id)) return true
+    if (level < 2 && autoExpandedIds.has(node.id)) return true
+    return false
   }
 
   if (!data) {
@@ -164,6 +245,12 @@ export const ComponentTree = ({ data, selectedId, onSelect, isDarkMode = false }
         onSelect={handleSelect}
         selectedId={selectedId ?? null}
         isDarkMode={isDarkMode}
+        getIsExpanded={(id, level) => {
+          if (expandedIds.has(id)) return true
+          if (level < 2 && autoExpandedIds.has(id)) return true
+          return false
+        }}
+        onToggleExpand={handleToggleExpand}
       />
     </div>
   )

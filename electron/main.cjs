@@ -24,6 +24,7 @@ const registerVoiceHandlers = require('./ipc/voice-handlers.cjs')
 const registerAgentHandlers = require('./ipc/agent-handlers.cjs')
 const registerTabDataHandlers = require('./ipc/tab-data-handlers.cjs')
 const ptyServer = require('./pty-server.cjs')
+const extensionBridge = require('./extension-bridge.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -2208,6 +2209,10 @@ app.whenReady().then(async () => {
   // Start PTY WebSocket server for terminal support
   ptyServer.start(3001)
 
+  // Initialize Chrome extension bridge on port 3002
+  extensionBridge.initialize(mainWindow)
+  extensionBridge.registerHandlers(ipcMain)
+
   // Auto-load Fast Apply if it was enabled in previous session
   try {
     const fa = getFastApply()
@@ -2238,6 +2243,8 @@ app.on('window-all-closed', () => {
   mgrep.shutdown()
   // Stop PTY server
   ptyServer.stop()
+  // Cleanup extension bridge
+  extensionBridge.cleanup()
   if (process.platform !== 'darwin') {
     app.quit()
   }

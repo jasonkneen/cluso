@@ -34,6 +34,7 @@ import { generateTurnId } from './utils/turnUtils';
 import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler';
 import { PatchApprovalDialog } from './components/PatchApprovalDialog';
 import { LeftSidebar } from './components/LeftSidebar';
+import type { SelectedElementSourceSnippet } from './components/LeftSidebar';
 import type { TreeNode } from './components/ComponentTree';
 import { DEFAULT_ELEMENT_STYLES, type ElementStyles } from './types/elementStyles';
 
@@ -811,6 +812,7 @@ export default function App() {
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
   const selectedElementRef = useRef<SelectedElement | null>(null);
   useEffect(() => { selectedElementRef.current = selectedElement; }, [selectedElement]);
+  const [selectedElementSourceSnippet, setSelectedElementSourceSnippet] = useState<SelectedElementSourceSnippet>(null);
 
   // Steering Questions - must be before the useEffect that uses refreshQuestions
   const { questions, dismissQuestion, selectQuestion, refreshQuestions } = useSteeringQuestions();
@@ -839,21 +841,120 @@ export default function App() {
 
   // Left panel (Layers) state
   const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(false);
+  const isLeftPanelOpenRef = useRef(false);
+  useEffect(() => { isLeftPanelOpenRef.current = isLeftPanelOpen; }, [isLeftPanelOpen]);
   const [leftPanelWidth, setLeftPanelWidth] = useState(280);
   const [isLeftResizing, setIsLeftResizing] = useState(false);
   const [layersTreeData, setLayersTreeData] = useState<import('./components/ComponentTree').TreeNode | null>(null);
+  const layersTreeDataRef = useRef<import('./components/ComponentTree').TreeNode | null>(null);
+  useEffect(() => { layersTreeDataRef.current = layersTreeData; }, [layersTreeData]);
   const [selectedTreeNodeId, setSelectedTreeNodeId] = useState<string | null>(null);
   const [isLayersLoading, setIsLayersLoading] = useState(false);
+  const isLayersLoadingRef = useRef(false)
+  useEffect(() => { isLayersLoadingRef.current = isLayersLoading }, [isLayersLoading])
   const [multiViewportData, setMultiViewportData] = useState<Array<{ id: string; windowType: string; devicePresetId?: string }>>([]);
   const [selectedLayerElementNumber, setSelectedLayerElementNumber] = useState<number | null>(null)
   const [selectedLayerElementName, setSelectedLayerElementName] = useState<string | null>(null)
   const selectedLayerElementNumberRef = useRef<number | null>(null)
   useEffect(() => { selectedLayerElementNumberRef.current = selectedLayerElementNumber }, [selectedLayerElementNumber])
+  const layersTreeStaleRef = useRef(false)
 
   const [elementStyles, setElementStyles] = useState<ElementStyles>(DEFAULT_ELEMENT_STYLES)
   const elementStylesRef = useRef<ElementStyles>(DEFAULT_ELEMENT_STYLES)
   useEffect(() => { elementStylesRef.current = elementStyles }, [elementStyles])
   const applyElementStylesTimerRef = useRef<number | null>(null)
+  const [selectedLayerComputedStyles, setSelectedLayerComputedStyles] = useState<Record<string, string> | null>(null)
+  const [selectedLayerAttributes, setSelectedLayerAttributes] = useState<Record<string, string> | null>(null)
+  const [selectedLayerDataset, setSelectedLayerDataset] = useState<Record<string, string> | null>(null)
+  const [selectedLayerFontFamilies, setSelectedLayerFontFamilies] = useState<string[] | null>(null)
+  const [selectedLayerClassNames, setSelectedLayerClassNames] = useState<string[] | null>(null)
+
+  // Avoid referencing `isElectron` before it is initialized (it is declared later in this file).
+  const isElectronEnv = typeof window !== 'undefined' && !!window.electronAPI?.isElectron
+
+  const resolveSourceFilePath = useCallback((projectPath: string, raw: string) => {
+    let file = String(raw || '').trim()
+    if (!file) return { absPath: '', displayPath: '' }
+    try {
+      if (file.startsWith('http://') || file.startsWith('https://')) {
+        file = new URL(file).pathname
+      }
+    } catch (e) {
+      // ignore
+    }
+    file = file.split('?')[0]
+    file = file.replace(/^webpack-internal:\/\//, '')
+    file = file.replace(/^file:\/\//, '')
+    const displayPath = file
+    const isAbs =
+      file.startsWith('/') ||
+      file.startsWith('C:\\') ||
+      file.startsWith('D:\\') ||
+      file.startsWith('E:\\')
+    const absPath = isAbs ? file : `${projectPath}/${file.replace(/^\/+/, '')}`.replace(/\/{2,}/g, '/')
+    return { absPath, displayPath }
+  }, [])
+
+  const getCodeLanguageFromPath = useCallback((path: string) => {
+    const ext = (path.split('.').pop() || '').toLowerCase()
+    if (ext === 'tsx') return 'tsx'
+    if (ext === 'ts') return 'typescript'
+    if (ext === 'jsx') return 'jsx'
+    if (ext === 'js') return 'javascript'
+    if (ext === 'html' || ext === 'htm') return 'html'
+    if (ext === 'css') return 'css'
+    if (ext === 'json') return 'json'
+    if (ext === 'md' || ext === 'markdown') return 'markdown'
+    return 'tsx'
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const src0 = selectedElement?.sourceLocation?.sources?.[0] as { file?: string; line?: number } | undefined
+    const rawFile = src0?.file
+    const rawLine = src0?.line
+    const projectPath = activeTab.projectPath
+
+    if (!isElectronEnv || !projectPath || !rawFile || !rawLine) {
+      setSelectedElementSourceSnippet(null)
+      return
+    }
+
+    const { absPath, displayPath } = resolveSourceFilePath(projectPath, rawFile)
+    if (!absPath) {
+      setSelectedElementSourceSnippet(null)
+      return
+    }
+
+    fileService.readFileFull(absPath).then((result: { success: boolean; data?: string; error?: string }) => {
+      if (cancelled) return
+      if (!result.success || typeof result.data !== 'string') {
+        setSelectedElementSourceSnippet(null)
+        return
+      }
+
+      const allLines = result.data.split('\n')
+      const focusLine = Math.max(1, Math.min(allLines.length, Number(rawLine) || 1))
+      const startLine = Math.max(1, focusLine - 12)
+      const endLine = Math.min(allLines.length, focusLine + 28)
+      const code = allLines.slice(startLine - 1, endLine).join('\n')
+
+      setSelectedElementSourceSnippet({
+        filePath: absPath,
+        displayPath,
+        startLine,
+        focusLine,
+        language: getCodeLanguageFromPath(displayPath),
+        code,
+      })
+    }).catch(() => {
+      if (!cancelled) setSelectedElementSourceSnippet(null)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedElement?.sourceLocation?.sources?.[0]?.file, selectedElement?.sourceLocation?.sources?.[0]?.line, activeTab.projectPath, isElectronEnv, resolveSourceFilePath, getCodeLanguageFromPath])
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -2334,6 +2435,7 @@ export default function App() {
         numberedElements.forEach((el, i) => {
           const badge = document.createElement('div');
           badge.className = 'element-number-badge';
+          badge.setAttribute('data-cluso-ui', '1');
           badge.textContent = String(i + 1);
           badge.style.cssText = 'position:absolute;background:#3b82f6;color:white;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;z-index:99999;pointer-events:none;';
           const rect = el.getBoundingClientRect();
@@ -2432,6 +2534,28 @@ export default function App() {
           const importantTags = new Set(['button', 'a', 'input', 'textarea', 'select', 'img', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'form', 'nav', 'header', 'footer', 'main', 'section', 'article', 'aside', 'ul', 'ol', 'table']);
           const containerTags = new Set(['div', 'span', 'li', 'p', 'label', 'td', 'tr', 'th']);
 
+          function getXPath(el) {
+            try {
+              if (!el) return '';
+              if (el.id) return '//*[@id=\"' + String(el.id).replace(/\"/g, '') + '\"]';
+              const parts = [];
+              let node = el;
+              while (node && node.nodeType === 1) {
+                let idx = 1;
+                let sib = node.previousSibling;
+                while (sib) {
+                  if (sib.nodeType === 1 && sib.tagName === node.tagName) idx++;
+                  sib = sib.previousSibling;
+                }
+                parts.unshift(node.tagName.toLowerCase() + '[' + idx + ']');
+                node = node.parentNode;
+              }
+              return '/' + parts.join('/');
+            } catch (e) {
+              return '';
+            }
+          }
+
           function getElementType(el) {
             const tagName = el.tagName.toLowerCase();
             if (tagName === 'button' || el.getAttribute('role') === 'button') return 'button';
@@ -2444,13 +2568,61 @@ export default function App() {
             return 'component';
           }
 
+          const markerClasses = new Set([
+            'inspector-hover-target',
+            'inspector-selected-target',
+            'screenshot-hover-target',
+            'move-hover-target',
+            'inspector-drag-over',
+            'move-original-hidden',
+            'cluso-highlighted',
+          ]);
+
           function getElementName(el) {
             const tagName = el.tagName.toLowerCase();
-            const text = el.innerText?.substring(0, 30)?.trim();
+            function getCleanClassToken(node) {
+              const cls = String(node.className || '');
+              if (!cls) return '';
+              const tokens = cls.split(/\s+/).map(s => s.trim()).filter(Boolean);
+              const clean = tokens.filter(t => !markerClasses.has(t));
+              return clean[0] || '';
+            }
+
+            function getCleanText(node, maxLen = 30) {
+              try {
+                const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
+                  acceptNode(textNode) {
+                    const parent = textNode.parentElement;
+                    if (!parent) return NodeFilter.FILTER_REJECT;
+                    if (parent.closest && parent.closest('[data-cluso-ui="1"]')) return NodeFilter.FILTER_REJECT;
+                    const pCls = String(parent.className || '');
+                    if (pCls.includes('element-number-badge')) return NodeFilter.FILTER_REJECT;
+                    if (pCls.includes('inspector-edit-toolbar') || pCls.includes('inspector-edit-btn')) return NodeFilter.FILTER_REJECT;
+                    if (pCls.includes('drop-zone-label')) return NodeFilter.FILTER_REJECT;
+                    if (pCls.includes('move-floating-overlay') || pCls.includes('move-resize-handle') || pCls.includes('move-position-label')) return NodeFilter.FILTER_REJECT;
+                    const txt = (textNode.textContent || '').trim();
+                    if (!txt) return NodeFilter.FILTER_REJECT;
+                    return NodeFilter.FILTER_ACCEPT;
+                  }
+                });
+                let out = '';
+                while (walker.nextNode()) {
+                  const t = String(walker.currentNode.textContent || '').replace(/\s+/g, ' ').trim();
+                  if (!t) continue;
+                  out = (out ? (out + ' ' + t) : t);
+                  if (out.length >= maxLen) break;
+                }
+                return out.substring(0, maxLen).trim();
+              } catch (e) {
+                return '';
+              }
+            }
+
+            const text = getCleanText(el, 30);
             const ariaLabel = el.getAttribute('aria-label');
             const placeholder = el.getAttribute('placeholder');
             const id = el.id;
-            const className = el.className?.split?.(' ')?.[0];
+            const className = getCleanClassToken(el);
 
             if (ariaLabel) return ariaLabel.substring(0, 30);
             if (text && text.length < 30 && !text.includes('\\n')) return text;
@@ -2462,10 +2634,34 @@ export default function App() {
 
           function isElementVisible(el) {
             const style = window.getComputedStyle(el);
-            return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+            if (style.display === 'none') return false;
+            if (style.opacity === '0') return false;
+            if (style.visibility === 'hidden') {
+              // Ignore our own temporary hiding class so Layers doesn't change due to inspector/move tooling.
+              const cls = String(el.className || '');
+              if (!cls.includes('move-original-hidden')) return false;
+            }
+            return true;
+          }
+
+          function isClusoUi(el) {
+            try {
+              if (!el) return false;
+              if (el.closest && el.closest('[data-cluso-ui="1"]')) return true;
+              const id = String(el.id || '');
+              if (id === 'cluso-hover-overlay' || id === 'cluso-selection-overlay' || id === 'cluso-rect-selection' || id === 'inspector-styles') return true;
+              const cls = String(el.className || '');
+              if (!cls) return false;
+              if (cls.includes('element-number-badge')) return true;
+              if (cls.includes('inspector-edit-toolbar') || cls.includes('inspector-edit-btn')) return true;
+              if (cls.includes('drop-zone-label')) return true;
+              if (cls.includes('move-floating-overlay') || cls.includes('move-resize-handle') || cls.includes('move-position-label')) return true;
+            } catch (e) {}
+            return false;
           }
 
           function shouldInclude(el) {
+            if (isClusoUi(el)) return false;
             if (!isElementVisible(el)) return false;
             const tagName = el.tagName.toLowerCase();
 
@@ -2477,7 +2673,7 @@ export default function App() {
             if (containerTags.has(tagName)) {
               const hasId = !!el.id;
               const hasMeaningfulClass = el.className && typeof el.className === 'string' &&
-                el.className.split(' ').some(c => c.length > 2 && !c.includes('__') && !c.includes('css-'));
+                el.className.split(' ').some(c => c && c.length > 2 && !markerClasses.has(c) && !c.includes('__') && !c.includes('css-'));
               const hasRole = !!el.getAttribute('role');
               const hasAriaLabel = !!el.getAttribute('aria-label');
               const hasDirectText = el.childNodes.length > 0 &&
@@ -2496,10 +2692,11 @@ export default function App() {
 
             const children = [];
             for (const child of el.children) {
+              if (isClusoUi(child)) continue;
               if (shouldInclude(child)) {
                 elementNumber++;
                 const node = {
-                  id: 'element-' + elementNumber,
+                  id: getXPath(child) || ('element-' + elementNumber),
                   name: getElementName(child),
                   type: getElementType(child),
                   tagName: child.tagName.toLowerCase(),
@@ -2546,11 +2743,14 @@ export default function App() {
       };
 
       setLayersTreeData(treeData);
+      layersTreeStaleRef.current = false
     } catch (err) {
       console.error('[Layers] Refresh error:', err);
     }
     setIsLayersLoading(false);
   }, [isWebviewReady, activeTabId, isMultiViewportMode, multiViewportData]);
+  const handleRefreshLayersRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  useEffect(() => { handleRefreshLayersRef.current = handleRefreshLayers; }, [handleRefreshLayers]);
 
   const handleTreeNodeSelect = useCallback(async (node: TreeNode) => {
     setSelectedTreeNodeId(node.id);
@@ -2570,6 +2770,13 @@ export default function App() {
       const webview = webviewRefs.current.get(activeTabId);
       if (!webview) return;
 
+      // Also sync selection into the inspector overlay for a unified experience
+      try {
+        webview.send('select-layer-element-by-number', node.elementNumber);
+      } catch (e) {
+        // ignore
+      }
+
       // Pull computed styles for the element to seed the properties panel
       try {
         const result = await webview.executeJavaScript(`
@@ -2581,6 +2788,85 @@ export default function App() {
 
             const rect = el.getBoundingClientRect();
             const cs = window.getComputedStyle(el);
+            const computedStyles = {};
+            try {
+              for (let i = 0; i < cs.length; i++) {
+                const prop = cs[i];
+                computedStyles[prop] = String(cs.getPropertyValue(prop) || '').trim();
+              }
+            } catch (e) {}
+
+            const attributes = {};
+            try {
+              for (const attr of Array.from(el.attributes || [])) {
+                if (!attr || !attr.name) continue;
+                attributes[attr.name] = String(attr.value ?? '');
+              }
+            } catch (e) {}
+
+            const dataset = {};
+            try {
+              const ds = el.dataset || {};
+              for (const k in ds) {
+                if (!Object.prototype.hasOwnProperty.call(ds, k)) continue;
+                dataset[k] = String(ds[k] ?? '');
+              }
+            } catch (e) {}
+
+            function addFamilies(set, raw) {
+              if (!raw) return;
+              const parts = String(raw)
+                .split(',')
+                .map(s => s.trim())
+                .filter(Boolean)
+                .map(s => s.replace(/^['\"]|['\"]$/g, ''));
+              for (const p of parts) {
+                if (p) set.add(p);
+              }
+            }
+
+            const fontFamiliesSet = new Set();
+            try {
+              addFamilies(fontFamiliesSet, cs.fontFamily);
+              const sheets = Array.from(document.styleSheets || []);
+              for (const sheet of sheets) {
+                let rules;
+                try { rules = sheet.cssRules; } catch (e) { continue; }
+                if (!rules) continue;
+                for (const rule of Array.from(rules)) {
+                  const t = rule.type;
+                  // CSSFontFaceRule
+                  if (t === 5 && rule.style) {
+                    addFamilies(fontFamiliesSet, rule.style.getPropertyValue('font-family'));
+                    continue;
+                  }
+                  // CSSStyleRule
+                  if (t === 1 && rule.style) {
+                    addFamilies(fontFamiliesSet, rule.style.fontFamily || rule.style.getPropertyValue('font-family'));
+                    continue;
+                  }
+                }
+              }
+            } catch (e) {}
+
+            const classNamesSet = new Set();
+            try {
+              const all = Array.from(document.querySelectorAll('[class]'));
+              for (const node of all) {
+                if (node.closest && node.closest('[data-cluso-ui="1"]')) continue;
+                const cls = node.className;
+                if (!cls) continue;
+                const tokens = String(cls).split(/\\s+/).map(s => s.trim()).filter(Boolean);
+                for (const t of tokens) {
+                  if (!t || t.length >= 80) continue;
+                  if (t === 'element-number-badge' || t === 'inspector-hover-target' || t === 'inspector-selected-target') continue;
+                  if (t === 'screenshot-hover-target' || t === 'move-hover-target') continue;
+                  if (t === 'drop-zone-label' || t === 'move-floating-overlay' || t === 'move-resize-handle' || t === 'move-position-label') continue;
+                  classNamesSet.add(t);
+                }
+                if (classNamesSet.size > 5000) break;
+              }
+            } catch (e) {}
 
             function px(v) {
               const n = parseFloat(String(v || '0'));
@@ -2602,14 +2888,16 @@ export default function App() {
 
             function parseTransform(transform) {
               const t = String(transform || '').trim();
-              if (!t || t === 'none') return { x: 0, y: 0, rotation: 0 };
+              if (!t || t === 'none') return { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1 };
               const m2 = t.match(/^matrix\\(([^)]+)\\)$/);
               if (m2) {
                 const parts = m2[1].split(',').map(s => parseFloat(s.trim()));
                 if (parts.length >= 6) {
-                  const [a, b, _c, _d, tx, ty] = parts;
+                  const [a, b, c, d, tx, ty] = parts;
                   const rotation = Math.round(Math.atan2(b, a) * (180 / Math.PI));
-                  return { x: Math.round(tx), y: Math.round(ty), rotation };
+                  const scaleX = Math.sign(a || 1) * Math.sqrt((a * a) + (b * b));
+                  const scaleY = Math.sign(d || 1) * Math.sqrt((c * c) + (d * d));
+                  return { x: Math.round(tx), y: Math.round(ty), rotation, scaleX: scaleX >= 0 ? 1 : -1, scaleY: scaleY >= 0 ? 1 : -1 };
                 }
               }
               const m3 = t.match(/^matrix3d\\(([^)]+)\\)$/);
@@ -2618,13 +2906,17 @@ export default function App() {
                 if (parts.length >= 16) {
                   const a = parts[0];
                   const b = parts[1];
+                  const c = parts[4];
+                  const d = parts[5];
                   const tx = parts[12];
                   const ty = parts[13];
                   const rotation = Math.round(Math.atan2(b, a) * (180 / Math.PI));
-                  return { x: Math.round(tx), y: Math.round(ty), rotation };
+                  const scaleX = Math.sign(a || 1) * Math.sqrt((a * a) + (b * b));
+                  const scaleY = Math.sign(d || 1) * Math.sqrt((c * c) + (d * d));
+                  return { x: Math.round(tx), y: Math.round(ty), rotation, scaleX: scaleX >= 0 ? 1 : -1, scaleY: scaleY >= 0 ? 1 : -1 };
                 }
               }
-              return { x: 0, y: 0, rotation: 0 };
+              return { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1 };
             }
 
             const transform = parseTransform(cs.transform);
@@ -2641,9 +2933,14 @@ export default function App() {
               success: true,
               styles: {
                 className: (el.className || ''),
+                cssOverrides: {},
+                attributeOverrides: {},
+                datasetOverrides: {},
                 x: transform.x,
                 y: transform.y,
                 rotation: transform.rotation,
+                scaleX: transform.scaleX,
+                scaleY: transform.scaleY,
                 width: Math.round(rect.width),
                 height: Math.round(rect.height),
                 display,
@@ -2652,81 +2949,99 @@ export default function App() {
                 alignItems: align,
                 gap: px(cs.gap),
                 padding: px(cs.paddingTop),
+                overflow: (cs.overflow === 'hidden' || cs.overflowX === 'hidden' || cs.overflowY === 'hidden') ? 'hidden' : 'visible',
+                boxSizing: cs.boxSizing === 'content-box' ? 'content-box' : 'border-box',
                 backgroundColor: rgbToHex(cs.backgroundColor),
                 opacity: Math.round(parseFloat(cs.opacity || '1') * 100),
                 borderRadius: px(cs.borderTopLeftRadius),
+                borderWidth: px(cs.borderTopWidth),
+                borderStyle: ['none', 'solid', 'dashed', 'dotted'].includes(cs.borderTopStyle) ? cs.borderTopStyle : 'solid',
+                borderColor: rgbToHex(cs.borderTopColor),
+                color: rgbToHex(cs.color),
+                fontFamily: String(cs.fontFamily || 'system-ui'),
+                fontSize: px(cs.fontSize),
+                fontWeight: Number.parseInt(String(cs.fontWeight || '400'), 10) || 400,
+                lineHeight: String(cs.lineHeight || '').trim() === 'normal' ? 0 : px(cs.lineHeight),
+                letterSpacing: String(cs.letterSpacing || '').trim() === 'normal' ? 0 : px(cs.letterSpacing),
+                textAlign: ['left', 'center', 'right', 'justify'].includes(cs.textAlign) ? cs.textAlign : 'left',
+                shadowEnabled: String(cs.boxShadow || '').trim() !== '' && String(cs.boxShadow || '').trim() !== 'none',
+                shadowVisible: String(cs.boxShadow || '').trim() !== '' && String(cs.boxShadow || '').trim() !== 'none',
+                shadowType: String(cs.boxShadow || '').includes('inset') ? 'inner' : 'drop',
+                shadowX: (function() {
+                  const m = String(cs.boxShadow || '').match(/(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px/);
+                  return m ? (parseFloat(m[1]) || 0) : 0;
+                })(),
+                shadowY: (function() {
+                  const m = String(cs.boxShadow || '').match(/(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px/);
+                  return m ? (parseFloat(m[2]) || 0) : 0;
+                })(),
+                shadowBlur: (function() {
+                  const m = String(cs.boxShadow || '').match(/(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px/);
+                  return m ? (parseFloat(m[3]) || 0) : 0;
+                })(),
+                shadowSpread: (function() {
+                  const m = String(cs.boxShadow || '').match(/(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px/);
+                  return m ? (parseFloat(m[4]) || 0) : 0;
+                })(),
+                shadowColor: (function() {
+                  const c = String(cs.boxShadow || '');
+                  const m = c.match(/(rgba?\\([^\\)]+\\)|#[0-9a-fA-F]{3,8})/);
+                  return m ? m[1] : 'rgba(0,0,0,0.25)';
+                })(),
+                blurType: (function() {
+                  const b = String(cs.backdropFilter || '').match(/blur\\(([-\\d.]+)px\\)/);
+                  if (b) return 'backdrop';
+                  return 'layer';
+                })(),
+                blurEnabled: (function() {
+                  const b = String(cs.backdropFilter || '').match(/blur\\(([-\\d.]+)px\\)/);
+                  const f = String(cs.filter || '').match(/blur\\(([-\\d.]+)px\\)/);
+                  return !!(b || f);
+                })(),
+                blurVisible: (function() {
+                  const b = String(cs.backdropFilter || '').match(/blur\\(([-\\d.]+)px\\)/);
+                  const f = String(cs.filter || '').match(/blur\\(([-\\d.]+)px\\)/);
+                  return !!(b || f);
+                })(),
+                blur: (function() {
+                  const b = String(cs.backdropFilter || '').match(/blur\\(([-\\d.]+)px\\)/);
+                  if (b) return (parseFloat(b[1]) || 0);
+                  const m = String(cs.filter || '').match(/blur\\(([-\\d.]+)px\\)/);
+                  return m ? (parseFloat(m[1]) || 0) : 0;
+                })(),
               }
+              ,
+              computedStyles,
+              attributes,
+              dataset,
+              fontFamilies: Array.from(fontFamiliesSet).slice(0, 200),
+              classNames: Array.from(classNamesSet).slice(0, 5000)
             };
           })()
         `);
         if (result?.success && result.styles) {
           setElementStyles((prev) => ({ ...prev, ...result.styles }))
+          setSelectedLayerComputedStyles(result.computedStyles || null)
+          setSelectedLayerAttributes(result.attributes || null)
+          setSelectedLayerDataset(result.dataset || null)
+          setSelectedLayerFontFamilies(Array.isArray(result.fontFamilies) ? result.fontFamilies : null)
+          setSelectedLayerClassNames(Array.isArray(result.classNames) ? result.classNames : null)
         }
       } catch (e) {
         console.warn('[Layers] Failed to read element styles:', e)
       }
-
-      const highlightCode = `
-        (function() {
-          const elementMap = window.__layersElements;
-          if (!elementMap || !(elementMap instanceof Map)) return { success: false };
-
-          const element = elementMap.get(${node.elementNumber});
-          if (!element) return { success: false };
-
-          // Get or create the highlight overlay
-          let overlay = document.getElementById('layers-highlight-overlay');
-          if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.id = 'layers-highlight-overlay';
-            overlay.style.cssText = \`
-              position: fixed;
-              pointer-events: none;
-              border: 3px solid #3b82f6;
-              border-radius: 8px;
-              box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
-              z-index: 999999;
-              transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-              opacity: 0;
-            \`;
-            document.body.appendChild(overlay);
-          }
-
-          // Get element position
-          const rect = element.getBoundingClientRect();
-          const padding = 4;
-
-          // Animate to new position
-          overlay.style.left = (rect.left - padding) + 'px';
-          overlay.style.top = (rect.top - padding) + 'px';
-          overlay.style.width = (rect.width + padding * 2) + 'px';
-          overlay.style.height = (rect.height + padding * 2) + 'px';
-          overlay.style.opacity = '1';
-
-          // Scroll element into view smoothly
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-          // Update position after scroll
-          setTimeout(() => {
-            const newRect = element.getBoundingClientRect();
-            overlay.style.left = (newRect.left - padding) + 'px';
-            overlay.style.top = (newRect.top - padding) + 'px';
-          }, 300);
-
-          return { success: true };
-        })()
-      `;
-
-      try {
-        await webview.executeJavaScript(highlightCode);
-      } catch (err) {
-        console.error('[Layers] Highlight error:', err);
-      }
     } else {
       setSelectedLayerElementNumber(null)
       setSelectedLayerElementName(null)
+      setSelectedLayerComputedStyles(null)
+      setSelectedLayerAttributes(null)
+      setSelectedLayerDataset(null)
+      setSelectedLayerFontFamilies(null)
+      setSelectedLayerClassNames(null)
     }
   }, [activeTabId, isMultiViewportMode]);
+  const handleTreeNodeSelectRef = useRef<(node: TreeNode) => void>(() => {});
+  useEffect(() => { handleTreeNodeSelectRef.current = handleTreeNodeSelect as unknown as (node: TreeNode) => void; }, [handleTreeNodeSelect]);
 
   const flushApplyElementStyles = useCallback(() => {
     if (applyElementStylesTimerRef.current) {
@@ -2744,9 +3059,16 @@ export default function App() {
     const s = elementStylesRef.current
     const payload = JSON.stringify({
       className: s.className,
+      cssOverrides: s.cssOverrides,
+      attributeOverrides: s.attributeOverrides,
+      datasetOverrides: s.datasetOverrides,
+      googleFonts: s.googleFonts,
+      fontFaces: s.fontFaces,
       x: s.x,
       y: s.y,
       rotation: s.rotation,
+      scaleX: s.scaleX,
+      scaleY: s.scaleY,
       width: s.width,
       height: s.height,
       display: s.display,
@@ -2755,9 +3077,33 @@ export default function App() {
       alignItems: s.alignItems,
       gap: s.gap,
       padding: s.padding,
+      overflow: s.overflow,
+      boxSizing: s.boxSizing,
       backgroundColor: s.backgroundColor,
       opacity: s.opacity,
       borderRadius: s.borderRadius,
+      borderWidth: s.borderWidth,
+      borderStyle: s.borderStyle,
+      borderColor: s.borderColor,
+      color: s.color,
+      fontFamily: s.fontFamily,
+      fontSize: s.fontSize,
+      fontWeight: s.fontWeight,
+      lineHeight: s.lineHeight,
+      letterSpacing: s.letterSpacing,
+      textAlign: s.textAlign,
+      shadowEnabled: s.shadowEnabled,
+      shadowVisible: s.shadowVisible,
+      shadowType: s.shadowType,
+      shadowX: s.shadowX,
+      shadowY: s.shadowY,
+      shadowBlur: s.shadowBlur,
+      shadowSpread: s.shadowSpread,
+      shadowColor: s.shadowColor,
+      blurEnabled: s.blurEnabled,
+      blurVisible: s.blurVisible,
+      blurType: s.blurType,
+      blur: s.blur,
     })
 
     try {
@@ -2773,9 +3119,93 @@ export default function App() {
             el.className = s.className;
           }
 
+          // Apply attribute/dataset overrides from the Properties section
+          const nextAttrs = (s.attributeOverrides && typeof s.attributeOverrides === 'object') ? s.attributeOverrides : {};
+          const prevAttrKeys = Array.isArray(el.__clusoAttrOverrideKeys) ? el.__clusoAttrOverrideKeys : [];
+          for (const k of prevAttrKeys) {
+            if (!(k in nextAttrs)) {
+              try { el.removeAttribute(k); } catch (e) {}
+            }
+          }
+          const appliedAttrKeys = [];
+          for (const k in nextAttrs) {
+            if (!Object.prototype.hasOwnProperty.call(nextAttrs, k)) continue;
+            const v = String(nextAttrs[k] ?? '');
+            try {
+              if (v === '') el.removeAttribute(k);
+              else el.setAttribute(k, v);
+              appliedAttrKeys.push(k);
+            } catch (e) {}
+          }
+          el.__clusoAttrOverrideKeys = appliedAttrKeys;
+
+          const nextDataset = (s.datasetOverrides && typeof s.datasetOverrides === 'object') ? s.datasetOverrides : {};
+          const prevDataKeys = Array.isArray(el.__clusoDataOverrideKeys) ? el.__clusoDataOverrideKeys : [];
+          for (const k of prevDataKeys) {
+            if (!(k in nextDataset)) {
+              try { delete el.dataset[k]; } catch (e) {}
+            }
+          }
+          const appliedDataKeys = [];
+          for (const k in nextDataset) {
+            if (!Object.prototype.hasOwnProperty.call(nextDataset, k)) continue;
+            const v = String(nextDataset[k] ?? '');
+            try {
+              if (v === '') delete el.dataset[k];
+              else el.dataset[k] = v;
+              appliedDataKeys.push(k);
+            } catch (e) {}
+          }
+          el.__clusoDataOverrideKeys = appliedDataKeys;
+
+          // Ensure Google fonts are loaded (document-scoped)
+          try {
+            const families = Array.isArray(s.googleFonts) ? s.googleFonts : [];
+            for (const fam of families) {
+              const family = String(fam || '').trim();
+              if (!family) continue;
+              const slug = family.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+              const id = 'cluso-google-font-' + slug;
+              if (!document.getElementById(id)) {
+                const link = document.createElement('link');
+                link.id = id;
+                link.rel = 'stylesheet';
+                const familyParam = encodeURIComponent(family).replace(/%20/g, '+');
+                link.href = 'https://fonts.googleapis.com/css2?family=' + familyParam + ':wght@100;200;300;400;500;600;700;800;900&display=swap';
+                document.head.appendChild(link);
+              }
+            }
+          } catch (e) {}
+
+          // Ensure @font-face rules exist for project/local fonts (document-scoped)
+          try {
+            const faces = Array.isArray(s.fontFaces) ? s.fontFaces : [];
+            let styleEl = document.getElementById('cluso-font-faces');
+            if (!styleEl) {
+              styleEl = document.createElement('style');
+              styleEl.id = 'cluso-font-faces';
+              document.head.appendChild(styleEl);
+            }
+            const seen = new Set();
+            const rules = [];
+            for (const face of faces) {
+              if (!face) continue;
+              const family = String(face.family || '').trim();
+              const srcUrl = String(face.srcUrl || '').trim();
+              if (!family || !srcUrl) continue;
+              const key = family + '|' + srcUrl;
+              if (seen.has(key)) continue;
+              seen.add(key);
+              const fmt = String(face.format || '').trim();
+              const fmtPart = fmt ? (' format(\\'' + fmt.replace(/'/g, '') + '\\')') : '';
+              rules.push(\"@font-face{font-family:'\" + family.replace(/'/g, \"\\\\'\") + \"';src:url('\" + srcUrl.replace(/'/g, \"\\\\'\") + \"')\" + fmtPart + \";font-display:swap;}\");
+            }
+            styleEl.textContent = rules.join('\\n');
+          } catch (e) {}
+
           el.style.width = s.width + 'px';
           el.style.height = s.height + 'px';
-          el.style.transform = 'translate(' + s.x + 'px, ' + s.y + 'px) rotate(' + s.rotation + 'deg)';
+          el.style.transform = 'translate(' + s.x + 'px, ' + s.y + 'px) rotate(' + s.rotation + 'deg) scale(' + (s.scaleX || 1) + ',' + (s.scaleY || 1) + ')';
 
           el.style.display = s.display;
           if (s.display === 'flex') {
@@ -2787,9 +3217,65 @@ export default function App() {
           el.style.gap = s.gap + 'px';
           el.style.padding = s.padding + 'px';
 
+          el.style.overflow = s.overflow;
+          el.style.boxSizing = s.boxSizing;
+
           el.style.backgroundColor = s.backgroundColor;
           el.style.opacity = String((s.opacity || 0) / 100);
           el.style.borderRadius = s.borderRadius + 'px';
+
+          el.style.borderWidth = (s.borderWidth || 0) + 'px';
+          el.style.borderStyle = s.borderStyle || (s.borderWidth ? 'solid' : 'none');
+          el.style.borderColor = s.borderColor || '';
+
+          el.style.color = s.color || '';
+          el.style.fontFamily = s.fontFamily || '';
+          el.style.fontSize = (s.fontSize || 0) ? (s.fontSize + 'px') : '';
+          el.style.fontWeight = s.fontWeight ? String(s.fontWeight) : '';
+          el.style.lineHeight = (s.lineHeight || 0) ? (s.lineHeight + 'px') : '';
+          el.style.letterSpacing = (s.letterSpacing || 0) ? (s.letterSpacing + 'px') : '';
+          el.style.textAlign = s.textAlign || '';
+
+          if (s.shadowEnabled && s.shadowVisible) {
+            const inset = (s.shadowType === 'inner') ? 'inset ' : '';
+            el.style.boxShadow = inset + (s.shadowX || 0) + 'px ' + (s.shadowY || 0) + 'px ' + (s.shadowBlur || 0) + 'px ' + (s.shadowSpread || 0) + 'px ' + (s.shadowColor || 'rgba(0,0,0,0.25)');
+          } else {
+            el.style.boxShadow = 'none';
+          }
+
+          if (s.blurEnabled && s.blurVisible && (s.blur || 0) > 0) {
+            if (s.blurType === 'backdrop') {
+              el.style.backdropFilter = 'blur(' + s.blur + 'px)';
+              el.style.filter = '';
+            } else {
+              el.style.filter = 'blur(' + s.blur + 'px)';
+              el.style.backdropFilter = '';
+            }
+          } else {
+            el.style.filter = '';
+            el.style.backdropFilter = '';
+          }
+
+          // Apply custom CSS overrides (e.g., from the CSS inspector tab)
+          const nextOverrides = (s.cssOverrides && typeof s.cssOverrides === 'object') ? s.cssOverrides : {};
+          const prevKeys = Array.isArray(el.__clusoCssOverrideKeys) ? el.__clusoCssOverrideKeys : [];
+          for (const k of prevKeys) {
+            if (!(k in nextOverrides)) {
+              el.style.removeProperty(k);
+            }
+          }
+          const appliedKeys = [];
+          for (const k in nextOverrides) {
+            if (!Object.prototype.hasOwnProperty.call(nextOverrides, k)) continue;
+            const v = String(nextOverrides[k] ?? '').trim();
+            if (!v) {
+              el.style.removeProperty(k);
+              continue;
+            }
+            el.style.setProperty(k, v);
+            appliedKeys.push(k);
+          }
+          el.__clusoCssOverrideKeys = appliedKeys;
 
           return { success: true };
         })()
@@ -2847,23 +3333,12 @@ export default function App() {
     document.addEventListener('mouseup', handleMouseUp);
   }, [leftPanelWidth]);
 
-  // Auto-refresh layers when URL changes, mode changes, or viewports change
+  // Mark Layers tree stale on navigation changes; refresh is user/event-driven only.
   useEffect(() => {
-    if (isLeftPanelOpen) {
-      // In multi-viewport mode, refresh when viewports change
-      if (isMultiViewportMode && multiViewportData.length > 0) {
-        handleRefreshLayers();
-        return;
-      }
-      // In single viewport mode, refresh when URL changes
-      if (isWebviewReady && activeTab.url) {
-        const timer = setTimeout(() => {
-          handleRefreshLayers();
-        }, 500);
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [activeTab.url, isLeftPanelOpen, isWebviewReady, isMultiViewportMode, multiViewportData]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (activeTab.url) layersTreeStaleRef.current = true
+  }, [activeTab.url])
+
+  // No auto-refresh on open; Layers refresh is selection/manual driven.
 
   // Handle get_page_elements tool - scans page for interactive elements
   // Supports hierarchical focusing: if an element is focused, only shows children of that element
@@ -2915,6 +3390,8 @@ export default function App() {
         function createBadge(number) {
           const badge = document.createElement('div');
           badge.className = 'element-number-badge';
+          badge.setAttribute('data-cluso-ui', '1');
+          badge.setAttribute('aria-hidden', 'true');
           badge.textContent = number;
           badge.style.cssText = 'position:absolute;top:-8px;left:-8px;width:20px;height:20px;background:#3b82f6;color:white;border-radius:50%;font-size:11px;font-weight:bold;display:flex;align-items:center;justify-content:center;z-index:999999;pointer-events:none;box-shadow:0 1px 3px rgba(0,0,0,0.3);';
           return badge;
@@ -2935,14 +3412,10 @@ export default function App() {
           // Only create badges if showBadges is true
           if (showBadges) {
             const badge = createBadge(num);
-
-            // Make element position relative if static
-            const pos = style.position;
-            if (pos === 'static') {
-              el.style.position = 'relative';
-            }
-
-            el.appendChild(badge);
+            const rect = el.getBoundingClientRect();
+            badge.style.top = (rect.top + window.scrollY - 8) + 'px';
+            badge.style.left = (rect.left + window.scrollX - 8) + 'px';
+            document.body.appendChild(badge);
           }
           numberedElements.push({ ...summarize(el, num), element: el });
         });
@@ -4181,6 +4654,49 @@ export default function App() {
   const setupWebviewHandlers = useCallback((tabId: string, webview: WebviewElement) => {
     console.log(`[Tab ${tabId}] Setting up webview event handlers`);
 
+    const syncInspectorSelectionToLayers = async (xpath: string, element: SelectedElement) => {
+      try {
+        if ((!layersTreeDataRef.current || layersTreeStaleRef.current) && !isLayersLoadingRef.current) {
+          await handleRefreshLayersRef.current?.();
+        }
+
+        const elementNumber = await webview.executeJavaScript(`
+          (function() {
+            const map = window.__layersElements;
+            if (!map || !(map instanceof Map)) return null;
+            const el = document.evaluate(${JSON.stringify(xpath)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+            if (!el) return null;
+            for (const entry of map.entries()) {
+              const num = entry[0];
+              const node = entry[1];
+              if (node === el) return num;
+            }
+            return null;
+          })()
+        `);
+
+        if (typeof elementNumber === 'number' && elementNumber > 0) {
+          const name =
+            (element?.text && String(element.text).trim().slice(0, 30)) ||
+            (element?.id ? `#${element.id}` : '') ||
+            (element?.className ? `.${String(element.className).split(' ')[0]}` : '') ||
+            `<${String(element?.tagName || 'element').toLowerCase()}>`;
+
+          handleTreeNodeSelectRef.current({
+            id: xpath,
+            name,
+            type: 'component',
+            tagName: String(element?.tagName || 'div').toLowerCase(),
+            elementNumber,
+          } as any);
+        } else {
+          setSelectedTreeNodeId(null);
+        }
+      } catch (e) {
+        console.warn('[Inspector→Layers] Failed to sync:', e);
+      }
+    };
+
     const handleDidNavigate = () => {
       const url = webview.getURL();
       console.log(`[Tab ${tabId}] Did navigate:`, url);
@@ -4221,7 +4737,7 @@ export default function App() {
       updateTab(tabId, { title: e.title });
     };
 
-    const handleIpcMessage = (event: { channel: string; args: unknown[] }) => {
+    const handleIpcMessage = async (event: { channel: string; args: unknown[] }) => {
       const { channel, args } = event;
 
       if (channel === 'inspector-hover') {
@@ -4230,7 +4746,7 @@ export default function App() {
       } else if (channel === 'inspector-hover-end') {
         setHoveredElement(null);
       } else if (channel === 'inspector-select') {
-        const data = args[0] as { element: SelectedElement; x: number; y: number; rect: unknown };
+        const data = args[0] as { element: SelectedElement; x: number; y: number; rect: unknown; source?: string };
         setSelectedElement({
           ...data.element,
           x: data.x,
@@ -4238,8 +4754,18 @@ export default function App() {
           rect: data.rect as SelectedElement['rect']
         });
         setHoveredElement(null); // Clear hover on selection
-        // Clear tree selection when selecting via inspector (different element source)
-        setSelectedTreeNodeId(null);
+
+        // If selection comes from Layers -> inspector sync, don't bounce back
+        if (data.source === 'layers') {
+          return;
+        }
+
+        // If the Layers/Properties panel is closed, don't auto-open it; just keep selection state.
+        if (!isLeftPanelOpenRef.current) return;
+
+        const xpath = data.element?.xpath;
+        if (!xpath) return;
+        await syncInspectorSelectionToLayers(xpath, data.element);
       } else if (channel === 'screenshot-select') {
         const data = args[0] as { element: SelectedElement; rect: { top: number; left: number; width: number; height: number } };
         setScreenshotElement(data.element);
@@ -7773,6 +8299,13 @@ If you're not sure what the user wants, ask for clarification.
               selectedElementNumber={selectedLayerElementNumber}
               styles={elementStyles}
               onStyleChange={handleElementStyleChange}
+              computedStyles={selectedLayerComputedStyles}
+              attributes={selectedLayerAttributes}
+              dataset={selectedLayerDataset}
+              fontFamilies={selectedLayerFontFamilies}
+              projectPath={activeTab.projectPath || null}
+              classNames={selectedLayerClassNames}
+              sourceSnippet={selectedElementSourceSnippet}
             />
             {/* Left resize handle */}
             <div
@@ -7863,10 +8396,56 @@ If you're not sure what the user wants, ask for clarification.
             >
           {/* Layers Toggle */}
           <button
-            onClick={() => {
-              setIsLeftPanelOpen(!isLeftPanelOpen);
-              if (!isLeftPanelOpen && !layersTreeData) {
-                handleRefreshLayers();
+            onClick={async () => {
+              const next = !isLeftPanelOpen;
+              setIsLeftPanelOpen(next);
+              if (next) {
+                setIsInspectorActive(true);
+                if ((!layersTreeDataRef.current || layersTreeStaleRef.current) && !isLayersLoadingRef.current) {
+                  await handleRefreshLayersRef.current?.();
+                }
+
+                // If an element is already selected (e.g. inspector used while panel was closed),
+                // sync the tree to that selection when opening.
+                try {
+                  const xpath = selectedElementRef.current?.xpath;
+                  const webview = webviewRefs.current.get(activeTabId);
+                  if (!xpath || !webview) return;
+
+                  const elementNumber = await webview.executeJavaScript(`
+                    (function() {
+                      const map = window.__layersElements;
+                      if (!map || !(map instanceof Map)) return null;
+                      const el = document.evaluate(${JSON.stringify(xpath)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                      if (!el) return null;
+                      for (const entry of map.entries()) {
+                        const num = entry[0];
+                        const node = entry[1];
+                        if (node === el) return num;
+                      }
+                      return null;
+                    })()
+                  `);
+
+                  if (typeof elementNumber === 'number' && elementNumber > 0) {
+                    const element = selectedElementRef.current as SelectedElement;
+                    const name =
+                      (element?.text && String(element.text).trim().slice(0, 30)) ||
+                      (element?.id ? `#${element.id}` : '') ||
+                      (element?.className ? `.${String(element.className).split(' ')[0]}` : '') ||
+                      `<${String(element?.tagName || 'element').toLowerCase()}>`;
+
+                    handleTreeNodeSelectRef.current({
+                      id: xpath,
+                      name,
+                      type: 'component',
+                      tagName: String(element?.tagName || 'div').toLowerCase(),
+                      elementNumber,
+                    } as any);
+                  }
+                } catch (e) {
+                  console.warn('[Layers Toggle] Failed to sync selection:', e);
+                }
               }
             }}
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isLeftPanelOpen ? (isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white') : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-300' : 'hover:bg-stone-200 text-stone-600')}`}

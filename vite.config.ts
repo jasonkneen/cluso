@@ -25,6 +25,11 @@ export default defineConfig(({ mode }) => {
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
+          // Workspace packages (dev): point to source so we don't require a prebuilt dist/.
+          '@ai-cluso/shared-tools': path.resolve(__dirname, 'packages/shared-tools/src/index.ts'),
+          '@ai-cluso/shared-inspector': path.resolve(__dirname, 'packages/shared-inspector/src/index.ts'),
+          '@ai-cluso/shared-types': path.resolve(__dirname, 'packages/shared-types/src/index.ts'),
+          '@ai-cluso/shared-audio': path.resolve(__dirname, 'packages/shared-audio/src/index.ts'),
           // Buffer polyfill for browser
           'buffer': 'buffer/',
         }
@@ -38,6 +43,13 @@ export default defineConfig(({ mode }) => {
         // Pre-bundle shiki to avoid 504 errors during HMR
         // Shiki dynamically imports themes/languages which can cause stale dep issues
         include: ['shiki', 'buffer'],
+        // Don't try to prebundle workspace packages via their package.json exports.
+        exclude: [
+          '@ai-cluso/shared-tools',
+          '@ai-cluso/shared-inspector',
+          '@ai-cluso/shared-types',
+          '@ai-cluso/shared-audio',
+        ],
       },
       css: {
         devSourcemap: true,

@@ -313,6 +313,8 @@ export const INJECTION_SCRIPT = `
     function createNumberBadge(number) {
       const badge = document.createElement('div');
       badge.className = 'element-number-badge';
+      badge.setAttribute('data-cluso-ui', '1');
+      badge.setAttribute('aria-hidden', 'true');
       badge.textContent = number;
       return badge;
     }
@@ -815,6 +817,8 @@ export const INJECTION_SCRIPT = `
       if (!dropLabel) {
         dropLabel = document.createElement('div');
         dropLabel.className = 'drop-zone-label';
+        dropLabel.setAttribute('data-cluso-ui', '1');
+        dropLabel.setAttribute('aria-hidden', 'true');
         document.body.appendChild(dropLabel);
       }
 
@@ -836,6 +840,8 @@ export const INJECTION_SCRIPT = `
 
       editToolbar = document.createElement('div');
       editToolbar.className = 'inspector-edit-toolbar';
+      editToolbar.setAttribute('data-cluso-ui', '1');
+      editToolbar.setAttribute('aria-hidden', 'true');
       editToolbar.innerHTML = \`
         <button class="edit-btn edit-accept" title="Accept">✓</button>
         <button class="edit-btn edit-reject" title="Reject">✗</button>

@@ -1,0 +1,25 @@
+{
+  "name": "@ai-cluso/shared-tools",
+  "version": "1.0.0",
+  "description": "Tool definitions and router for ai-cluso applications",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

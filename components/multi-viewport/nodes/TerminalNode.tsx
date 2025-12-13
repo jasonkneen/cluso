@@ -48,6 +48,24 @@ export const TerminalNode = memo(function TerminalNode({
   const initializedRef = useRef(false)
   const fitTimerRef = useRef<number | null>(null)
 
+  // Ensure Ghostty/xterm DOM uses CSS percentages (not pixel sizing)
+  const fixTerminalSizing = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    // Force common container nodes to fill available space.
+    const roots = container.querySelectorAll<HTMLElement>(
+      'canvas, .xterm, .xterm-screen, .xterm-viewport, .xterm-scroll-area, .terminal, .ghostty, .ghostty-terminal'
+    )
+    roots.forEach((el) => {
+      el.style.width = '100%'
+      el.style.height = '100%'
+      if (el.tagName.toLowerCase() === 'canvas') {
+        el.style.display = 'block'
+      }
+    })
+  }, [])
+
   // Initialize terminal - runs once on mount
   useEffect(() => {
     // Prevent double initialization from StrictMode
@@ -90,13 +108,8 @@ export const TerminalNode = memo(function TerminalNode({
         terminalRef.current = term
         fitAddonRef.current = fitAddon
 
-        // Force canvas to 100% (fit sets pixel values)
-        const canvas = containerRef.current?.querySelector('canvas')
-        if (canvas) {
-          canvas.style.display = 'block'
-          canvas.style.width = '100%'
-          canvas.style.height = '100%'
-        }
+        // Force Ghostty DOM to 100% sizing (fit sets pixel values)
+        fixTerminalSizing()
 
         // Connect to WebSocket PTY
         if (wsUrl && mounted) {
@@ -182,16 +195,6 @@ export const TerminalNode = memo(function TerminalNode({
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Force canvas to 100% dimensions (not pixels)
-  const fixCanvasSize = useCallback(() => {
-    const canvas = containerRef.current?.querySelector('canvas')
-    if (canvas) {
-      canvas.style.display = 'block'
-      canvas.style.width = '100%'
-      canvas.style.height = '100%'
-    }
-  }, [])
-
   // Fit terminal when size changes
   useEffect(() => {
     if (fitAddonRef.current) {
@@ -202,8 +205,8 @@ export const TerminalNode = memo(function TerminalNode({
       fitTimerRef.current = window.setTimeout(() => {
         // @ts-expect-error - fitAddon fit method
         fitAddonRef.current?.fit?.()
-        // Fix canvas size after fit (fit sets pixel values)
-        fixCanvasSize()
+        // Fix terminal sizing after fit (fit sets pixel values)
+        fixTerminalSizing()
         fitTimerRef.current = null
       }, 120)
       return () => {
@@ -213,7 +216,7 @@ export const TerminalNode = memo(function TerminalNode({
         }
       }
     }
-  }, [width, height, fixCanvasSize])
+  }, [width, height, fixTerminalSizing])
 
   // Title bar extras
   const titleBarExtra = (
@@ -257,7 +260,7 @@ export const TerminalNode = memo(function TerminalNode({
     >
       <div
         ref={containerRef}
-        className="w-full h-full overflow-hidden"
+        className="w-full h-full overflow-hidden pt-2 pl-2"
         style={{ backgroundColor: isDarkMode ? '#1e1e1e' : '#fafaf9' }}
       />
     </BaseNode>

@@ -4,6 +4,15 @@ import { LayersPanel } from './LayersPanel'
 import { PropertiesPanel } from './PropertiesPanel'
 import type { ElementStyles } from '../types/elementStyles'
 
+export type SelectedElementSourceSnippet = {
+  filePath: string
+  displayPath: string
+  startLine: number
+  focusLine: number
+  language: string
+  code: string
+} | null
+
 interface LeftSidebarProps {
   width: number
   isDarkMode: boolean
@@ -21,6 +30,14 @@ interface LeftSidebarProps {
 
   styles: ElementStyles
   onStyleChange: (key: keyof ElementStyles, value: ElementStyles[keyof ElementStyles]) => void
+
+  computedStyles?: Record<string, string> | null
+  attributes?: Record<string, string> | null
+  dataset?: Record<string, string> | null
+  fontFamilies?: string[] | null
+  projectPath?: string | null
+  classNames?: string[] | null
+  sourceSnippet?: SelectedElementSourceSnippet
 }
 
 const STORAGE_KEY = 'cluso-left-sidebar-tree-height'
@@ -39,6 +56,13 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   selectedElementNumber,
   styles,
   onStyleChange,
+  computedStyles,
+  attributes,
+  dataset,
+  fontFamilies,
+  projectPath,
+  classNames,
+  sourceSnippet,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const [treeHeight, setTreeHeight] = useState(() => {
@@ -134,6 +158,13 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           embedded
           selectedElementName={selectedElementName ?? null}
           selectedElementNumber={selectedElementNumber ?? null}
+          computedStyles={computedStyles ?? null}
+          attributes={attributes ?? null}
+          dataset={dataset ?? null}
+          fontFamilies={fontFamilies ?? null}
+          projectPath={projectPath ?? null}
+          classNames={classNames ?? null}
+          sourceSnippet={sourceSnippet ?? null}
         />
       </div>
     </div>
