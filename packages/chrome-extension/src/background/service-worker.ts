@@ -236,6 +236,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       })
       return true
 
+    case 'show-toolbar':
+      sendToActiveTab({ type: 'show-toolbar' }).then((response) => {
+        sendResponse(response)
+      }).catch((err) => {
+        sendResponse({ success: false, error: err.message })
+      })
+      return true
+
+    case 'hide-toolbar':
+      sendToActiveTab({ type: 'hide-toolbar' }).then((response) => {
+        sendResponse(response)
+      }).catch((err) => {
+        sendResponse({ success: false, error: err.message })
+      })
+      return true
+
+    case 'toggle-toolbar':
+      sendToActiveTab({ type: 'toggle-toolbar' }).then((response) => {
+        sendResponse(response)
+      }).catch((err) => {
+        sendResponse({ success: false, error: err.message })
+      })
+      return true
+
     default:
       sendResponse({ error: `Unknown message type: ${message.type}` })
   }

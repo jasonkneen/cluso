@@ -11,6 +11,14 @@ import {
   INSPECTOR_OVERLAY_STYLES,
 } from '@ai-cluso/shared-inspector'
 
+import {
+  showToolbar,
+  hideToolbar,
+  toggleToolbar,
+  updateConnectionStatus,
+  isVisible as isToolbarVisible,
+} from './toolbar'
+
 // Track inspector state
 let inspectorActive = false
 let hoverOverlay: HTMLDivElement | null = null
@@ -281,6 +289,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       })
 
       sendResponse({ elements: elementList })
+      break
+
+    case 'show-toolbar':
+      showToolbar()
+      sendResponse({ success: true, visible: true })
+      break
+
+    case 'hide-toolbar':
+      hideToolbar()
+      sendResponse({ success: true, visible: false })
+      break
+
+    case 'toggle-toolbar':
+      const visible = toggleToolbar()
+      sendResponse({ success: true, visible })
+      break
+
+    case 'update-connection-status':
+      updateConnectionStatus(message.connected ?? false)
+      sendResponse({ success: true })
       break
 
     default:

@@ -11,6 +11,7 @@ export function Popup() {
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const [isMicActive, setIsMicActive] = useState(false)
+  const [isToolbarVisible, setIsToolbarVisible] = useState(false)
 
   // Get initial state from background
   useEffect(() => {
@@ -66,6 +67,15 @@ export function Popup() {
     chrome.runtime.sendMessage({ type: 'clear-selection' })
   }, [])
 
+  // Toggle floating toolbar on the page
+  const handleToggleFloatingToolbar = useCallback(() => {
+    chrome.runtime.sendMessage({ type: 'toggle-toolbar' }, (response) => {
+      if (response?.success) {
+        setIsToolbarVisible(response.visible)
+      }
+    })
+  }, [])
+
   return (
     <div className="flex flex-col h-full bg-[#0f0f0f]">
       {/* Header */}
@@ -77,6 +87,19 @@ export function Popup() {
           <span className="font-semibold text-sm">Cluso</span>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleToggleFloatingToolbar}
+            className={`p-1.5 rounded-md transition-colors ${
+              isToolbarVisible
+                ? 'bg-blue-500/20 text-blue-400'
+                : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70'
+            }`}
+            title={isToolbarVisible ? 'Hide floating toolbar' : 'Show floating toolbar on page'}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
+            </svg>
+          </button>
           <div
             className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-yellow-500'}`}
             title={isConnected ? 'Connected to Cluso' : 'Standalone mode'}
