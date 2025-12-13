@@ -1035,6 +1035,31 @@ interface ElectronWindowAPI {
   onRegistryChanged: (callback: (windows: WindowEntry[]) => void) => () => void
 }
 
+// Extension Bridge API - Chrome extension communication
+interface ExtensionChatRequest {
+  requestId: string
+  message: string
+  elements: Array<{
+    id: string
+    tagName: string
+    label: string
+    fullInfo?: Record<string, unknown>
+  }>
+  pageUrl: string
+  pageTitle: string
+}
+
+interface ElectronExtensionBridgeAPI {
+  getStatus: () => Promise<{ connected: boolean; port: number }>
+  activateInspector: () => Promise<{ success: boolean }>
+  deactivateInspector: () => Promise<{ success: boolean }>
+  requestElements: () => Promise<{ success: boolean }>
+  sendChatResponse: (requestId: string, reply?: string, error?: string) => Promise<{ success: boolean }>
+  onSelection: (callback: (element: unknown) => void) => () => void
+  onPageElements: (callback: (elements: unknown[]) => void) => () => void
+  onChatRequest: (callback: (request: ExtensionChatRequest) => void) => () => void
+}
+
 interface ElectronAPI {
   git: ElectronGitAPI
   files: ElectronFilesAPI
@@ -1056,6 +1081,7 @@ interface ElectronAPI {
   mgrep?: ElectronMgrepAPI
   projectRunner?: ElectronProjectRunnerAPI
   window?: ElectronWindowAPI
+  extensionBridge?: ElectronExtensionBridgeAPI
   getWebviewPreloadPath: () => Promise<string>
   isElectron: boolean
 }

@@ -23,6 +23,7 @@ class ClusoClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempts = 0
   private maxReconnectAttempts = 5
+  private pendingRequests = new Map<string, { resolve: (value: { reply?: string; error?: string }) => void; timeout: ReturnType<typeof setTimeout> }>()
 
   async connect(): Promise<boolean> {
     try {
@@ -90,9 +91,57 @@ class ClusoClient {
         })
         break
 
+      case 'chat-response': {
+        // Handle chat response from Cluso
+        const requestId = message.requestId as string
+        const pending = this.pendingRequests.get(requestId)
+        if (pending) {
+          clearTimeout(pending.timeout)
+          this.pendingRequests.delete(requestId)
+          pending.resolve({
+            reply: message.reply as string | undefined,
+            error: message.error as string | undefined,
+          })
+        }
+        break
+      }
+
       default:
         console.log('[Cluso] Unknown message type:', message.type)
     }
+  }
+
+  /**
+   * Send a chat request and wait for response
+   */
+  async sendChatRequest(request: {
+    message: string
+    elements: Array<{ id: string; tagName: string; label: string; fullInfo?: Record<string, unknown> }>
+    pageUrl: string
+    pageTitle: string
+  }): Promise<{ reply?: string; error?: string }> {
+    const requestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+
+    return new Promise((resolve) => {
+      // Set timeout
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(requestId)
+        resolve({ error: 'Request timed out' })
+      }, 30000)
+
+      // Track pending request
+      this.pendingRequests.set(requestId, { resolve, timeout })
+
+      // Send request
+      this.send({
+        type: 'chat-request',
+        requestId,
+        message: request.message,
+        elements: request.elements,
+        pageUrl: request.pageUrl,
+        pageTitle: request.pageTitle,
+      })
+    })
   }
 
   private scheduleReconnect(): void {
@@ -186,34 +235,8 @@ async function handleChatMessage(message: {
 }): Promise<{ reply?: string; error?: string }> {
   // If connected to Cluso, proxy through it
   if (isConnectedToCluso) {
-    return new Promise((resolve) => {
-      // Set up a one-time listener for the response
-      const responseHandler = (event: MessageEvent) => {
-        try {
-          const data = JSON.parse(event.data as string)
-          if (data.type === 'chat-response' && data.requestId === message.message) {
-            resolve({ reply: data.reply })
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      }
-
-      // Send to Cluso
-      clusoClient.send({
-        type: 'chat-request',
-        requestId: message.message,
-        message: message.message,
-        elements: message.elements,
-        pageUrl: message.pageUrl,
-        pageTitle: message.pageTitle,
-      })
-
-      // Timeout after 30 seconds
-      setTimeout(() => {
-        resolve({ error: 'Request timed out' })
-      }, 30000)
-    })
+    console.log('[Cluso] Sending chat request to desktop app')
+    return clusoClient.sendChatRequest(message)
   }
 
   // Standalone mode - direct API call

@@ -333,6 +333,47 @@ ${INSPECTOR_OVERLAY_STYLES}
   cursor: not-allowed;
 }
 
+/* Messages container */
+#cluso-chat-panel .messages-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+}
+
+#cluso-chat-panel .message {
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  max-width: 85%;
+  word-wrap: break-word;
+}
+
+#cluso-chat-panel .message.user {
+  background: #3b82f6;
+  color: white;
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+
+#cluso-chat-panel .message.assistant {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+
+#cluso-chat-panel .message.error {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+
 /* Chat toggle button in toolbar */
 #cluso-toolbar .chat-toggle {
   width: 36px;
@@ -398,6 +439,7 @@ function createChatPanelHTML(): string {
       <div class="chips-container" id="cluso-chips">
         ${chipsHTML}
       </div>
+      <div class="messages-container" id="cluso-messages"></div>
       <div class="chat-input-container">
         <input type="text" class="chat-input" id="cluso-chat-input" placeholder="Ask about these elements..." />
         <button class="send-button" id="cluso-chat-send" title="Send">
@@ -632,6 +674,22 @@ function attachEventListeners(): void {
 }
 
 /**
+ * Add a message to the chat UI
+ */
+function addMessage(text: string, type: 'user' | 'assistant' | 'error'): void {
+  const container = document.getElementById('cluso-messages')
+  if (!container) return
+
+  const msg = document.createElement('div')
+  msg.className = `message ${type}`
+  msg.textContent = text
+  container.appendChild(msg)
+
+  // Scroll to bottom
+  container.scrollTop = container.scrollHeight
+}
+
+/**
  * Handle sending a chat message
  */
 function handleChatSend(): void {
@@ -641,6 +699,9 @@ function handleChatSend(): void {
 
   const message = input.value.trim()
   input.value = ''
+
+  // Add user message to UI
+  addMessage(message, 'user')
 
   // Show loading state
   isSending = true
@@ -669,10 +730,10 @@ function handleChatSend(): void {
 
     if (response?.error) {
       console.error('[Cluso] Chat error:', response.error)
-      // Could show error in UI
+      addMessage(response.error, 'error')
     } else if (response?.reply) {
-      // Could show response in UI
       console.log('[Cluso] Chat response:', response.reply)
+      addMessage(response.reply, 'assistant')
     }
   })
 }

@@ -68,6 +68,9 @@ function initialize(window) {
   }
 }
 
+// Pending chat requests waiting for response
+const pendingChatRequests = new Map()
+
 /**
  * Handle incoming messages from the extension
  */
@@ -89,8 +92,38 @@ function handleMessage(message) {
       }
       break
 
+    case 'chat-request':
+      // Forward chat request to renderer and track for response
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        const requestId = message.requestId || Date.now().toString()
+        pendingChatRequests.set(requestId, true)
+        mainWindow.webContents.send('extension:chat-request', {
+          requestId,
+          message: message.message,
+          elements: message.elements,
+          pageUrl: message.pageUrl,
+          pageTitle: message.pageTitle,
+        })
+      }
+      break
+
     default:
       console.log('[ExtensionBridge] Unknown message type:', message.type)
+  }
+}
+
+/**
+ * Send chat response back to extension
+ */
+function sendChatResponse(requestId, reply, error) {
+  if (pendingChatRequests.has(requestId)) {
+    pendingChatRequests.delete(requestId)
+    sendToExtension({
+      type: 'chat-response',
+      requestId,
+      reply,
+      error,
+    })
   }
 }
 
@@ -159,7 +192,7 @@ function registerHandlers(ipcMain) {
   ipcMain.handle('extension-bridge:status', async () => {
     return {
       connected: isConnected(),
-      port: wss?.options?.port || 3001,
+      port: wss?.options?.port || 3002,
     }
   })
 
@@ -174,11 +207,17 @@ function registerHandlers(ipcMain) {
   ipcMain.handle('extension-bridge:request-elements', async () => {
     return { success: requestPageElements() }
   })
+
+  ipcMain.handle('extension-bridge:chat-response', async (_event, requestId, reply, error) => {
+    sendChatResponse(requestId, reply, error)
+    return { success: true }
+  })
 }
 
 module.exports = {
   initialize,
   sendToExtension,
+  sendChatResponse,
   isConnected,
   activateInspector,
   deactivateInspector,

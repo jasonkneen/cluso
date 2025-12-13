@@ -615,6 +615,38 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // Extension Bridge (Chrome extension communication)
+  extensionBridge: {
+    // Get connection status
+    getStatus: () => ipcRenderer.invoke('extension-bridge:status'),
+    // Activate inspector on extension
+    activateInspector: () => ipcRenderer.invoke('extension-bridge:activate-inspector'),
+    // Deactivate inspector
+    deactivateInspector: () => ipcRenderer.invoke('extension-bridge:deactivate-inspector'),
+    // Request page elements
+    requestElements: () => ipcRenderer.invoke('extension-bridge:request-elements'),
+    // Send chat response back to extension
+    sendChatResponse: (requestId, reply, error) => ipcRenderer.invoke('extension-bridge:chat-response', requestId, reply, error),
+    // Listen for element selections from extension
+    onSelection: (callback) => {
+      const handler = (_event, element) => callback(element)
+      ipcRenderer.on('extension:selection', handler)
+      return () => ipcRenderer.removeListener('extension:selection', handler)
+    },
+    // Listen for page elements from extension
+    onPageElements: (callback) => {
+      const handler = (_event, elements) => callback(elements)
+      ipcRenderer.on('extension:page-elements', handler)
+      return () => ipcRenderer.removeListener('extension:page-elements', handler)
+    },
+    // Listen for chat requests from extension
+    onChatRequest: (callback) => {
+      const handler = (_event, request) => callback(request)
+      ipcRenderer.on('extension:chat-request', handler)
+      return () => ipcRenderer.removeListener('extension:chat-request', handler)
+    },
+  },
+
   // Check if running in Electron
   isElectron: true,
 })
