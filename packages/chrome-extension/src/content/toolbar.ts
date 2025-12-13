@@ -654,6 +654,7 @@ function toggleMode(mode: 'screen' | 'select' | 'move'): void {
  * Set the current mode
  */
 function setMode(mode: 'none' | 'screen' | 'select' | 'move'): void {
+  const previousMode = currentMode
   currentMode = mode
 
   // Update button states
@@ -668,11 +669,18 @@ function setMode(mode: 'none' | 'screen' | 'select' | 'move'): void {
     }
   })
 
-  // Send message to content script handler
+  // Deactivate previous mode
+  if (previousMode === 'select') {
+    chrome.runtime.sendMessage({ type: 'deactivate-inspector' })
+  } else if (previousMode === 'move') {
+    chrome.runtime.sendMessage({ type: 'deactivate-move' })
+  }
+
+  // Activate new mode
   if (mode === 'select') {
     chrome.runtime.sendMessage({ type: 'activate-inspector' })
-  } else {
-    chrome.runtime.sendMessage({ type: 'deactivate-inspector' })
+  } else if (mode === 'move') {
+    chrome.runtime.sendMessage({ type: 'activate-move' })
   }
 
   // Update cursor
@@ -680,6 +688,8 @@ function setMode(mode: 'none' | 'screen' | 'select' | 'move'): void {
     document.body.style.cursor = 'crosshair'
   } else if (mode === 'screen') {
     document.body.style.cursor = 'cell'
+  } else if (mode === 'move') {
+    document.body.style.cursor = 'move'
   } else {
     document.body.style.cursor = ''
   }

@@ -6,8 +6,6 @@
  */
 
 import {
-  REACT_FIBER_EXTRACTION_SCRIPT,
-  RSC_EXTRACTION_SCRIPT,
   INSPECTOR_OVERLAY_STYLES,
 } from '@ai-cluso/shared-inspector'
 
@@ -23,25 +21,33 @@ import {
 
 // Track inspector state
 let inspectorActive = false
+let moveActive = false
 let hoverOverlay: HTMLDivElement | null = null
 let selectionOverlay: HTMLDivElement | null = null
 let currentHoveredElement: Element | null = null
 
+// Move mode state
+let movingElement: HTMLElement | null = null
+let moveStartX = 0
+let moveStartY = 0
+let elementOriginalPosition: { position: string; top: string; left: string; transform: string } | null = null
+
 /**
  * Inject the React fiber extraction scripts into the page
+ * Uses external script files to avoid CSP issues
  */
 function injectExtractionScripts(): void {
-  // Inject React fiber extraction
+  // Inject React fiber extraction via external script
   const fiberScript = document.createElement('script')
-  fiberScript.textContent = REACT_FIBER_EXTRACTION_SCRIPT
+  fiberScript.src = chrome.runtime.getURL('inject/react-fiber.js')
+  fiberScript.onload = () => fiberScript.remove()
   document.documentElement.appendChild(fiberScript)
-  fiberScript.remove()
 
-  // Inject RSC extraction
+  // Inject RSC extraction via external script
   const rscScript = document.createElement('script')
-  rscScript.textContent = RSC_EXTRACTION_SCRIPT
+  rscScript.src = chrome.runtime.getURL('inject/rsc-extraction.js')
+  rscScript.onload = () => rscScript.remove()
   document.documentElement.appendChild(rscScript)
-  rscScript.remove()
 
   console.log('[Cluso] Extraction scripts injected')
 }
@@ -264,6 +270,140 @@ function clearSelection(): void {
   }
 }
 
+/**
+ * Activate move mode
+ */
+function activateMoveMode(): void {
+  if (moveActive) return
+
+  moveActive = true
+  document.addEventListener('mousedown', handleMoveStart, true)
+  document.body.style.cursor = 'move'
+
+  console.log('[Cluso] Move mode activated')
+}
+
+/**
+ * Deactivate move mode
+ */
+function deactivateMoveMode(): void {
+  if (!moveActive) return
+
+  moveActive = false
+  document.removeEventListener('mousedown', handleMoveStart, true)
+  document.removeEventListener('mousemove', handleMoveMove, true)
+  document.removeEventListener('mouseup', handleMoveEnd, true)
+  document.body.style.cursor = ''
+
+  // Reset moving element if any
+  if (movingElement && elementOriginalPosition) {
+    // Optionally restore original position
+    // movingElement.style.position = elementOriginalPosition.position
+    // movingElement.style.top = elementOriginalPosition.top
+    // movingElement.style.left = elementOriginalPosition.left
+    // movingElement.style.transform = elementOriginalPosition.transform
+  }
+  movingElement = null
+  elementOriginalPosition = null
+
+  if (hoverOverlay) {
+    hoverOverlay.classList.remove('visible')
+  }
+
+  console.log('[Cluso] Move mode deactivated')
+}
+
+/**
+ * Handle move mode mouse down (start dragging)
+ */
+function handleMoveStart(event: MouseEvent): void {
+  if (!moveActive) return
+
+  const target = event.target as HTMLElement
+  if (target.closest('[data-cluso-ui]')) return
+
+  event.preventDefault()
+  event.stopPropagation()
+
+  movingElement = target
+  moveStartX = event.clientX
+  moveStartY = event.clientY
+
+  // Store original position
+  const computed = getComputedStyle(target)
+  elementOriginalPosition = {
+    position: target.style.position || computed.position,
+    top: target.style.top || computed.top,
+    left: target.style.left || computed.left,
+    transform: target.style.transform || computed.transform,
+  }
+
+  // Ensure element can be moved
+  if (computed.position === 'static') {
+    target.style.position = 'relative'
+  }
+
+  // Add move listeners
+  document.addEventListener('mousemove', handleMoveMove, true)
+  document.addEventListener('mouseup', handleMoveEnd, true)
+
+  // Visual feedback
+  target.style.opacity = '0.8'
+  target.style.outline = '2px dashed #f59e0b'
+  document.body.style.cursor = 'grabbing'
+}
+
+/**
+ * Handle move mode mouse move (dragging)
+ */
+function handleMoveMove(event: MouseEvent): void {
+  if (!movingElement) return
+
+  event.preventDefault()
+  event.stopPropagation()
+
+  const deltaX = event.clientX - moveStartX
+  const deltaY = event.clientY - moveStartY
+
+  // Apply transform for smooth movement
+  const existingTransform = elementOriginalPosition?.transform
+  const baseTransform = existingTransform && existingTransform !== 'none' ? existingTransform : ''
+  movingElement.style.transform = `${baseTransform} translate(${deltaX}px, ${deltaY}px)`
+}
+
+/**
+ * Handle move mode mouse up (end dragging)
+ */
+function handleMoveEnd(event: MouseEvent): void {
+  if (!movingElement) return
+
+  event.preventDefault()
+  event.stopPropagation()
+
+  // Remove move listeners
+  document.removeEventListener('mousemove', handleMoveMove, true)
+  document.removeEventListener('mouseup', handleMoveEnd, true)
+
+  // Reset visual feedback
+  movingElement.style.opacity = ''
+  movingElement.style.outline = ''
+  document.body.style.cursor = 'move'
+
+  // Send move info to background
+  const deltaX = event.clientX - moveStartX
+  const deltaY = event.clientY - moveStartY
+
+  chrome.runtime.sendMessage({
+    type: 'element-moved',
+    element: extractElementInfo(movingElement),
+    delta: { x: deltaX, y: deltaY },
+  })
+
+  console.log(`[Cluso] Element moved by (${deltaX}, ${deltaY})`)
+
+  movingElement = null
+}
+
 // Listen for messages from the background script
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   switch (message.type) {
@@ -274,6 +414,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     case 'deactivate-inspector':
       deactivateInspector()
+      sendResponse({ success: true })
+      break
+
+    case 'activate-move':
+      deactivateInspector() // Turn off inspector first
+      activateMoveMode()
+      sendResponse({ success: true })
+      break
+
+    case 'deactivate-move':
+      deactivateMoveMode()
       sendResponse({ success: true })
       break
 
