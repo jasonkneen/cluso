@@ -175,6 +175,56 @@ async function getPageElementsFromActiveTab(): Promise<unknown[]> {
   }
 }
 
+/**
+ * Handle chat message - proxy via Cluso socket or direct API
+ */
+async function handleChatMessage(message: {
+  message: string
+  elements: Array<{ id: string; tagName: string; label: string; fullInfo?: Record<string, unknown> }>
+  pageUrl: string
+  pageTitle: string
+}): Promise<{ reply?: string; error?: string }> {
+  // If connected to Cluso, proxy through it
+  if (isConnectedToCluso) {
+    return new Promise((resolve) => {
+      // Set up a one-time listener for the response
+      const responseHandler = (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data as string)
+          if (data.type === 'chat-response' && data.requestId === message.message) {
+            resolve({ reply: data.reply })
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+
+      // Send to Cluso
+      clusoClient.send({
+        type: 'chat-request',
+        requestId: message.message,
+        message: message.message,
+        elements: message.elements,
+        pageUrl: message.pageUrl,
+        pageTitle: message.pageTitle,
+      })
+
+      // Timeout after 30 seconds
+      setTimeout(() => {
+        resolve({ error: 'Request timed out' })
+      }, 30000)
+    })
+  }
+
+  // Standalone mode - direct API call
+  // For now, return a placeholder response
+  // TODO: Implement direct Gemini API call when not connected to Cluso
+  console.log('[Cluso] Chat message (standalone):', message)
+  return {
+    reply: `Standalone mode: "${message.message}" with ${message.elements.length} element(s) on ${message.pageTitle}`,
+  }
+}
+
 // Listen for messages from content scripts and popup
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   switch (message.type) {
@@ -257,6 +307,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse(response)
       }).catch((err) => {
         sendResponse({ success: false, error: err.message })
+      })
+      return true
+
+    case 'chat-message':
+      handleChatMessage(message).then((response) => {
+        sendResponse(response)
+      }).catch((err) => {
+        sendResponse({ error: err.message })
       })
       return true
 

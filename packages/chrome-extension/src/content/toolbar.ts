@@ -12,7 +12,8 @@ let currentMode: 'none' | 'screen' | 'select' | 'move' = 'none'
 let isMicActive = false
 let isToolbarVisible = false
 let isChatOpen = false
-let selectedElements: Array<{ id: string; tagName: string; label: string }> = []
+let isSending = false
+let selectedElements: Array<{ id: string; tagName: string; label: string; fullInfo?: Record<string, unknown> }> = []
 
 const TOOLBAR_STYLES = `
 ${INSPECTOR_OVERLAY_STYLES}
@@ -123,6 +124,15 @@ ${INSPECTOR_OVERLAY_STYLES}
   50% { transform: scale(1.05); opacity: 0.9; }
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
 #cluso-toolbar .cluso-logo {
   width: 28px;
   height: 28px;
@@ -183,26 +193,18 @@ ${INSPECTOR_OVERLAY_STYLES}
 #cluso-chat-panel .chat-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-#cluso-chat-panel .chat-header h3 {
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-  margin: 0;
+  justify-content: flex-end;
+  padding: 8px 12px 4px;
 }
 
 #cluso-chat-panel .chat-header button {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.4);
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -213,24 +215,28 @@ ${INSPECTOR_OVERLAY_STYLES}
   color: rgba(255, 255, 255, 0.9);
 }
 
+#cluso-chat-panel .chat-header button svg {
+  width: 14px;
+  height: 14px;
+}
+
 #cluso-chat-panel .chips-container {
-  padding: 12px 16px;
+  padding: 4px 12px 8px;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  min-height: 44px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  gap: 6px;
+  min-height: 28px;
 }
 
 #cluso-chat-panel .chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
+  gap: 4px;
+  padding: 4px 8px;
   background: rgba(59, 130, 246, 0.15);
   border: 1px solid rgba(59, 130, 246, 0.3);
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: 6px;
+  font-size: 11px;
   color: #60a5fa;
 }
 
@@ -241,15 +247,15 @@ ${INSPECTOR_OVERLAY_STYLES}
 
 #cluso-chat-panel .chip .chip-label {
   color: rgba(255, 255, 255, 0.7);
-  max-width: 120px;
+  max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 #cluso-chat-panel .chip .chip-remove {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border: none;
   background: transparent;
   color: rgba(255, 255, 255, 0.4);
@@ -258,7 +264,13 @@ ${INSPECTOR_OVERLAY_STYLES}
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 3px;
+  margin-left: 2px;
+}
+
+#cluso-chat-panel .chip .chip-remove svg {
+  width: 10px;
+  height: 10px;
 }
 
 #cluso-chat-panel .chip .chip-remove:hover {
@@ -267,14 +279,13 @@ ${INSPECTOR_OVERLAY_STYLES}
 }
 
 #cluso-chat-panel .empty-state {
-  padding: 16px;
-  text-align: center;
-  color: rgba(255, 255, 255, 0.4);
-  font-size: 12px;
+  padding: 8px 12px;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 11px;
 }
 
 #cluso-chat-panel .chat-input-container {
-  padding: 12px 16px;
+  padding: 8px 12px 12px;
   display: flex;
   gap: 8px;
 }
@@ -358,7 +369,7 @@ const ICONS = {
   mic: `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>`,
   chat: `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>`,
   close: `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>`,
-  send: `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>`,
+  send: `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>`,
 }
 
 /**
@@ -380,7 +391,6 @@ function createChatPanelHTML(): string {
   return `
     <div id="cluso-chat-panel" data-cluso-ui="1">
       <div class="chat-header">
-        <h3>Selected Elements</h3>
         <button id="cluso-chat-close" title="Close">
           ${ICONS.close}
         </button>
@@ -626,16 +636,44 @@ function attachEventListeners(): void {
  */
 function handleChatSend(): void {
   const input = document.getElementById('cluso-chat-input') as HTMLInputElement
-  if (!input?.value.trim()) return
+  const sendBtn = document.getElementById('cluso-chat-send') as HTMLButtonElement
+  if (!input?.value.trim() || isSending) return
 
   const message = input.value.trim()
   input.value = ''
 
-  // Send to background for processing
+  // Show loading state
+  isSending = true
+  if (sendBtn) {
+    sendBtn.disabled = true
+    sendBtn.innerHTML = '<svg class="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10" stroke-width="2" stroke-dasharray="32" stroke-dashoffset="12"/></svg>'
+  }
+
+  // Send to background for processing (will proxy via Cluso socket or direct API)
   chrome.runtime.sendMessage({
     type: 'chat-message',
     message,
-    elements: selectedElements,
+    elements: selectedElements.map(el => ({
+      ...el,
+      fullInfo: el.fullInfo,
+    })),
+    pageUrl: window.location.href,
+    pageTitle: document.title,
+  }, (response) => {
+    // Reset loading state
+    isSending = false
+    if (sendBtn) {
+      sendBtn.disabled = false
+      sendBtn.innerHTML = ICONS.send
+    }
+
+    if (response?.error) {
+      console.error('[Cluso] Chat error:', response.error)
+      // Could show error in UI
+    } else if (response?.reply) {
+      // Could show response in UI
+      console.log('[Cluso] Chat response:', response.reply)
+    }
   })
 }
 
@@ -745,6 +783,9 @@ export function addSelectedElement(element: {
   id?: string
   className?: string
   text?: string
+  xpath?: string
+  rect?: { top: number; left: number; width: number; height: number }
+  computedStyle?: Record<string, string>
 }): void {
   // Generate a unique ID for this selection
   const uniqueId = `el-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
@@ -766,6 +807,7 @@ export function addSelectedElement(element: {
     id: uniqueId,
     tagName: element.tagName.toLowerCase(),
     label,
+    fullInfo: element as Record<string, unknown>,
   })
 
   updateChipsDisplay()
