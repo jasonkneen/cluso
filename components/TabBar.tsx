@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Plus, X, Sun, Moon, Settings, Globe, LayoutGrid, CheckSquare, FileText, Columns3, Zap, FolderOpen, Eye } from 'lucide-react'
+import { Plus, X, Sun, Moon, Settings, Globe, LayoutGrid, CheckSquare, FileText, Columns3, Zap, FolderOpen, Eye, Plug2 } from 'lucide-react'
 import { useTheme } from '../hooks/useTheme'
 
 export type TabType = 'browser' | 'kanban' | 'todos' | 'notes'
@@ -26,6 +26,7 @@ interface TabBarProps {
   fastApplyReady?: boolean
   fastApplyLoading?: boolean
   fileWatcherActive?: boolean
+  extensionConnected?: boolean
 }
 
 const TAB_TYPES = [
@@ -57,7 +58,8 @@ export function TabBar({
   onOpenSettings,
   fastApplyReady,
   fastApplyLoading,
-  fileWatcherActive
+  fileWatcherActive,
+  extensionConnected
 }: TabBarProps) {
   const { currentTheme } = useTheme()
   const [showMenu, setShowMenu] = useState(false)
@@ -340,6 +342,21 @@ export function TabBar({
           >
             <Zap size={10} className={fastApplyLoading ? (isDarkMode ? 'text-blue-400 animate-pulse' : 'text-blue-600 animate-pulse') : (isDarkMode ? 'text-yellow-400' : 'text-yellow-600')} />
             <span>{fastApplyLoading ? 'Loading...' : 'Ready'}</span>
+          </div>
+        )}
+
+        {/* Extension Connected Status Chip */}
+        {extensionConnected && (
+          <div
+            className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium backdrop-blur-md transition-all ${
+              isDarkMode
+                ? 'bg-gradient-to-r from-violet-500/20 to-purple-500/20 text-violet-300 border border-violet-500/30 shadow-lg shadow-violet-500/10'
+                : 'bg-gradient-to-r from-violet-100 to-purple-100 text-violet-700 border border-violet-300/50 shadow-sm'
+            }`}
+            title="Chrome extension connected - browser inspector available"
+          >
+            <Plug2 size={10} className={isDarkMode ? 'text-violet-400' : 'text-violet-600'} />
+            <span>Extension</span>
           </div>
         )}
 

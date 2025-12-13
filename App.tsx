@@ -596,8 +596,22 @@ export default function App() {
   useEffect(() => {
     if (!window.electronAPI?.extensionBridge) return;
 
+    // Check initial connection status and poll periodically
+    const checkStatus = async () => {
+      try {
+        const status = await window.electronAPI.extensionBridge?.getStatus();
+        setExtensionConnected(status?.connected ?? false);
+      } catch {
+        setExtensionConnected(false);
+      }
+    };
+
+    checkStatus();
+    const statusInterval = setInterval(checkStatus, 5000); // Check every 5 seconds
+
     const handleChatRequest = async (request: ExtensionChatRequest) => {
       console.log('[ExtensionBridge] Chat request:', request.requestId, request.message);
+      setExtensionConnected(true); // If we receive a request, we're connected
 
       try {
         // Build context from selected elements
@@ -648,6 +662,7 @@ export default function App() {
 
     return () => {
       unsubscribe?.();
+      clearInterval(statusInterval);
     };
   }, []);
 
@@ -1208,6 +1223,9 @@ export default function App() {
 
   // File Watcher Status
   const [fileWatcherActive, setFileWatcherActive] = useState(false);
+
+  // Extension Bridge Status (Chrome extension connected)
+  const [extensionConnected, setExtensionConnected] = useState(false);
 
   // Mgrep Onboarding State
   const [showMgrepOnboarding, setShowMgrepOnboarding] = useState(false);
@@ -8336,6 +8354,7 @@ If you're not sure what the user wants, ask for clarification.
         onOpenSettings={() => setIsSettingsOpen(true)}
         fastApplyReady={fastApplyReady}
         fileWatcherActive={fileWatcherActive}
+        extensionConnected={extensionConnected}
       />
 
       {/* Main Content Area */}
