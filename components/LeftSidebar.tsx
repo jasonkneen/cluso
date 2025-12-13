@@ -1,0 +1,131 @@
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import type { TreeNode } from './ComponentTree'
+import { LayersPanel } from './LayersPanel'
+import { PropertiesPanel } from './PropertiesPanel'
+import type { ElementStyles } from '../types/elementStyles'
+
+interface LeftSidebarProps {
+  width: number
+  isDarkMode: boolean
+  panelBg: string
+  panelBorder: string
+
+  treeData: TreeNode | null
+  selectedId: string | null
+  onSelect: (node: TreeNode) => void
+  onRefresh: () => void
+  isLoading?: boolean
+
+  styles: ElementStyles
+  onStyleChange: (key: keyof ElementStyles, value: ElementStyles[keyof ElementStyles]) => void
+}
+
+const STORAGE_KEY = 'cluso-left-sidebar-tree-height'
+
+export const LeftSidebar: React.FC<LeftSidebarProps> = ({
+  width,
+  isDarkMode,
+  panelBg,
+  panelBorder,
+  treeData,
+  selectedId,
+  onSelect,
+  onRefresh,
+  isLoading,
+  styles,
+  onStyleChange,
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [treeHeight, setTreeHeight] = useState(() => {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    const val = raw ? Number.parseInt(raw, 10) : 340
+    return Number.isFinite(val) ? val : 340
+  })
+  const dragStateRef = useRef<{ startY: number; startHeight: number } | null>(null)
+
+  const clampTreeHeight = useCallback((next: number) => {
+    const rect = containerRef.current?.getBoundingClientRect()
+    const total = rect?.height ?? 800
+    const minTree = 180
+    const minProps = 240
+    const maxTree = Math.max(minTree, total - minProps)
+    return Math.max(minTree, Math.min(maxTree, next))
+  }, [])
+
+  const handleDividerPointerDown = useCallback((e: React.PointerEvent) => {
+    if (!e.isPrimary) return
+    e.preventDefault()
+    e.stopPropagation()
+
+    dragStateRef.current = { startY: e.clientY, startHeight: treeHeight }
+
+    const handleMove = (ev: PointerEvent) => {
+      const drag = dragStateRef.current
+      if (!drag) return
+      const next = drag.startHeight + (ev.clientY - drag.startY)
+      setTreeHeight(clampTreeHeight(next))
+    }
+
+    const handleUp = () => {
+      dragStateRef.current = null
+      window.removeEventListener('pointermove', handleMove)
+      window.removeEventListener('pointerup', handleUp)
+      window.removeEventListener('pointercancel', handleUp)
+      window.removeEventListener('blur', handleUp)
+    }
+
+    window.addEventListener('pointermove', handleMove)
+    window.addEventListener('pointerup', handleUp)
+    window.addEventListener('pointercancel', handleUp)
+    window.addEventListener('blur', handleUp)
+  }, [clampTreeHeight, treeHeight])
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, String(treeHeight))
+  }, [treeHeight])
+
+  return (
+    <div ref={containerRef} className="flex flex-col h-full flex-shrink-0" style={{ width }}>
+      <div className="flex-shrink-0" style={{ height: treeHeight }}>
+        <div className="h-full">
+          <LayersPanel
+            width={width}
+            treeData={treeData}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            onRefresh={onRefresh}
+            isDarkMode={isDarkMode}
+            panelBg={panelBg}
+            panelBorder={panelBorder}
+            isLoading={isLoading}
+            className="h-full"
+            style={{ width: '100%', height: '100%' }}
+          />
+        </div>
+      </div>
+
+      <div
+        className={`h-2 cursor-row-resize flex-shrink-0 flex items-center justify-center ${
+          isDarkMode ? 'bg-neutral-900 hover:bg-neutral-800' : 'bg-stone-100 hover:bg-stone-200'
+        }`}
+        onPointerDown={handleDividerPointerDown}
+        title="Drag to resize panels"
+      >
+        <div className={`w-10 h-1 rounded-full ${isDarkMode ? 'bg-neutral-700' : 'bg-stone-300'}`} />
+      </div>
+
+      <div className="flex-1 min-h-0">
+        <PropertiesPanel
+          styles={styles}
+          onChange={onStyleChange}
+          isDarkMode={isDarkMode}
+          panelBg={panelBg}
+          panelBorder={panelBorder}
+        />
+      </div>
+    </div>
+  )
+}
+
+export default LeftSidebar
+

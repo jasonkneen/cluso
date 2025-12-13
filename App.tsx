@@ -33,8 +33,9 @@ import { SteeringQuestions } from './components/SteeringQuestions';
 import { generateTurnId } from './utils/turnUtils';
 import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler';
 import { PatchApprovalDialog } from './components/PatchApprovalDialog';
-import { LayersPanel } from './components/LayersPanel';
+import { LeftSidebar } from './components/LeftSidebar';
 import type { TreeNode } from './components/ComponentTree';
+import { DEFAULT_ELEMENT_STYLES, type ElementStyles } from './types/elementStyles';
 
 import { getElectronAPI } from './hooks/useElectronAPI';
 import type { MCPServerConfig } from './types/mcp';
@@ -844,6 +845,14 @@ export default function App() {
   const [selectedTreeNodeId, setSelectedTreeNodeId] = useState<string | null>(null);
   const [isLayersLoading, setIsLayersLoading] = useState(false);
   const [multiViewportData, setMultiViewportData] = useState<Array<{ id: string; windowType: string; devicePresetId?: string }>>([]);
+  const [selectedLayerElementNumber, setSelectedLayerElementNumber] = useState<number | null>(null)
+  const selectedLayerElementNumberRef = useRef<number | null>(null)
+  useEffect(() => { selectedLayerElementNumberRef.current = selectedLayerElementNumber }, [selectedLayerElementNumber])
+
+  const [elementStyles, setElementStyles] = useState<ElementStyles>(DEFAULT_ELEMENT_STYLES)
+  const elementStylesRef = useRef<ElementStyles>(DEFAULT_ELEMENT_STYLES)
+  useEffect(() => { elementStylesRef.current = elementStyles }, [elementStyles])
+  const applyElementStylesTimerRef = useRef<number | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -2553,9 +2562,106 @@ export default function App() {
     }
 
     if (node.elementNumber) {
+      setSelectedLayerElementNumber(node.elementNumber)
+
       // Highlight in webview
       const webview = webviewRefs.current.get(activeTabId);
       if (!webview) return;
+
+      // Pull computed styles for the element to seed the properties panel
+      try {
+        const result = await webview.executeJavaScript(`
+          (function() {
+            const map = window.__layersElements;
+            if (!map || !(map instanceof Map)) return { success: false, error: 'No element map' };
+            const el = map.get(${node.elementNumber});
+            if (!el) return { success: false, error: 'Element not found' };
+
+            const rect = el.getBoundingClientRect();
+            const cs = window.getComputedStyle(el);
+
+            function px(v) {
+              const n = parseFloat(String(v || '0'));
+              return Number.isFinite(n) ? n : 0;
+            }
+
+            function rgbToHex(color) {
+              if (!color) return '#000000';
+              const c = String(color).trim();
+              if (c.startsWith('#')) return c;
+              const m = c.match(/^rgba?\\((\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)/i);
+              if (!m) return '#000000';
+              const r = Number(m[1]) || 0;
+              const g = Number(m[2]) || 0;
+              const b = Number(m[3]) || 0;
+              const toHex = (n) => n.toString(16).padStart(2, '0');
+              return '#' + toHex(r) + toHex(g) + toHex(b);
+            }
+
+            function parseTransform(transform) {
+              const t = String(transform || '').trim();
+              if (!t || t === 'none') return { x: 0, y: 0, rotation: 0 };
+              const m2 = t.match(/^matrix\\(([^)]+)\\)$/);
+              if (m2) {
+                const parts = m2[1].split(',').map(s => parseFloat(s.trim()));
+                if (parts.length >= 6) {
+                  const [a, b, _c, _d, tx, ty] = parts;
+                  const rotation = Math.round(Math.atan2(b, a) * (180 / Math.PI));
+                  return { x: Math.round(tx), y: Math.round(ty), rotation };
+                }
+              }
+              const m3 = t.match(/^matrix3d\\(([^)]+)\\)$/);
+              if (m3) {
+                const parts = m3[1].split(',').map(s => parseFloat(s.trim()));
+                if (parts.length >= 16) {
+                  const a = parts[0];
+                  const b = parts[1];
+                  const tx = parts[12];
+                  const ty = parts[13];
+                  const rotation = Math.round(Math.atan2(b, a) * (180 / Math.PI));
+                  return { x: Math.round(tx), y: Math.round(ty), rotation };
+                }
+              }
+              return { x: 0, y: 0, rotation: 0 };
+            }
+
+            const transform = parseTransform(cs.transform);
+            const display = cs.display === 'flex' ? 'flex' : cs.display === 'grid' ? 'grid' : 'block';
+            const flexDirection = cs.flexDirection === 'column' ? 'column' : 'row';
+            const justify = ['flex-start', 'center', 'flex-end', 'space-between'].includes(cs.justifyContent)
+              ? cs.justifyContent
+              : 'flex-start';
+            const align = ['flex-start', 'center', 'flex-end'].includes(cs.alignItems)
+              ? cs.alignItems
+              : 'flex-start';
+
+            return {
+              success: true,
+              styles: {
+                x: transform.x,
+                y: transform.y,
+                rotation: transform.rotation,
+                width: Math.round(rect.width),
+                height: Math.round(rect.height),
+                display,
+                flexDirection,
+                justifyContent: justify,
+                alignItems: align,
+                gap: px(cs.gap),
+                padding: px(cs.paddingTop),
+                backgroundColor: rgbToHex(cs.backgroundColor),
+                opacity: Math.round(parseFloat(cs.opacity || '1') * 100),
+                borderRadius: px(cs.borderTopLeftRadius),
+              }
+            };
+          })()
+        `);
+        if (result?.success && result.styles) {
+          setElementStyles((prev) => ({ ...prev, ...result.styles }))
+        }
+      } catch (e) {
+        console.warn('[Layers] Failed to read element styles:', e)
+      }
 
       const highlightCode = `
         (function() {
@@ -2615,6 +2721,97 @@ export default function App() {
       }
     }
   }, [activeTabId, isMultiViewportMode]);
+
+  const flushApplyElementStyles = useCallback(() => {
+    if (applyElementStylesTimerRef.current) {
+      window.clearTimeout(applyElementStylesTimerRef.current)
+      applyElementStylesTimerRef.current = null
+    }
+
+    const elementNumber = selectedLayerElementNumberRef.current
+    if (!elementNumber) return
+
+    const tabId = activeTabIdRef.current
+    const webview = webviewRefs.current.get(tabId)
+    if (!webview) return
+
+    const s = elementStylesRef.current
+    const payload = JSON.stringify({
+      x: s.x,
+      y: s.y,
+      rotation: s.rotation,
+      width: s.width,
+      height: s.height,
+      display: s.display,
+      flexDirection: s.flexDirection,
+      justifyContent: s.justifyContent,
+      alignItems: s.alignItems,
+      gap: s.gap,
+      padding: s.padding,
+      backgroundColor: s.backgroundColor,
+      opacity: s.opacity,
+      borderRadius: s.borderRadius,
+    })
+
+    try {
+      webview.executeJavaScript(`
+        (function() {
+          const map = window.__layersElements;
+          if (!map || !(map instanceof Map)) return { success: false, error: 'No element map' };
+          const el = map.get(${elementNumber});
+          if (!el) return { success: false, error: 'Element not found' };
+          const s = ${payload};
+
+          el.style.width = s.width + 'px';
+          el.style.height = s.height + 'px';
+          el.style.transform = 'translate(' + s.x + 'px, ' + s.y + 'px) rotate(' + s.rotation + 'deg)';
+
+          el.style.display = s.display;
+          if (s.display === 'flex') {
+            el.style.flexDirection = s.flexDirection;
+            el.style.justifyContent = s.justifyContent;
+            el.style.alignItems = s.alignItems;
+          }
+
+          el.style.gap = s.gap + 'px';
+          el.style.padding = s.padding + 'px';
+
+          el.style.backgroundColor = s.backgroundColor;
+          el.style.opacity = String((s.opacity || 0) / 100);
+          el.style.borderRadius = s.borderRadius + 'px';
+
+          return { success: true };
+        })()
+      `);
+    } catch (e) {
+      console.warn('[Properties] Failed to apply styles:', e)
+    }
+  }, [])
+
+  const queueApplyElementStyles = useCallback(() => {
+    if (applyElementStylesTimerRef.current) {
+      window.clearTimeout(applyElementStylesTimerRef.current)
+    }
+    applyElementStylesTimerRef.current = window.setTimeout(flushApplyElementStyles, 120)
+  }, [flushApplyElementStyles])
+
+  useEffect(() => {
+    return () => {
+      if (applyElementStylesTimerRef.current) {
+        window.clearTimeout(applyElementStylesTimerRef.current)
+        applyElementStylesTimerRef.current = null
+      }
+    }
+  }, [])
+
+  const handleElementStyleChange = useCallback((key: keyof ElementStyles, value: ElementStyles[keyof ElementStyles]) => {
+    setElementStyles(prev => {
+      const next = { ...prev, [key]: value } as ElementStyles
+      elementStylesRef.current = next
+      return next
+    })
+    queueApplyElementStyles()
+  }, [queueApplyElementStyles])
 
   // Left panel resize handlers
   const handleLeftResizeStart = useCallback((e: React.MouseEvent) => {
@@ -7548,10 +7745,10 @@ If you're not sure what the user wants, ask for clarification.
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden pt-1 pb-2 px-2 gap-1">
 
-        {/* --- Left Panel: Layers Tree --- */}
+        {/* --- Left Panel: Layers + Properties --- */}
         {isLeftPanelOpen && (
           <>
-            <LayersPanel
+            <LeftSidebar
               width={leftPanelWidth}
               treeData={layersTreeData}
               selectedId={selectedTreeNodeId}
@@ -7561,6 +7758,8 @@ If you're not sure what the user wants, ask for clarification.
               panelBg={panelBg}
               panelBorder={panelBorder}
               isLoading={isLayersLoading}
+              styles={elementStyles}
+              onStyleChange={handleElementStyleChange}
             />
             {/* Left resize handle */}
             <div

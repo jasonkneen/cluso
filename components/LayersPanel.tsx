@@ -1,4 +1,5 @@
 import { RefreshCw, Layers } from 'lucide-react'
+import type { CSSProperties } from 'react'
 import { ComponentTree, TreeNode } from './ComponentTree'
 
 interface LayersPanelProps {
@@ -11,6 +12,8 @@ interface LayersPanelProps {
   panelBg: string
   panelBorder: string
   isLoading?: boolean
+  className?: string
+  style?: CSSProperties
 }
 
 export const LayersPanel = ({
@@ -23,16 +26,19 @@ export const LayersPanel = ({
   panelBg,
   panelBorder,
   isLoading = false,
+  className,
+  style,
 }: LayersPanelProps) => {
   return (
     <div
-      className="flex flex-col rounded-xl shadow-sm flex-shrink-0 border"
+      className={`flex flex-col rounded-xl shadow-sm flex-shrink-0 border ${className || ''}`}
       style={{
         width,
         minWidth: 200,
         maxWidth: 400,
         backgroundColor: panelBg,
         borderColor: panelBorder,
+        ...style,
       }}
     >
       {/* Header */}
