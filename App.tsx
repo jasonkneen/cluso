@@ -1227,6 +1227,60 @@ export default function App() {
   // Extension Bridge Status (Chrome extension connected)
   const [extensionConnected, setExtensionConnected] = useState(false);
 
+  // Extension cursor sharing state
+  const [extensionSharing, setExtensionSharing] = useState(false);
+  const [extensionCursor, setExtensionCursor] = useState<{
+    elementAnchor?: {
+      selector: string;
+      relativeX: number;
+      relativeY: number;
+      elementText?: string;
+    };
+    viewportPercentX?: number;
+    viewportPercentY?: number;
+    pageX: number; pageY: number;
+    clientX: number; clientY: number;
+    scrollX: number; scrollY: number;
+    viewportWidth: number; viewportHeight: number;
+    documentWidth: number; documentHeight: number;
+    pageUrl: string;
+    timestamp?: number;
+  } | null>(null);
+
+  // Send Cluso's cursor to extension when sharing is active
+  useEffect(() => {
+    if (!extensionSharing || !window.electronAPI?.extensionBridge?.sendCursor) return;
+
+    let lastUpdate = 0;
+    const handleMouseMove = (e: MouseEvent) => {
+      // Throttle to 30fps
+      const now = Date.now();
+      if (now - lastUpdate < 33) return;
+      lastUpdate = now;
+
+      // Send cursor data to extension
+      window.electronAPI?.extensionBridge?.sendCursor?.({
+        pageX: e.pageX,
+        pageY: e.pageY,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        scrollX: window.scrollX,
+        scrollY: window.scrollY,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        documentWidth: document.documentElement.scrollWidth,
+        documentHeight: document.documentElement.scrollHeight,
+        pageUrl: activeTab?.url || window.location.href,
+      });
+    };
+
+    // Track cursor movement across the app
+    document.addEventListener('mousemove', handleMouseMove);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+    };
+  }, [extensionSharing, activeTab?.url]);
   // Mgrep Onboarding State
   const [showMgrepOnboarding, setShowMgrepOnboarding] = useState(false);
 
@@ -8357,6 +8411,66 @@ If you're not sure what the user wants, ask for clarification.
         extensionConnected={extensionConnected}
       />
 
+      {/* Remote cursor from extension user */}
+      {extensionSharing && extensionCursor && (() => {
+        // Get webview bounds to position cursor relative to where the page is displayed
+        const webview = webviewRefs.current.get(activeTabId);
+        const webviewRect = webview?.getBoundingClientRect();
+
+        let x: number;
+        let y: number;
+        let isAnchored = false;
+
+        // Priority 1: Use viewport percentages (works across different screen sizes)
+        if (extensionCursor.viewportPercentX !== undefined && extensionCursor.viewportPercentY !== undefined && webviewRect) {
+          // Map their viewport percentages to our webview bounds
+          x = webviewRect.left + (webviewRect.width * extensionCursor.viewportPercentX);
+          y = webviewRect.top + (webviewRect.height * extensionCursor.viewportPercentY);
+          isAnchored = !!extensionCursor.elementAnchor;
+        } else if (webviewRect) {
+          // Priority 2: Scale their client coordinates to our webview
+          const scaleX = webviewRect.width / extensionCursor.viewportWidth;
+          const scaleY = webviewRect.height / extensionCursor.viewportHeight;
+          x = webviewRect.left + (extensionCursor.clientX * scaleX);
+          y = webviewRect.top + (extensionCursor.clientY * scaleY);
+        } else {
+          // Fallback: Direct coordinates
+          x = extensionCursor.clientX;
+          y = extensionCursor.clientY;
+        }
+
+        // Calculate scroll difference indicator (shows if they're scrolled differently)
+        const scrollDiffY = extensionCursor.scrollY;
+        const hasScrollDiff = scrollDiffY > 50;
+
+        return (
+          <div
+            className="fixed pointer-events-none z-[100000] transition-transform duration-75 ease-out"
+            style={{ transform: `translate(${x}px, ${y}px)` }}
+          >
+            {/* Cursor pointer (rotated triangle) */}
+            <div
+              className="w-0 h-0"
+              style={{
+                borderLeft: '8px solid transparent',
+                borderRight: '8px solid transparent',
+                borderBottom: '16px solid #3b82f6',
+                transform: 'rotate(-45deg)',
+              }}
+            />
+            {/* Label with anchoring and scroll indicators */}
+            <div
+              className="absolute top-4 left-3 bg-blue-500 text-white text-xs px-2 py-1 rounded whitespace-nowrap flex items-center gap-1"
+            >
+              <span>Extension User</span>
+              {isAnchored && <span title={extensionCursor.elementAnchor?.elementText}>📍</span>}
+              {hasScrollDiff && (
+                <span className="opacity-70">↓{Math.round(scrollDiffY)}px</span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden pt-1 pb-2 px-2 gap-1">
 

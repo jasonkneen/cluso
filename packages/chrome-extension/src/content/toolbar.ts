@@ -739,6 +739,330 @@ function handleChatSend(): void {
 }
 
 /**
+ * Toggle cursor sharing on/off
+ */
+function toggleSharing(): void {
+  isSharingEnabled = !isSharingEnabled
+
+  const btn = document.getElementById('cluso-btn-share')
+  if (btn) {
+    btn.classList.toggle('active', isSharingEnabled)
+    btn.classList.toggle('mode-share', isSharingEnabled)
+  }
+
+  if (isSharingEnabled) {
+    startCursorTracking()
+    chrome.runtime.sendMessage({ type: 'start-sharing' })
+    console.log('[Cluso] Cursor sharing enabled')
+  } else {
+    stopCursorTracking()
+    chrome.runtime.sendMessage({ type: 'stop-sharing' })
+    removeAllRemoteCursors()
+    console.log('[Cluso] Cursor sharing disabled')
+  }
+}
+
+/**
+ * Start tracking and broadcasting cursor position
+ */
+function startCursorTracking(): void {
+  if (cursorTrackingInterval) return
+
+  // Track mouse movement
+  document.addEventListener('mousemove', handleMouseMove)
+
+  // Listen for remote cursor updates
+  chrome.runtime.onMessage.addListener(handleRemoteCursor)
+}
+
+/**
+ * Stop cursor tracking
+ */
+function stopCursorTracking(): void {
+  document.removeEventListener('mousemove', handleMouseMove)
+  if (cursorTrackingInterval) {
+    clearInterval(cursorTrackingInterval)
+    cursorTrackingInterval = null
+  }
+}
+
+let lastCursorUpdate = 0
+let cursorMoveCount = 0
+
+/**
+ * Generate a unique selector for an element
+ */
+function getElementSelector(el: Element): string {
+  // Try ID first
+  if (el.id) return `#${el.id}`
+
+  // Try unique class combination
+  if (el.className && typeof el.className === 'string') {
+    const classes = el.className.trim().split(/\s+/).filter(c => c && !c.startsWith('hover') && !c.startsWith('active'))
+    if (classes.length > 0) {
+      const selector = `${el.tagName.toLowerCase()}.${classes.join('.')}`
+      if (document.querySelectorAll(selector).length === 1) return selector
+    }
+  }
+
+  // Try data attributes
+  const dataAttrs = Array.from(el.attributes).filter(a => a.name.startsWith('data-'))
+  for (const attr of dataAttrs) {
+    const selector = `${el.tagName.toLowerCase()}[${attr.name}="${attr.value}"]`
+    if (document.querySelectorAll(selector).length === 1) return selector
+  }
+
+  // Generate path-based selector
+  const path: string[] = []
+  let current: Element | null = el
+  while (current && current !== document.body) {
+    let selector = current.tagName.toLowerCase()
+    if (current.id) {
+      path.unshift(`#${current.id}`)
+      break
+    }
+    const parent = current.parentElement
+    if (parent) {
+      const siblings = Array.from(parent.children).filter(c => c.tagName === current!.tagName)
+      if (siblings.length > 1) {
+        const index = siblings.indexOf(current) + 1
+        selector += `:nth-of-type(${index})`
+      }
+    }
+    path.unshift(selector)
+    current = parent
+  }
+  return path.join(' > ')
+}
+
+/**
+ * Find the most specific interactive/content element at position
+ */
+function findAnchorElement(x: number, y: number): Element | null {
+  const elements = document.elementsFromPoint(x, y)
+
+  // Skip our UI elements
+  for (const el of elements) {
+    if (el.closest('[data-cluso-ui]') || el.closest('#cluso-toolbar-container')) continue
+
+    // Prefer interactive/content elements
+    const tag = el.tagName.toLowerCase()
+    const isInteractive = ['a', 'button', 'input', 'select', 'textarea', 'label'].includes(tag)
+    const isContent = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'li', 'td', 'th', 'img', 'video'].includes(tag)
+    const hasId = !!el.id
+    const hasClasses = el.className && typeof el.className === 'string' && el.className.trim().length > 0
+
+    if (isInteractive || isContent || hasId || hasClasses) {
+      return el
+    }
+  }
+
+  // Fall back to first non-UI element
+  for (const el of elements) {
+    if (!el.closest('[data-cluso-ui]') && !el.closest('#cluso-toolbar-container')) {
+      return el
+    }
+  }
+
+  return null
+}
+
+function handleMouseMove(e: MouseEvent): void {
+  // Throttle to 30fps
+  const now = Date.now()
+  if (now - lastCursorUpdate < 33) return
+  lastCursorUpdate = now
+
+  cursorMoveCount++
+
+  // Find anchor element under cursor
+  const anchorElement = findAnchorElement(e.clientX, e.clientY)
+
+  let elementAnchor: {
+    selector: string
+    relativeX: number
+    relativeY: number
+    elementText?: string
+  } | null = null
+
+  if (anchorElement) {
+    const rect = anchorElement.getBoundingClientRect()
+    // Calculate relative position within element (0-1)
+    const relativeX = (e.clientX - rect.left) / rect.width
+    const relativeY = (e.clientY - rect.top) / rect.height
+
+    // Only anchor if cursor is actually inside element bounds
+    if (relativeX >= 0 && relativeX <= 1 && relativeY >= 0 && relativeY <= 1) {
+      elementAnchor = {
+        selector: getElementSelector(anchorElement),
+        relativeX,
+        relativeY,
+        // Include text snippet for verification
+        elementText: anchorElement.textContent?.slice(0, 50)?.trim() || undefined,
+      }
+    }
+  }
+
+  // Send cursor data with element anchoring
+  chrome.runtime.sendMessage({
+    type: 'cursor-move',
+    // Element-relative positioning (primary - most accurate)
+    elementAnchor,
+    // Document-relative position (fallback)
+    pageX: e.pageX,
+    pageY: e.pageY,
+    // Viewport-relative position (fallback)
+    clientX: e.clientX,
+    clientY: e.clientY,
+    // Viewport percentage (breakpoint-aware fallback)
+    viewportPercentX: e.clientX / window.innerWidth,
+    viewportPercentY: e.clientY / window.innerHeight,
+    // Scroll position
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+    // Viewport dimensions
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    // Document dimensions
+    documentWidth: document.documentElement.scrollWidth,
+    documentHeight: document.documentElement.scrollHeight,
+    // Page URL for matching
+    pageUrl: window.location.href,
+    // Timestamp for interpolation
+    timestamp: now,
+  })
+}
+
+/**
+ * Handle incoming remote cursor positions
+ */
+interface RemoteCursorMessage {
+  type: string
+  userId?: string
+  userName?: string
+  color?: string
+  // Element-relative positioning (most accurate)
+  elementAnchor?: {
+    selector: string
+    relativeX: number
+    relativeY: number
+    elementText?: string
+  }
+  // Viewport percentage (breakpoint-aware fallback)
+  viewportPercentX?: number
+  viewportPercentY?: number
+  // Full positioning data
+  pageX?: number
+  pageY?: number
+  clientX?: number
+  clientY?: number
+  scrollX?: number
+  scrollY?: number
+  viewportWidth?: number
+  viewportHeight?: number
+  timestamp?: number
+  // Legacy format
+  x?: number
+  y?: number
+}
+
+// Store last keyframes for interpolation
+const cursorKeyframes = new Map<string, { x: number; y: number; timestamp: number }[]>()
+
+function handleRemoteCursor(message: RemoteCursorMessage): void {
+  if (message.type !== 'remote-cursor' || !isSharingEnabled) return
+
+  const { userId, userName, color, elementAnchor } = message
+
+  if (!userId) return
+
+  let targetX: number
+  let targetY: number
+  let anchoredToElement = false
+
+  // Priority 1: Element-relative positioning (most accurate across breakpoints)
+  if (elementAnchor) {
+    try {
+      const element = document.querySelector(elementAnchor.selector)
+      if (element) {
+        const rect = element.getBoundingClientRect()
+        targetX = rect.left + (rect.width * elementAnchor.relativeX)
+        targetY = rect.top + (rect.height * elementAnchor.relativeY)
+        anchoredToElement = true
+      }
+    } catch {
+      // Invalid selector, fall through to other methods
+    }
+  }
+
+  // Priority 2: Viewport percentage (works across different screen sizes)
+  if (!anchoredToElement && message.viewportPercentX !== undefined && message.viewportPercentY !== undefined) {
+    targetX = message.viewportPercentX * window.innerWidth
+    targetY = message.viewportPercentY * window.innerHeight
+  }
+
+  // Priority 3: Direct viewport coordinates (fallback)
+  if (targetX === undefined || targetY === undefined) {
+    targetX = message.clientX ?? message.x ?? 0
+    targetY = message.clientY ?? message.y ?? 0
+  }
+
+  // Store keyframe for interpolation
+  const keyframes = cursorKeyframes.get(userId) || []
+  keyframes.push({ x: targetX, y: targetY, timestamp: message.timestamp || Date.now() })
+  // Keep only last 5 keyframes
+  if (keyframes.length > 5) keyframes.shift()
+  cursorKeyframes.set(userId, keyframes)
+
+  let cursor = remoteCursors.get(userId)
+
+  if (!cursor) {
+    // Create new cursor element
+    cursor = document.createElement('div')
+    cursor.className = 'cluso-remote-cursor'
+    cursor.setAttribute('data-cluso-ui', '1')
+    cursor.style.setProperty('--cursor-color', color || '#8b5cf6') // Purple for Cluso
+    cursor.innerHTML = `
+      <div class="cursor-pointer"></div>
+      <div class="cursor-label">${userName || 'Cluso'}</div>
+    `
+    document.body.appendChild(cursor)
+    remoteCursors.set(userId, cursor)
+  }
+
+  // Position cursor
+  cursor.style.transform = `translate(${targetX}px, ${targetY}px)`
+
+  // Update label
+  const labelEl = cursor.querySelector('.cursor-label')
+  if (labelEl) {
+    let label = userName || 'Cluso'
+    // Show anchor indicator when element-anchored
+    if (anchoredToElement) {
+      label += ' 📍'
+    }
+    // Show scroll diff if not anchored
+    else if (message.scrollY !== undefined) {
+      const myScrollY = window.scrollY
+      const scrollDiff = Math.abs(message.scrollY - myScrollY)
+      if (scrollDiff > 50) {
+        const direction = message.scrollY > myScrollY ? '↓' : '↑'
+        label += ` ${direction}${Math.round(scrollDiff)}px`
+      }
+    }
+    labelEl.textContent = label
+  }
+}
+
+/**
+ * Remove all remote cursors
+ */
+function removeAllRemoteCursors(): void {
+  remoteCursors.forEach((cursor) => cursor.remove())
+  remoteCursors.clear()
+}
+
+/**
  * Toggle a mode on/off
  */
 function toggleMode(mode: 'screen' | 'select' | 'move'): void {

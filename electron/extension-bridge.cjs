@@ -104,6 +104,54 @@ function handleMessage(message) {
           pageUrl: message.pageUrl,
           pageTitle: message.pageTitle,
         })
+      } else {
+        console.log('[ExtensionBridge] Cannot forward - no mainWindow')
+      }
+      break
+
+    case 'start-sharing':
+      console.log('[ExtensionBridge] Extension started sharing')
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('extension:sharing-started')
+      }
+      break
+
+    case 'stop-sharing':
+      console.log('[ExtensionBridge] Extension stopped sharing')
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('extension:sharing-stopped')
+      }
+      break
+
+    case 'cursor-move':
+      // Forward cursor position to renderer with all positioning data
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('extension:cursor-move', {
+          // Element-relative anchoring (most accurate across breakpoints)
+          elementAnchor: message.elementAnchor,
+          // Viewport percentage (breakpoint-aware)
+          viewportPercentX: message.viewportPercentX,
+          viewportPercentY: message.viewportPercentY,
+          // Document-relative position
+          pageX: message.pageX,
+          pageY: message.pageY,
+          // Viewport-relative position
+          clientX: message.clientX,
+          clientY: message.clientY,
+          // Scroll position
+          scrollX: message.scrollX,
+          scrollY: message.scrollY,
+          // Viewport dimensions
+          viewportWidth: message.viewportWidth,
+          viewportHeight: message.viewportHeight,
+          // Document dimensions
+          documentWidth: message.documentWidth,
+          documentHeight: message.documentHeight,
+          // Page URL
+          pageUrl: message.pageUrl,
+          // Timestamp for interpolation
+          timestamp: message.timestamp,
+        })
       }
       break
 

@@ -341,6 +341,53 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       })
       return true
 
+    case 'start-sharing':
+      if (isConnectedToCluso) {
+        clusoClient.send({ type: 'start-sharing' })
+      }
+      sendResponse({ success: true })
+      break
+
+    case 'stop-sharing':
+      if (isConnectedToCluso) {
+        clusoClient.send({ type: 'stop-sharing' })
+      }
+      sendResponse({ success: true })
+      break
+
+    case 'cursor-move':
+      if (isConnectedToCluso) {
+        clusoClient.send({
+          type: 'cursor-move',
+          // Element-relative positioning (most accurate)
+          elementAnchor: message.elementAnchor,
+          // Viewport percentage (breakpoint-aware)
+          viewportPercentX: message.viewportPercentX,
+          viewportPercentY: message.viewportPercentY,
+          // Document-relative position
+          pageX: message.pageX,
+          pageY: message.pageY,
+          // Viewport-relative position
+          clientX: message.clientX,
+          clientY: message.clientY,
+          // Scroll position
+          scrollX: message.scrollX,
+          scrollY: message.scrollY,
+          // Viewport dimensions
+          viewportWidth: message.viewportWidth,
+          viewportHeight: message.viewportHeight,
+          // Document dimensions
+          documentWidth: message.documentWidth,
+          documentHeight: message.documentHeight,
+          // Page URL
+          pageUrl: message.pageUrl,
+          // Timestamp for interpolation
+          timestamp: message.timestamp,
+        })
+      }
+      sendResponse({ success: true })
+      break
+
     default:
       sendResponse({ error: `Unknown message type: ${message.type}` })
   }

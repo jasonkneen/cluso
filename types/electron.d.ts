@@ -1058,6 +1058,44 @@ interface ElectronExtensionBridgeAPI {
   onSelection: (callback: (element: unknown) => void) => () => void
   onPageElements: (callback: (elements: unknown[]) => void) => () => void
   onChatRequest: (callback: (request: ExtensionChatRequest) => void) => () => void
+  // Cursor sharing
+  onCursorMove?: (callback: (data: ExtensionCursorData) => void) => () => void
+  onSharingStarted?: (callback: () => void) => () => void
+  onSharingStopped?: (callback: () => void) => () => void
+  sendCursor?: (data: ExtensionCursorData) => Promise<{ success: boolean }>
+}
+
+// Cursor position data for collaborative sharing
+interface ExtensionCursorData {
+  // Element-relative anchoring (most accurate across breakpoints)
+  elementAnchor?: {
+    selector: string
+    relativeX: number
+    relativeY: number
+    elementText?: string
+  }
+  // Viewport percentage (breakpoint-aware)
+  viewportPercentX?: number
+  viewportPercentY?: number
+  // Document-relative position (accounts for scroll)
+  pageX: number
+  pageY: number
+  // Viewport-relative position
+  clientX: number
+  clientY: number
+  // Scroll position
+  scrollX: number
+  scrollY: number
+  // Viewport dimensions
+  viewportWidth: number
+  viewportHeight: number
+  // Document dimensions
+  documentWidth: number
+  documentHeight: number
+  // Page URL for matching
+  pageUrl: string
+  // Timestamp for interpolation
+  timestamp?: number
 }
 
 interface ElectronAPI {
