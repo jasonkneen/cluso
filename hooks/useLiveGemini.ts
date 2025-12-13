@@ -33,6 +33,17 @@ interface UseLiveGeminiParams {
   onSetViewport?: (mode: 'mobile' | 'tablet' | 'desktop') => Promise<{ success: boolean }>;
   onSwitchTab?: (type: 'browser' | 'kanban' | 'todos' | 'notes') => Promise<{ success: boolean }>;
   onFindElementByText?: (searchText: string, elementType?: string) => Promise<{ success: boolean; matches?: Array<{ elementNumber: number; text: string; tagName: string }>; error?: string }>;
+  // DOM Navigation
+  onSelectParent?: (levels?: number) => Promise<{ success: boolean; element?: any; error?: string }>;
+  onSelectChildren?: (selector?: string) => Promise<{ success: boolean; children?: any[]; error?: string }>;
+  onSelectSiblings?: (direction: 'next' | 'prev' | 'all') => Promise<{ success: boolean; siblings?: any[]; error?: string }>;
+  onSelectAllMatching?: (matchBy: 'tag' | 'class' | 'both') => Promise<{ success: boolean; matches?: any[]; error?: string }>;
+  // Drill-Down Selection
+  onStartDrillSelection?: () => Promise<{ success: boolean; sections?: any[]; level?: number; error?: string }>;
+  onDrillInto?: (elementNumber: number) => Promise<{ success: boolean; isFinalSelection?: boolean; element?: any; children?: any[]; description?: string; level?: number; canGoBack?: boolean; canGoForward?: boolean; error?: string }>;
+  onDrillBack?: () => Promise<{ success: boolean; children?: any[]; level?: number; canGoBack?: boolean; canGoForward?: boolean; error?: string }>;
+  onDrillForward?: () => Promise<{ success: boolean; children?: any[]; level?: number; canGoBack?: boolean; canGoForward?: boolean; error?: string }>;
+  onExitDrillMode?: () => Promise<{ success: boolean }>;
   selectedElement?: SelectedElement | null;
   // Context for logging
   projectFolder?: string;
@@ -514,16 +525,165 @@ WHEN TO USE:
 // Clear focus tool - resets hierarchical navigation to show all elements
 const clearFocusTool: FunctionDeclaration = {
   name: 'clear_focus',
-  description: `Clear the current focus scope and show ALL page elements again.
+  description: `Clear focus and show ALL page elements again.
+Use when user says: "zoom out", "show all", "go back", "everything"`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {},
+    required: [],
+  },
+};
 
-Use this when the user wants to "zoom out" or see the full page elements again after
-drilling down into a specific section.
+// DOM Navigation Tools - move around the DOM tree
+const selectParentTool: FunctionDeclaration = {
+  name: 'select_parent',
+  description: `Select the PARENT element of current selection.
+Use when: "select parent", "go up", "container", "wrapper", "the thing containing this"`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      levels: {
+        type: Type.NUMBER,
+        description: 'How many levels up (default 1). "grandparent" = 2',
+      },
+    },
+    required: [],
+  },
+};
 
-TRIGGERS:
-- "clear focus" / "zoom out" / "show all" / "reset" / "go back to all"
-- "start over" / "full page" / "everything"
+const selectChildrenTool: FunctionDeclaration = {
+  name: 'select_children',
+  description: `Select CHILDREN of current element. Shows them numbered for picking.
+Use when: "show children", "what's inside", "select the children", "items inside"`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      selector: {
+        type: Type.STRING,
+        description: 'Optional filter: "button", "div", "img" etc. Empty = all direct children',
+      },
+    },
+    required: [],
+  },
+};
 
-After clearing focus, call get_page_elements() to re-number all elements on the page.`,
+const selectSiblingsTool: FunctionDeclaration = {
+  name: 'select_siblings',
+  description: `Select SIBLINGS of current element (same level in DOM).
+Use when: "next one", "previous", "the one after", "siblings", "others like this"`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      direction: {
+        type: Type.STRING,
+        description: '"next" = next sibling, "prev" = previous, "all" = all siblings',
+      },
+    },
+    required: [],
+  },
+};
+
+const selectAllMatchingTool: FunctionDeclaration = {
+  name: 'select_all_matching',
+  description: `Select ALL elements matching current element's type/class.
+Use when: "all buttons like this", "every card", "all of these", "select all similar"`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      matchBy: {
+        type: Type.STRING,
+        description: '"tag" = same tag, "class" = same classes, "both" = exact match',
+      },
+    },
+    required: [],
+  },
+};
+
+// --- Hierarchical Drill-Down Selection Tools ---
+// These enable step-by-step navigation through the page structure
+
+const startDrillSelectionTool: FunctionDeclaration = {
+  name: 'start_drill_selection',
+  description: `🎯 START FOCUSED SELECTION MODE - Shows top-level page sections with numbers.
+
+USE WHEN user is looking for something specific or confused about which element:
+- "help me find the form"
+- "where is the contact section?"
+- "show me the main areas"
+- "I can't find it"
+- "which section has..."
+
+This shows numbered sections like: [1] Header [2] Hero [3] Features [4] Footer
+User says a number → drill_into() to focus there and see children.`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {},
+    required: [],
+  },
+};
+
+const drillIntoTool: FunctionDeclaration = {
+  name: 'drill_into',
+  description: `📍 DRILL INTO a numbered element - Focus on it and show its children with new numbers.
+
+USE WHEN user says a number during drill selection:
+- "1" / "number 1" / "the first one"
+- "4" / "number 4" / "that one"
+- "the header" (if header is [1])
+
+If the element has children → shows them numbered for further drilling.
+If no children → selects it as final selection.`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      elementNumber: {
+        type: Type.NUMBER,
+        description: 'The number of the element to drill into (1-based)',
+      },
+    },
+    required: ['elementNumber'],
+  },
+};
+
+const drillBackTool: FunctionDeclaration = {
+  name: 'drill_back',
+  description: `⬆️ GO BACK one level in drill selection - Return to parent level.
+
+USE WHEN:
+- "go back" / "back" / "up"  
+- "go up" / "parent level"
+- "wrong one" / "not that section"`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {},
+    required: [],
+  },
+};
+
+const drillForwardTool: FunctionDeclaration = {
+  name: 'drill_forward',
+  description: `⬇️ GO FORWARD in drill selection - Redo last drill action.
+
+USE WHEN:
+- "go forward" / "forward"
+- "back to where I was"
+- "redo" / "return"`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {},
+    required: [],
+  },
+};
+
+const exitDrillModeTool: FunctionDeclaration = {
+  name: 'exit_drill_mode',
+  description: `🚪 EXIT drill selection mode - Clear all numbered badges and highlights.
+
+USE WHEN:
+- "done" / "finished" / "exit"
+- "clear" / "cancel"
+- User selected final element
+- Moving on to different task`,
   parameters: {
     type: Type.OBJECT,
     properties: {},
@@ -586,7 +746,7 @@ TRIGGERS:
   },
 };
 
-export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onFindElementByText, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, onOpenItem, onOpenFile, onOpenFolder, onBrowserBack, onCloseBrowser, onApproveChange, onRejectChange, onUndoChange, onHighlightByNumber, onClearFocus, onSetViewport, onSwitchTab, selectedElement, projectFolder, currentUrl, googleApiKey, selectedModelId }: UseLiveGeminiParams) {
+export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSelect, onExecuteCode, onConfirmSelection, onGetPageElements, onFindElementByText, onPatchSourceFile, onListFiles, onReadFile, onClickElement, onNavigate, onScroll, onOpenItem, onOpenFile, onOpenFolder, onBrowserBack, onCloseBrowser, onApproveChange, onRejectChange, onUndoChange, onHighlightByNumber, onClearFocus, onSetViewport, onSwitchTab, onSelectParent, onSelectChildren, onSelectSiblings, onSelectAllMatching, onStartDrillSelection, onDrillInto, onDrillBack, onDrillForward, onExitDrillMode, selectedElement, projectFolder, currentUrl, googleApiKey, selectedModelId }: UseLiveGeminiParams) {
   const [streamState, setStreamState] = useState<StreamState>({
     isConnected: false,
     isStreaming: false,
@@ -594,6 +754,14 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
   });
 
   const [volume, setVolume] = useState(0);
+
+  // User corrections - when user manually selects elements to teach the voice agent
+  interface UserCorrection {
+    userDescription: string;       // What user said (e.g., "the form", "the container")
+    element: SelectedElement;      // The element they manually selected
+    timestamp: Date;
+  }
+  const userCorrectionsRef = useRef<UserCorrection[]>([]);
 
   // Using any for session promise type as LiveSession is not exported
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
@@ -742,99 +910,62 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
           },
-          tools: [{ functionDeclarations: [updateUiTool, selectElementTool, executeCodeTool, confirmSelectionTool, getPageElementsTool, findElementByTextTool, patchSourceFileTool, listFilesTool, readFileTool, clickElementTool, navigateTool, scrollTool, openFileBrowserItemTool, openFileTool, openFolderTool, fileBrowserBackTool, closeFileBrowserTool, approveCchangeTool, rejectChangeTool, undoChangeTool, highlightByNumberTool, clearFocusTool, setViewportTool, switchTabTool] }],
-          systemInstruction: `You are a specialized AI UI Engineer with voice control, file browsing, element selection, and browser navigation.
+          tools: [{ functionDeclarations: [updateUiTool, selectElementTool, executeCodeTool, confirmSelectionTool, getPageElementsTool, findElementByTextTool, patchSourceFileTool, listFilesTool, readFileTool, clickElementTool, navigateTool, scrollTool, openFileBrowserItemTool, openFileTool, openFolderTool, fileBrowserBackTool, closeFileBrowserTool, approveCchangeTool, rejectChangeTool, undoChangeTool, highlightByNumberTool, clearFocusTool, setViewportTool, switchTabTool, selectParentTool, selectChildrenTool, selectSiblingsTool, selectAllMatchingTool, startDrillSelectionTool, drillIntoTool, drillBackTool, drillForwardTool, exitDrillModeTool] }],
+          systemInstruction: `You are a fast, silent UI engineer. ACT FIRST, talk minimally.
 
-          You can see the user's screen or video feed if enabled.
-          You can hear the user's voice commands.
+CORE RULES:
+1. NEVER ASK PERMISSION - just do it. User said it, so do it.
+2. SELECT IMMEDIATELY when user refers to something - even if wrong, they'll correct you
+3. BE SILENT during actions - no "I'll now..." or "Let me..."
+4. RESPOND BRIEFLY after actions - "Done" or "Selected the header"
 
-          CAPABILITIES:
-          📁 FILE BROWSER: Browse files with numbered overlay, navigate folders, view files/images
-          🔍 PAGE INSPECTION: Get page elements, highlight by number, execute code
-          🧭 NAVIGATION: Click links, go back/forward, scroll, navigate to URLs
-          ✏️ EDITING: Preview changes with execute_code, save with patch_source_file
+INSTANT SELECTION - When user mentions ANY element:
+- "that button" → find_element_by_text + highlight immediately
+- "the header" → highlight_element_by_number(likely #1) immediately  
+- "number 3" → highlight_element_by_number(3)
+- "the image" → get_page_elements("images") + highlight first one
+Don't ask "which one?" - SELECT THE MOST LIKELY ONE. User will say "no, the other one"
 
-          🎯 ELEMENT HIGHLIGHTING - USE NUMBERS, NOT CSS SELECTORS!
-          Elements on the page are numbered (1, 2, 3...). Use highlight_element_by_number() to highlight them.
-          This is MORE RELIABLE than CSS selectors and never causes errors.
+🎯 DRILL-DOWN SELECTION - For finding specific elements step by step:
+When user says "help me find", "where is", "show me sections", "I can't find":
+1. start_drill_selection() → Shows numbered top-level sections from the ACTUAL page
+2. User says a number → drill_into(N) → Focus there, show its children numbered
+3. Keep drilling until user finds what they want
+4. "go back" / "back" → drill_back() → Return to parent level
+5. "forward" → drill_forward() → Redo (if went back)
+6. "done" / "exit" → exit_drill_mode() → Clear and finish
 
-          🔍 HIERARCHICAL FOCUSING - DRILL DOWN INTO SECTIONS:
-          When you highlight an element, it becomes the FOCUS. Subsequent get_page_elements
-          calls will ONLY show elements WITHIN the focused element. This lets users drill down:
+The tool returns the ACTUAL sections/elements found on the page. Read them back to the user.
+Example flow (actual content will vary by page):
+- start_drill_selection() returns sections → Tell user what you found
+- User picks a number → drill_into(N) → Tell user what children you found
+- Repeat until final selection or user says "go back" / "done"
 
-          Example conversation:
-          User: "show me the page" → get_page_elements()
-          You: "I see 20 elements. The header is #1, main section #5, footer #12"
-          User: "that middle section" → highlight_element_by_number(5) - SETS FOCUS
-          You: "Now focused on the main section"
-          User: "what's in there?" → get_page_elements() - now shows ONLY elements inside #5
-          You: "Within the main section: 3 buttons (#1, #2, #3)"
-          User: "the left one" → highlight_element_by_number(1)
-          User: "zoom out" → clear_focus() then get_page_elements() - shows all again
+DOM NAVIGATION - Move around the tree:
+- "parent" / "container" / "go up" → select_parent()
+- "children" / "what's inside" → select_children()
+- "next" / "previous" / "sibling" → select_siblings()
+- "all like this" / "every button" → select_all_matching()
 
-          WORKFLOW:
-          1. get_page_elements() - shows all page elements numbered
-          2. User picks a section → highlight_element_by_number(N) - sets focus to that section
-          3. get_page_elements() - now ONLY shows children of focused section
-          4. User: "clear focus" / "zoom out" → clear_focus() to see full page again
+HIERARCHY:
+- highlight_element_by_number() SETS FOCUS - subsequent get_page_elements() shows only children
+- "zoom out" / "clear" → clear_focus()
 
-          NUMBER-BASED COMMANDS:
-          - "highlight 3" / "number 3" → highlight_element_by_number(3)
-          - "that section" / "the header" → highlight to set focus
-          - "clear focus" / "zoom out" / "show all" → clear_focus()
-          - "show me the buttons" → get_page_elements('buttons')
+EDITS - Use execute_code(), NEVER update_ui():
+- "make it red" → execute_code() immediately
+- "delete it" → execute_code() to remove
+- "change text to X" → execute_code() to set innerText
 
-          ⚠️ IMPORTANT: highlight_element_by_number sets FOCUS for drilling down.
-          Use execute_code or update_ui for actual code changes.
+${selectedElement ? `SELECTED: <${selectedElement.tagName}> "${selectedElement.text?.slice(0,30) || ''}" - target THIS with execute_code()` : ''}
 
-          FILE BROWSER OVERLAY:
-          When user asks to see files ("show files", "list files", "check the public folder"), use list_files.
-          This shows a numbered overlay. User can then say "open 3" to navigate.
+FILE BROWSER:
+- "show files" → list_files()
+- "open 3" → open_item(3)
+- "close" → close_browser()
 
-          FILE BROWSER COMMANDS:
-          - "show me the files" / "list files" → list_files()
-          - "check the public folder" → list_files("public")
-          - "open 3" / "open three" / "number 3" → open_item(3) OR open_folder({ itemNumber: 3 })
-          - "open the src folder" / "go into hooks" → open_folder({ name: "src" })
-          - "open LandingPage.tsx" / "show me App.tsx" → open_file({ name: "LandingPage.tsx" })
-          - "go back" (in file browser) → browser_back()
-          - "close that" / "clear" / "enough" / "dismiss" → close_browser()
+APPROVAL: "yes" → approve_change(), "no" → reject_change(), "undo" → undo_change()
 
-          FILE TOOLS:
-          - open_file: Open a specific file by name - searches in current directory
-          - open_folder: For folders specifically - can use name OR number
-          - open_item: For any item by number (files or folders)
-
-          CLOSING CONTEXT:
-          When user says "close that", "clear that", "enough of that", "dismiss":
-          - If file browser is showing → close_browser()
-          - If element is selected → confirm_selection(false)
-          - Otherwise → acknowledge and do nothing
-
-          ${selectedElement ? `SELECTED ELEMENT: ${selectedElement.tagName} "${selectedElement.text || ''}"` : ''}
-
-          VOICE APPROVAL COMMANDS:
-          When user says these voice commands, use the approval tools:
-          - "yes", "accept", "approve", "do it", "go ahead" → approve_change()
-          - "no", "reject", "cancel", "nope", "wrong" → reject_change()
-          - "undo that", "undo the last change", "revert", "go back" → undo_change()
-
-          VOICE COMMANDS SUMMARY:
-          HIGHLIGHTING: "highlight 3", "show me the buttons", "number 2"
-          FILE BROWSER: "show files", "open 3", "go back", "close that"
-          PAGE: "click that", "scroll down"
-          APPROVAL: "yes"/"approve", "no"/"reject", "undo that"
-
-          🚀 INSTANT DOM EDITS - CRITICAL:
-          When user requests UI changes ("flip it back", "change the color", "move that button", etc):
-          - IMMEDIATELY call update_ui with the modified HTML
-          - Do NOT read source files first - you can infer changes from the current DOM
-          - Do NOT explain or describe what you're doing
-          - Do NOT use tools like read_file, get_page_elements, or list_files
-          - Apply the change silently and instantly
-          - Only respond AFTER the DOM update is complete
-
-          Be silent on instant edits. Concise on other tasks.`,
+BE INSTANT. BE SILENT. ACT FIRST.`,
         },
         callbacks: {
           onopen: () => {
@@ -932,6 +1063,15 @@ export function useLiveGemini({ videoRef, canvasRef, onCodeUpdate, onElementSele
                       onClearFocus,
                       onSetViewport,
                       onSwitchTab,
+                      onSelectParent,
+                      onSelectChildren,
+                      onSelectSiblings,
+                      onSelectAllMatching,
+                      onStartDrillSelection,
+                      onDrillInto,
+                      onDrillBack,
+                      onDrillForward,
+                      onExitDrillMode,
                     };
 
                     // Convert to typed tool calls

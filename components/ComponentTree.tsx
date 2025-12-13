@@ -12,6 +12,10 @@ export interface TreeNode {
   type: 'frame' | 'page' | 'component' | 'text' | 'group' | 'button' | 'link' | 'input' | 'image' | 'list'
   elementNumber?: number
   tagName?: string
+  // Source mapping from data-cluso-id
+  sourceFile?: string | null
+  sourceLine?: number | null
+  sourceColumn?: number | null
   children?: TreeNode[]
 }
 
@@ -113,7 +117,17 @@ const TreeItem = ({ node, level, onSelect, selectedId, isDarkMode, getIsExpanded
           )}>
             {getIcon(node.type, node.tagName)}
           </div>
-          <span className="truncate">{node.name}</span>
+          <div className="flex flex-col min-w-0 flex-1">
+            <span className="truncate">{node.name}</span>
+            {node.sourceFile && node.sourceLine && (
+              <span className={cn(
+                'text-[10px] truncate',
+                isDarkMode ? 'text-neutral-500' : 'text-stone-400'
+              )}>
+                {node.sourceFile}:{node.sourceLine}
+              </span>
+            )}
+          </div>
           {node.elementNumber && (
             <span className={cn(
               'text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0',

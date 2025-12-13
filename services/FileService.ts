@@ -273,6 +273,138 @@ class FileService {
       data: { originalContent, patchedContent },
     };
   }
+
+  /**
+   * Apply a patch with automatic history recording for undo support
+   */
+  async applyPatchWithHistory(
+    filePath: string,
+    originalContent: string,
+    patchedContent: string,
+    description: string,
+    options?: { generatedBy?: string; lineNumber?: number }
+  ): Promise<Result<{ success: boolean }>> {
+    // Write the patched content
+    const writeResult = await this.writeFile(filePath, patchedContent);
+    if (!writeResult.success) {
+      return { success: false, error: writeResult.error || `Failed to write file: ${filePath}` };
+    }
+
+    // Record in patch history for undo support
+    const electronAPI = (window as any).electronAPI;
+    if (electronAPI?.patchHistory?.record) {
+      try {
+        await electronAPI.patchHistory.record(
+          filePath,
+          originalContent,
+          patchedContent,
+          description,
+          options
+        );
+        console.log('[FileService] Patch recorded in history:', description);
+      } catch (err) {
+        console.warn('[FileService] Failed to record patch history:', err);
+        // Don't fail the operation if history recording fails
+      }
+    }
+
+    return { success: true, data: { success: true } };
+  }
+
+  /**
+   * Undo the last patch for a file
+   */
+  async undoPatch(filePath: string): Promise<Result<{ restoredContent: string }>> {
+    const electronAPI = (window as any).electronAPI;
+    if (!electronAPI?.patchHistory?.undo) {
+      return { success: false, error: 'Patch history not available' };
+    }
+
+    try {
+      const result = await electronAPI.patchHistory.undo(filePath);
+      if (result.success) {
+        return { success: true, data: { restoredContent: result.restoredContent } };
+      }
+      return { success: false, error: result.error || 'Undo failed' };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Undo failed' };
+    }
+  }
+
+  /**
+   * Redo the last undone patch for a file
+   */
+  async redoPatch(filePath: string): Promise<Result<{ restoredContent: string }>> {
+    const electronAPI = (window as any).electronAPI;
+    if (!electronAPI?.patchHistory?.redo) {
+      return { success: false, error: 'Patch history not available' };
+    }
+
+    try {
+      const result = await electronAPI.patchHistory.redo(filePath);
+      if (result.success) {
+        return { success: true, data: { restoredContent: result.restoredContent } };
+      }
+      return { success: false, error: result.error || 'Redo failed' };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Redo failed' };
+    }
+  }
+
+  /**
+   * Create a named checkpoint for a file
+   */
+  async createCheckpoint(filePath: string, name?: string): Promise<Result<{ checkpointId: string; name: string }>> {
+    const electronAPI = (window as any).electronAPI;
+    if (!electronAPI?.patchHistory?.createCheckpoint) {
+      return { success: false, error: 'Patch history not available' };
+    }
+
+    try {
+      const result = await electronAPI.patchHistory.createCheckpoint(filePath, name);
+      if (result.success) {
+        return { success: true, data: { checkpointId: result.checkpointId, name: result.name } };
+      }
+      return { success: false, error: result.error || 'Failed to create checkpoint' };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to create checkpoint' };
+    }
+  }
+
+  /**
+   * Get patch history status for a file
+   */
+  async getPatchHistoryStatus(filePath: string): Promise<Result<{
+    canUndo: boolean;
+    canRedo: boolean;
+    undoCount: number;
+    redoCount: number;
+    checkpointCount: number;
+  }>> {
+    const electronAPI = (window as any).electronAPI;
+    if (!electronAPI?.patchHistory?.getStatus) {
+      return { success: false, error: 'Patch history not available' };
+    }
+
+    try {
+      const result = await electronAPI.patchHistory.getStatus(filePath);
+      if (result.success) {
+        return {
+          success: true,
+          data: {
+            canUndo: result.canUndo,
+            canRedo: result.canRedo,
+            undoCount: result.undoCount,
+            redoCount: result.redoCount,
+            checkpointCount: result.checkpointCount,
+          },
+        };
+      }
+      return { success: false, error: result.error || 'Failed to get status' };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to get status' };
+    }
+  }
 }
 
 export const fileService = new FileService();

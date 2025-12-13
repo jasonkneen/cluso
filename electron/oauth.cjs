@@ -98,9 +98,29 @@ function decryptString(encryptedData) {
 }
 
 /**
- * Load OAuth config from file
+ * Load OAuth config from file (async for non-blocking I/O)
+ * PERFORMANCE: Uses fs.promises to avoid blocking the Electron main thread
  */
-function loadOAuthConfig() {
+async function loadOAuthConfig() {
+  try {
+    const configPath = getConfigPath()
+    const data = await fs.promises.readFile(configPath, 'utf-8')
+    return JSON.parse(data)
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      // File doesn't exist yet - not an error
+      return {}
+    }
+    console.error('Failed to load OAuth config:', error)
+    return {}
+  }
+}
+
+/**
+ * Synchronous version for startup/critical paths only
+ * @deprecated Prefer loadOAuthConfig() for non-blocking operation
+ */
+function loadOAuthConfigSync() {
   try {
     const configPath = getConfigPath()
     if (fs.existsSync(configPath)) {
@@ -114,11 +134,16 @@ function loadOAuthConfig() {
 }
 
 /**
- * Save OAuth config to file
+ * Save OAuth config to file (async for non-blocking I/O)
+ * PERFORMANCE: Uses fs.promises to avoid blocking the Electron main thread
  */
-function saveOAuthConfig(config) {
+async function saveOAuthConfig(config) {
   try {
-    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2))
+    const configPath = getConfigPath()
+    // Ensure directory exists
+    const dir = path.dirname(configPath)
+    await fs.promises.mkdir(dir, { recursive: true })
+    await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2))
   } catch (error) {
     console.error('Failed to save OAuth config:', error)
   }
@@ -285,9 +310,10 @@ async function createApiKey(accessToken) {
 
 /**
  * Save OAuth tokens to config with encryption
+ * PERFORMANCE: Now async to avoid blocking main thread
  */
-function saveOAuthTokens(tokens) {
-  const config = loadOAuthConfig()
+async function saveOAuthTokens(tokens) {
+  const config = await loadOAuthConfig()
   // Encrypt sensitive token data
   config.oauthTokens = {
     type: tokens.type,
@@ -295,14 +321,15 @@ function saveOAuthTokens(tokens) {
     access: encryptString(tokens.access),
     expires: tokens.expires
   }
-  saveOAuthConfig(config)
+  await saveOAuthConfig(config)
 }
 
 /**
  * Get OAuth tokens from config with decryption
+ * PERFORMANCE: Now async to avoid blocking main thread
  */
-function getOAuthTokens() {
-  const config = loadOAuthConfig()
+async function getOAuthTokens() {
+  const config = await loadOAuthConfig()
   const tokens = config.oauthTokens
   if (!tokens) return null
 
@@ -326,37 +353,41 @@ function getOAuthTokens() {
 
 /**
  * Remove OAuth tokens from config
+ * PERFORMANCE: Now async to avoid blocking main thread
  */
-function clearOAuthTokens() {
-  const config = loadOAuthConfig()
+async function clearOAuthTokens() {
+  const config = await loadOAuthConfig()
   delete config.oauthTokens
-  saveOAuthConfig(config)
+  await saveOAuthConfig(config)
 }
 
 /**
  * Save Claude Code API key to config with encryption
+ * PERFORMANCE: Now async to avoid blocking main thread
  */
-function saveClaudeCodeApiKey(apiKey) {
-  const config = loadOAuthConfig()
+async function saveClaudeCodeApiKey(apiKey) {
+  const config = await loadOAuthConfig()
   config.claudeCodeApiKey = encryptString(apiKey)
-  saveOAuthConfig(config)
+  await saveOAuthConfig(config)
 }
 
 /**
  * Get Claude Code API key from config with decryption
+ * PERFORMANCE: Now async to avoid blocking main thread
  */
-function getClaudeCodeApiKey() {
-  const config = loadOAuthConfig()
+async function getClaudeCodeApiKey() {
+  const config = await loadOAuthConfig()
   return decryptString(config.claudeCodeApiKey)
 }
 
 /**
  * Clear Claude Code API key from config
+ * PERFORMANCE: Now async to avoid blocking main thread
  */
-function clearClaudeCodeApiKey() {
-  const config = loadOAuthConfig()
+async function clearClaudeCodeApiKey() {
+  const config = await loadOAuthConfig()
   delete config.claudeCodeApiKey
-  saveOAuthConfig(config)
+  await saveOAuthConfig(config)
 }
 
 /**
@@ -372,7 +403,7 @@ function isTokenExpired(tokens) {
  * Uses a lock to prevent concurrent refresh attempts
  */
 async function getValidAccessToken() {
-  const tokens = getOAuthTokens()
+  const tokens = await getOAuthTokens()
   if (!tokens) {
     return null
   }
@@ -394,7 +425,7 @@ async function getValidAccessToken() {
     refreshInProgress = (async () => {
       try {
         // Re-check tokens in case another caller just refreshed
-        const currentTokens = getOAuthTokens()
+        const currentTokens = await getOAuthTokens()
         if (currentTokens && !isTokenExpired(currentTokens)) {
           return currentTokens.access
         }
@@ -404,7 +435,7 @@ async function getValidAccessToken() {
           console.error('Failed to refresh token')
           return null
         }
-        saveOAuthTokens(newTokens)
+        await saveOAuthTokens(newTokens)
         return newTokens.access
       } finally {
         // Clear the lock after refresh completes
@@ -492,11 +523,81 @@ function startCallbackServer() {
           res.end(`
             <!DOCTYPE html>
             <html>
-              <head><title>OAuth Error</title></head>
-              <body style="font-family: system-ui; padding: 40px; text-align: center;">
-                <h1 style="color: #dc2626;">Authentication Failed</h1>
-                <p>${errorDescription || error}</p>
-                <p>You can close this window.</p>
+              <head>
+                <title>Cluso - Authentication Error</title>
+                <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+                    min-height: 100vh;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    color: #fff;
+                  }
+                  .container {
+                    text-align: center;
+                    padding: 48px;
+                    max-width: 420px;
+                  }
+                  .icon {
+                    width: 64px;
+                    height: 64px;
+                    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin: 0 auto 24px;
+                    font-size: 32px;
+                    animation: shake 0.5s ease-in-out;
+                  }
+                  @keyframes shake {
+                    0%, 100% { transform: translateX(0); }
+                    25% { transform: translateX(-8px); }
+                    75% { transform: translateX(8px); }
+                  }
+                  h1 {
+                    font-size: 24px;
+                    font-weight: 600;
+                    margin-bottom: 12px;
+                    background: linear-gradient(135deg, #fff 0%, #a1a1aa 100%);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                  }
+                  p {
+                    color: #a1a1aa;
+                    font-size: 14px;
+                    line-height: 1.6;
+                    margin-bottom: 8px;
+                  }
+                  .error-detail {
+                    background: rgba(239, 68, 68, 0.1);
+                    border: 1px solid rgba(239, 68, 68, 0.2);
+                    border-radius: 8px;
+                    padding: 12px 16px;
+                    margin: 16px 0;
+                    font-size: 13px;
+                    color: #fca5a5;
+                  }
+                  .logo {
+                    font-size: 14px;
+                    color: #525252;
+                    margin-top: 32px;
+                    letter-spacing: 2px;
+                    text-transform: uppercase;
+                  }
+                </style>
+              </head>
+              <body>
+                <div class="container">
+                  <div class="icon">✕</div>
+                  <h1>Authentication Failed</h1>
+                  <div class="error-detail">${errorDescription || error}</div>
+                  <p>Please close this window and try again.</p>
+                  <div class="logo">Cluso</div>
+                </div>
               </body>
             </html>
           `)
@@ -514,11 +615,91 @@ function startCallbackServer() {
           res.end(`
             <!DOCTYPE html>
             <html>
-              <head><title>OAuth Success</title></head>
-              <body style="font-family: system-ui; padding: 40px; text-align: center;">
-                <h1 style="color: #16a34a;">✓ Authentication Successful</h1>
-                <p>You can close this window and return to the application.</p>
-                <script>window.close()</script>
+              <head>
+                <title>Cluso - Authentication Success</title>
+                <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+                    min-height: 100vh;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    color: #fff;
+                  }
+                  .container {
+                    text-align: center;
+                    padding: 48px;
+                    max-width: 420px;
+                  }
+                  .icon {
+                    width: 64px;
+                    height: 64px;
+                    background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin: 0 auto 24px;
+                    font-size: 32px;
+                    animation: pop 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+                  }
+                  @keyframes pop {
+                    0% { transform: scale(0); opacity: 0; }
+                    100% { transform: scale(1); opacity: 1; }
+                  }
+                  .checkmark {
+                    animation: draw 0.5s ease-in-out 0.2s forwards;
+                    stroke-dasharray: 50;
+                    stroke-dashoffset: 50;
+                  }
+                  @keyframes draw {
+                    to { stroke-dashoffset: 0; }
+                  }
+                  h1 {
+                    font-size: 24px;
+                    font-weight: 600;
+                    margin-bottom: 12px;
+                    background: linear-gradient(135deg, #fff 0%, #a1a1aa 100%);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                  }
+                  p {
+                    color: #a1a1aa;
+                    font-size: 14px;
+                    line-height: 1.6;
+                  }
+                  .closing {
+                    margin-top: 24px;
+                    padding: 12px 24px;
+                    background: rgba(255, 255, 255, 0.05);
+                    border-radius: 8px;
+                    font-size: 13px;
+                    color: #71717a;
+                  }
+                  .logo {
+                    font-size: 14px;
+                    color: #525252;
+                    margin-top: 32px;
+                    letter-spacing: 2px;
+                    text-transform: uppercase;
+                  }
+                </style>
+              </head>
+              <body>
+                <div class="container">
+                  <div class="icon">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline class="checkmark" points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                  </div>
+                  <h1>Authentication Successful</h1>
+                  <p>You're now connected to Claude.</p>
+                  <div class="closing">This window will close automatically...</div>
+                  <div class="logo">Cluso</div>
+                </div>
+                <script>setTimeout(() => window.close(), 2000)</script>
               </body>
             </html>
           `)
@@ -536,11 +717,66 @@ function startCallbackServer() {
           res.end(`
             <!DOCTYPE html>
             <html>
-              <head><title>OAuth Error</title></head>
-              <body style="font-family: system-ui; padding: 40px; text-align: center;">
-                <h1 style="color: #dc2626;">Authentication Failed</h1>
-                <p>No authorization code received.</p>
-                <p>You can close this window.</p>
+              <head>
+                <title>Cluso - Authentication Error</title>
+                <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+                    min-height: 100vh;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    color: #fff;
+                  }
+                  .container {
+                    text-align: center;
+                    padding: 48px;
+                    max-width: 420px;
+                  }
+                  .icon {
+                    width: 64px;
+                    height: 64px;
+                    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin: 0 auto 24px;
+                    font-size: 32px;
+                  }
+                  h1 {
+                    font-size: 24px;
+                    font-weight: 600;
+                    margin-bottom: 12px;
+                    background: linear-gradient(135deg, #fff 0%, #a1a1aa 100%);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                  }
+                  p {
+                    color: #a1a1aa;
+                    font-size: 14px;
+                    line-height: 1.6;
+                    margin-bottom: 8px;
+                  }
+                  .logo {
+                    font-size: 14px;
+                    color: #525252;
+                    margin-top: 32px;
+                    letter-spacing: 2px;
+                    text-transform: uppercase;
+                  }
+                </style>
+              </head>
+              <body>
+                <div class="container">
+                  <div class="icon">?</div>
+                  <h1>Something Went Wrong</h1>
+                  <p>No authorization code was received.</p>
+                  <p>Please close this window and try again.</p>
+                  <div class="logo">Cluso</div>
+                </div>
               </body>
             </html>
           `)

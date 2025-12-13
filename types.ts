@@ -90,6 +90,7 @@ export interface SelectedElement {
     width: number;
     height: number;
   };
+  selector?: string;
   // Move mode - target position for repositioning
   targetPosition?: {
     x: number;

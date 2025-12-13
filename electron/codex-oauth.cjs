@@ -42,9 +42,29 @@ function getCodexCliAuthPath() {
 }
 
 /**
- * Load Codex OAuth config from file
+ * Load Codex OAuth config from file (async for non-blocking I/O)
+ * PERFORMANCE: Uses fs.promises to avoid blocking the Electron main thread
  */
-function loadCodexConfig() {
+async function loadCodexConfig() {
+  try {
+    const configPath = getConfigPath()
+    const data = await fs.promises.readFile(configPath, 'utf-8')
+    return JSON.parse(data)
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      // File doesn't exist yet - not an error
+      return {}
+    }
+    console.error('Failed to load Codex OAuth config:', error)
+    return {}
+  }
+}
+
+/**
+ * Synchronous version for startup/critical paths only
+ * @deprecated Prefer loadCodexConfig() for non-blocking operation
+ */
+function loadCodexConfigSync() {
   try {
     const configPath = getConfigPath()
     if (fs.existsSync(configPath)) {
@@ -58,11 +78,16 @@ function loadCodexConfig() {
 }
 
 /**
- * Save Codex OAuth config to file
+ * Save Codex OAuth config to file (async for non-blocking I/O)
+ * PERFORMANCE: Uses fs.promises to avoid blocking the Electron main thread
  */
-function saveCodexConfig(config) {
+async function saveCodexConfig(config) {
   try {
-    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2))
+    const configPath = getConfigPath()
+    // Ensure directory exists
+    const dir = path.dirname(configPath)
+    await fs.promises.mkdir(dir, { recursive: true })
+    await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2))
   } catch (error) {
     console.error('Failed to save Codex OAuth config:', error)
   }
@@ -238,28 +263,31 @@ function extractAccountId(token) {
 
 /**
  * Save Codex OAuth tokens to config
+ * PERFORMANCE: Now async to avoid blocking main thread
  */
-function saveCodexTokens(tokens) {
-  const config = loadCodexConfig()
+async function saveCodexTokens(tokens) {
+  const config = await loadCodexConfig()
   config.oauthTokens = tokens
-  saveCodexConfig(config)
+  await saveCodexConfig(config)
 }
 
 /**
  * Get Codex OAuth tokens from config
+ * PERFORMANCE: Now async to avoid blocking main thread
  */
-function getCodexTokens() {
-  const config = loadCodexConfig()
+async function getCodexTokens() {
+  const config = await loadCodexConfig()
   return config.oauthTokens || null
 }
 
 /**
  * Remove Codex OAuth tokens from config
+ * PERFORMANCE: Now async to avoid blocking main thread
  */
-function clearCodexTokens() {
-  const config = loadCodexConfig()
+async function clearCodexTokens() {
+  const config = await loadCodexConfig()
   delete config.oauthTokens
-  saveCodexConfig(config)
+  await saveCodexConfig(config)
 }
 
 /**

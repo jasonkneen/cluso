@@ -18,6 +18,7 @@ interface LeftSidebarProps {
   isDarkMode: boolean
   panelBg: string
   panelBorder: string
+  headerBg?: string
 
   treeData: TreeNode | null
   selectedId: string | null
@@ -47,6 +48,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   isDarkMode,
   panelBg,
   panelBorder,
+  headerBg,
   treeData,
   selectedId,
   onSelect,
@@ -129,6 +131,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           isDarkMode={isDarkMode}
           panelBg={panelBg}
           panelBorder={panelBorder}
+          headerBg={headerBg}
           isLoading={isLoading}
           embedded
           className="h-full"

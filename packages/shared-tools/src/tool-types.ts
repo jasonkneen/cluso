@@ -95,6 +95,17 @@ export interface ToolHandlers {
     matches?: Array<{ elementNumber: number; text: string; tagName: string }>
     error?: string
   }>
+  // DOM Navigation
+  onSelectParent?: (levels?: number) => Promise<{ success: boolean; element?: Record<string, unknown>; error?: string }>
+  onSelectChildren?: (selector?: string) => Promise<{ success: boolean; children?: Record<string, unknown>[]; error?: string }>
+  onSelectSiblings?: (direction: 'next' | 'prev' | 'all') => Promise<{ success: boolean; siblings?: Record<string, unknown>[]; error?: string }>
+  onSelectAllMatching?: (matchBy: 'tag' | 'class' | 'both') => Promise<{ success: boolean; matches?: Record<string, unknown>[]; error?: string }>
+  // Drill-Down Selection
+  onStartDrillSelection?: () => Promise<{ success: boolean; sections?: Record<string, unknown>[]; level?: number; error?: string }>
+  onDrillInto?: (elementNumber: number) => Promise<{ success: boolean; isFinalSelection?: boolean; element?: Record<string, unknown>; children?: Record<string, unknown>[]; description?: string; level?: number; canGoBack?: boolean; canGoForward?: boolean; error?: string }>
+  onDrillBack?: () => Promise<{ success: boolean; children?: Record<string, unknown>[]; level?: number; canGoBack?: boolean; canGoForward?: boolean; error?: string }>
+  onDrillForward?: () => Promise<{ success: boolean; children?: Record<string, unknown>[]; level?: number; canGoBack?: boolean; canGoForward?: boolean; error?: string }>
+  onExitDrillMode?: () => Promise<{ success: boolean }>
 }
 
 /**

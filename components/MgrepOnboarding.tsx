@@ -225,11 +225,11 @@ export function MgrepOnboardingDemo({ isDarkMode, onAccept, onDecline, onClose }
                     )}
                   </div>
                   <div className="space-y-2 min-h-[300px]">
-                    {semanticResults.map((result, i) => (
+                    {semanticResults.filter(Boolean).map((result, i) => (
                       <div
                         key={i}
                         className={`p-3 rounded-lg border animate-fadeIn ${
-                          result.match
+                          result?.match
                             ? isDarkMode ? 'bg-purple-500/10 border-purple-500/30' : 'bg-purple-50 border-purple-200'
                             : isDarkMode ? 'bg-neutral-800 border-neutral-700' : 'bg-white border-stone-200'
                         }`}
@@ -237,20 +237,20 @@ export function MgrepOnboardingDemo({ isDarkMode, onAccept, onDecline, onClose }
                       >
                         <div className="flex items-center justify-between mb-1">
                           <span className={`text-xs font-mono ${isDarkMode ? 'text-purple-400' : 'text-purple-600'}`}>
-                            {result.file}:{result.line}
+                            {result?.file}:{result?.line}
                           </span>
                           <span className={`text-xs px-2 py-0.5 rounded-full ${
-                            result.similarity > 80
+                            (result?.similarity ?? 0) > 80
                               ? 'bg-green-500/20 text-green-400'
-                              : result.similarity > 65
+                              : (result?.similarity ?? 0) > 65
                                 ? 'bg-yellow-500/20 text-yellow-400'
                                 : 'bg-neutral-500/20 text-neutral-400'
                           }`}>
-                            {result.similarity}%
+                            {result?.similarity}%
                           </span>
                         </div>
                         <pre className={`text-xs font-mono ${isDarkMode ? 'text-neutral-300' : 'text-stone-700'}`}>
-                          {result.content}
+                          {result?.content}
                         </pre>
                       </div>
                     ))}

@@ -87,6 +87,55 @@ function supportsThinking(modelId) {
 }
 
 // ============================================================================
+// Platform Environment
+// ============================================================================
+
+/**
+ * Build platform-specific environment variables
+ */
+function buildPlatformEnv(workingDir) {
+  const isWindows = process.platform === 'win32'
+  const pathSeparator = isWindows ? ';' : ':'
+
+  const defaultPaths = isWindows
+    ? [
+        path.join(os.homedir(), 'AppData', 'Roaming', 'npm'),
+        path.join(os.homedir(), 'AppData', 'Local', 'pnpm'),
+        path.join(os.homedir(), '.cargo', 'bin'),
+        'C:\\Program Files\\nodejs',
+        'C:\\Program Files\\Git\\bin',
+        'C:\\Program Files\\Git\\cmd',
+      ]
+    : [
+        '/opt/homebrew/bin',
+        '/usr/local/bin',
+        '/usr/bin',
+        '/bin',
+        path.join(os.homedir(), '.nvm/versions/node/v22.14.0/bin'),
+        path.join(os.homedir(), '.cargo', 'bin'),
+        path.join(os.homedir(), '.local', 'bin'),
+      ]
+
+  const enhancedPath = [...defaultPaths, process.env.PATH || ''].join(pathSeparator)
+
+  const baseEnv = {
+    ...process.env,
+    PATH: enhancedPath,
+  }
+
+  if (isWindows) {
+    baseEnv.USERPROFILE = process.env.USERPROFILE || os.homedir()
+    // PWD is not commonly used on Windows, but set it anyway
+    if (workingDir) baseEnv.CD = workingDir
+  } else {
+    baseEnv.HOME = os.homedir()
+    if (workingDir) baseEnv.PWD = workingDir
+  }
+
+  return baseEnv
+}
+
+// ============================================================================
 // CLI Path Resolution
 // ============================================================================
 
@@ -96,11 +145,29 @@ function supportsThinking(modelId) {
  */
 function resolveClaudeCodeCli() {
   // Prefer global claude CLI which has working OAuth auth
-  const globalPaths = [
-    '/usr/local/bin/claude',
-    path.join(os.homedir(), '.npm', 'bin', 'claude'),
-    path.join(os.homedir(), '.local', 'bin', 'claude'),
-  ]
+  const isWindows = process.platform === 'win32'
+
+  const globalPaths = isWindows
+    ? [
+        // Windows paths (use .cmd extension for npm packages)
+        path.join(os.homedir(), 'AppData', 'Roaming', 'npm', 'claude.cmd'),
+        path.join(os.homedir(), 'AppData', 'Roaming', 'npm', 'claude'),
+        path.join(os.homedir(), 'AppData', 'Local', 'pnpm', 'claude.cmd'),
+        path.join(os.homedir(), 'AppData', 'Local', 'pnpm', 'claude'),
+        path.join(os.homedir(), '.yarn', 'bin', 'claude.cmd'),
+        path.join(os.homedir(), '.yarn', 'bin', 'claude'),
+        'C:\\Program Files\\nodejs\\claude.cmd',
+      ]
+    : [
+        // macOS/Linux paths
+        '/usr/local/bin/claude',
+        '/opt/homebrew/bin/claude',
+        path.join(os.homedir(), '.npm', 'bin', 'claude'),
+        path.join(os.homedir(), '.local', 'bin', 'claude'),
+        // npm global installs
+        path.join(os.homedir(), 'Library', 'pnpm', 'claude'),
+        path.join(os.homedir(), '.yarn', 'bin', 'claude'),
+      ]
 
   for (const globalPath of globalPaths) {
     if (existsSync(globalPath)) {
@@ -402,12 +469,7 @@ async function streamChat(options) {
           preset: 'claude_code',
           append: system ? `${system}\n\n${SYSTEM_PROMPT_APPEND}` : SYSTEM_PROMPT_APPEND,
         },
-        env: {
-          ...process.env,
-          // Ensure proper working directory
-          PWD: workingDir,
-          HOME: os.homedir(),
-        },
+        env: buildPlatformEnv(workingDir),
       },
     })
 

@@ -132,6 +132,7 @@ export interface AppSettings {
   models: SettingsModel[]
   connections: Connection[]
   clusoCloudEditsEnabled?: boolean
+  fastPathAutoApplyEnabled?: boolean
   // Claude Code OAuth state
   claudeCodeAuthenticated?: boolean
   claudeCodeExpiresAt?: number | null
@@ -155,6 +156,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   windowOpacity: 0.92,
   windowBlur: 12,
   clusoCloudEditsEnabled: false,
+  fastPathAutoApplyEnabled: false,
   providers: [
     { id: 'google', name: 'Google AI (Gemini)', apiKey: '', enabled: true },
     { id: 'openai', name: 'OpenAI', apiKey: '', enabled: false },
@@ -2925,6 +2927,41 @@ serve"
               <div className={`mt-3 p-3 rounded-lg ${isDarkMode ? 'bg-neutral-900/60' : 'bg-white'} border ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
                 <p className={`text-xs ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>
                   The app will call Morph Fast Apply automatically when enabled. Set <code className="px-1 py-0.5 rounded bg-black/10">MORPH_API_KEY</code> in your environment. No local model download required.
+                </p>
+              </div>
+            </div>
+
+            <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-neutral-800/60 border-neutral-700' : 'bg-stone-50 border-stone-200'}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${isDarkMode ? 'bg-emerald-500/20' : 'bg-emerald-100'}`}>
+                    <Zap size={18} className={isDarkMode ? 'text-emerald-300' : 'text-emerald-700'} />
+                  </div>
+                  <div>
+                    <h3 className={`font-semibold ${isDarkMode ? 'text-white' : 'text-stone-900'}`}>Auto-Apply Fast Path Source Edits</h3>
+                    <p className={`text-sm ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>
+                      Automatically write source patches that were generated deterministically (Fast Path) after an instant DOM preview. AI-generated patches still require explicit approval.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => updateSettings({ fastPathAutoApplyEnabled: !settings.fastPathAutoApplyEnabled })}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium border transition ${
+                    settings.fastPathAutoApplyEnabled
+                      ? isDarkMode
+                        ? 'bg-emerald-600 text-white border-emerald-500'
+                        : 'bg-emerald-600 text-white border-emerald-600'
+                      : isDarkMode
+                        ? 'bg-neutral-800 text-neutral-200 border-neutral-600 hover:bg-neutral-700'
+                        : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
+                  }`}
+                >
+                  {settings.fastPathAutoApplyEnabled ? 'Enabled' : 'Enable'}
+                </button>
+              </div>
+              <div className={`mt-3 p-3 rounded-lg ${isDarkMode ? 'bg-neutral-900/60' : 'bg-white'} border ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
+                <p className={`text-xs ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>
+                  This is global opt-in approval. Disable if you prefer to manually confirm every source write.
                 </p>
               </div>
             </div>

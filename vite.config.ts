@@ -14,7 +14,9 @@ export default defineConfig(({ mode }) => {
         react({
           jsxRuntime: 'automatic',
           // Vite automatically adds __source in dev mode, no need for Babel plugin
-        })
+        }),
+        // DISABLED - Corrupts code (AST transformation issue)
+        // clusoMetadataPlugin()
       ],
       define: {
         'process.env.API_KEY': JSON.stringify(env.VITE_GOOGLE_API_KEY),

@@ -1480,9 +1480,42 @@ function getSourceLocation(el) {
             console.log('[Page] No __REACT_DEVTOOLS_GLOBAL_HOOK__ found');
           }
 
-          // PRIMARY: Use app's built-in __SOURCE_LOCATION__ API (bippy-based)
-          // This is the most reliable when the target app has bippy integrated
-          if (window.__SOURCE_LOCATION__ && window.__SOURCE_LOCATION__.getElementSourceLocation) {
+          // PRIMARY: Use ReactGrab if available (loaded via CDN script tag)
+          // ReactGrab handles React 19 source maps correctly
+          if (typeof ReactGrab !== 'undefined' && ReactGrab.getStack) {
+            try {
+              console.log('[Page] Trying ReactGrab.getStack...');
+              const stackFrames = await ReactGrab.getStack(el);
+              console.log('[Page] ReactGrab result:', stackFrames);
+              
+              if (stackFrames && stackFrames.length > 0) {
+                const sources = stackFrames
+                  .filter(f => f.fileName && !f.fileName.includes('node_modules'))
+                  .map((f, i) => ({
+                    name: f.functionName || el.tagName.toLowerCase(),
+                    file: f.fileName,
+                    line: f.lineNumber || 0,
+                    column: f.columnNumber || 0,
+                    isJSXLocation: i === 0
+                  }));
+                
+                if (sources.length > 0) {
+                  sourceInfo = {
+                    sources: sources,
+                    summary: sources[0].file + ':' + sources[0].line
+                  };
+                  console.log('[Page] Source from ReactGrab:', sourceInfo.summary);
+                }
+              }
+            } catch (e) {
+              console.log('[Page] ReactGrab error:', e.message);
+            }
+          } else {
+            console.log('[Page] ReactGrab not available');
+          }
+
+          // FALLBACK 1: Use app's built-in __SOURCE_LOCATION__ API (bippy-based)
+          if (!sourceInfo && window.__SOURCE_LOCATION__ && window.__SOURCE_LOCATION__.getElementSourceLocation) {
             try {
               console.log('[Page] Trying __SOURCE_LOCATION__ API...');
               const result = await window.__SOURCE_LOCATION__.getElementSourceLocation(el);
@@ -1496,7 +1529,7 @@ function getSourceLocation(el) {
             }
           }
 
-          // FALLBACK 1: Use our injected extractReactContext
+          // FALLBACK 2: Use our injected extractReactContext
           if (!sourceInfo && window.extractReactContext) {
             try {
               const context = window.extractReactContext(el);
@@ -2028,48 +2061,10 @@ ipcRenderer.on('select-element-by-selector', async (event, selector) => {
 })
 
 // --- Drag-Drop on Selected Elements ---
-let dropLabel = null
 let originalTextContent = null
 let isEditing = false
 let editToolbar = null
 let editingSourceLocation = null // Store source location when editing starts
-
-function getDropAction(element, dataTransfer) {
-  const hasFiles = dataTransfer.types.includes('Files')
-  const hasUrl = dataTransfer.types.includes('text/uri-list') || dataTransfer.types.includes('text/plain')
-  const tagName = element.tagName.toLowerCase()
-
-  if (tagName === 'img' && hasFiles) return 'Replace Image'
-  if (tagName === 'img' && hasUrl) return 'Set Image URL'
-  if ((tagName === 'a' || tagName === 'button') && hasUrl) return 'Set Link'
-  if (hasFiles) return 'Insert Image'
-  if (hasUrl) return 'Insert Link'
-  return 'Drop Here'
-}
-
-function showDropLabel(element, action) {
-  if (!dropLabel) {
-    dropLabel = document.createElement('div')
-    dropLabel.className = 'drop-zone-label'
-    markClusoUi(dropLabel)
-    document.body.appendChild(dropLabel)
-  }
-
-  // Lucide download icon as SVG
-  const downloadIcon = '<svg class="drop-zone-label-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'
-
-  const rect = element.getBoundingClientRect()
-  dropLabel.innerHTML = downloadIcon + '<span>' + action + '</span>'
-  dropLabel.style.left = (rect.left + rect.width / 2 - 60) + 'px'
-  dropLabel.style.top = (rect.top - 40) + 'px'
-  dropLabel.style.display = 'flex'
-}
-
-function hideDropLabel() {
-  if (dropLabel) {
-    dropLabel.style.display = 'none'
-  }
-}
 
 function createEditToolbar(element) {
   if (editToolbar) editToolbar.remove()

@@ -11,6 +11,7 @@ interface LayersPanelProps {
   isDarkMode: boolean
   panelBg: string
   panelBorder: string
+  headerBg?: string
   isLoading?: boolean
   className?: string
   style?: CSSProperties
@@ -26,6 +27,7 @@ export const LayersPanel = ({
   isDarkMode,
   panelBg,
   panelBorder,
+  headerBg,
   isLoading = false,
   className,
   style,
@@ -55,7 +57,7 @@ export const LayersPanel = ({
     >
       {/* Header */}
       <div
-        className="h-10 border-b flex items-center justify-between px-3"
+        className="h-12 border-b flex items-center justify-between px-3"
         style={{ borderColor: panelBorder }}
       >
         <div className="flex items-center gap-2">

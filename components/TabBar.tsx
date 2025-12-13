@@ -27,6 +27,7 @@ interface TabBarProps {
   fastApplyLoading?: boolean
   fileWatcherActive?: boolean
   extensionConnected?: boolean
+  indexingStatus?: 'idle' | 'indexing' | 'indexed'
 }
 
 const TAB_TYPES = [
@@ -59,7 +60,8 @@ export function TabBar({
   fastApplyReady,
   fastApplyLoading,
   fileWatcherActive,
-  extensionConnected
+  extensionConnected,
+  indexingStatus = 'idle'
 }: TabBarProps) {
   const { currentTheme } = useTheme()
   const [showMenu, setShowMenu] = useState(false)
@@ -245,65 +247,22 @@ export function TabBar({
           )
         })}
 
-        {/* New Tab Button with Hover Menu */}
-        <div className="relative" style={{ top: '3px' }}>
-          <button
-            ref={buttonRef}
-            onClick={() => onNewTab('browser')}
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
-            className={`
-              w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
-              transition-colors
-              ${isDarkMode
-                ? 'text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300'
-                : 'text-stone-400 hover:bg-stone-200 hover:text-stone-600'
-              }
-            `}
-            title="New tab"
-          >
-            <Plus size={16} />
-          </button>
-
-          {/* Popout Menu */}
-          {showMenu && buttonRef.current && (
-            <div
-              ref={menuRef}
-              onMouseEnter={handleMenuMouseEnter}
-              onMouseLeave={handleMouseLeave}
-              className={`fixed py-1 rounded-lg shadow-xl border z-[9999] min-w-[160px] ${
-                isDarkMode
-                  ? 'bg-neutral-800 border-neutral-700'
-                  : 'bg-white border-stone-200'
-              }`}
-              style={{
-                top: buttonRef.current.getBoundingClientRect().bottom + 4,
-                left: buttonRef.current.getBoundingClientRect().left,
-                WebkitAppRegion: 'no-drag'
-              } as React.CSSProperties}
-            >
-              {TAB_TYPES.map(({ type, label, icon: Icon, description }) => (
-                <button
-                  key={type}
-                  onClick={() => handleNewTab(type)}
-                  className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
-                    isDarkMode
-                      ? 'hover:bg-neutral-700 text-neutral-200'
-                      : 'hover:bg-stone-100 text-stone-700'
-                  }`}
-                >
-                  <Icon size={16} className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'} />
-                  <div className="flex-1">
-                    <div className="text-sm font-medium">{label}</div>
-                    <div className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-                      {description}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        {/* New Tab Button */}
+        <button
+          onClick={() => onNewTab('browser')}
+          className={`
+            w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
+            transition-colors
+            ${isDarkMode
+              ? 'text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300'
+              : 'text-stone-400 hover:bg-stone-200 hover:text-stone-600'
+            }
+          `}
+          style={{ position: 'relative', top: '3px' }}
+          title="New tab"
+        >
+          <Plus size={16} />
+        </button>
       </div>
 
       {/* Right side - Fast Apply Status, Dark Mode & Settings */}
@@ -311,18 +270,24 @@ export function TabBar({
         className="flex items-center gap-1.5 pr-3 flex-shrink-0"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
-        {/* File Watcher Status Chip */}
-        {fileWatcherActive && (
+        {/* Indexing Status Chip */}
+        {(fileWatcherActive || indexingStatus !== 'idle') && (
           <div
             className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium backdrop-blur-md transition-all ${
-              isDarkMode
-                ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20 text-emerald-300 border border-emerald-500/30 shadow-lg shadow-emerald-500/10'
-                : 'bg-gradient-to-r from-emerald-100 to-teal-100 text-emerald-700 border border-emerald-300/50 shadow-sm'
+              indexingStatus === 'indexing'
+                ? isDarkMode
+                  ? 'bg-gradient-to-r from-blue-500/20 to-cyan-500/20 text-blue-300 border border-blue-500/30 shadow-lg shadow-blue-500/10'
+                  : 'bg-gradient-to-r from-blue-100 to-cyan-100 text-blue-700 border border-blue-300/50 shadow-sm'
+                : isDarkMode
+                  ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20 text-emerald-300 border border-emerald-500/30 shadow-lg shadow-emerald-500/10'
+                  : 'bg-gradient-to-r from-emerald-100 to-teal-100 text-emerald-700 border border-emerald-300/50 shadow-sm'
             }`}
-            title="File watcher active - monitoring project for changes"
+            title={indexingStatus === 'indexing' ? "Indexing project files..." : "Project indexed and watching for changes"}
           >
-            <Eye size={10} className={isDarkMode ? 'text-emerald-400' : 'text-emerald-600'} />
-            <span>Watching</span>
+            <Eye size={10} className={indexingStatus === 'indexing' 
+              ? (isDarkMode ? 'text-blue-400 animate-pulse' : 'text-blue-600 animate-pulse') 
+              : (isDarkMode ? 'text-emerald-400' : 'text-emerald-600')} />
+            <span>{indexingStatus === 'indexing' ? 'Indexing' : 'Indexed'}</span>
           </div>
         )}
 
@@ -341,7 +306,7 @@ export function TabBar({
             title={fastApplyLoading ? "Fast Apply is loading..." : "Fast Apply is ready - local AI model loaded"}
           >
             <Zap size={10} className={fastApplyLoading ? (isDarkMode ? 'text-blue-400 animate-pulse' : 'text-blue-600 animate-pulse') : (isDarkMode ? 'text-yellow-400' : 'text-yellow-600')} />
-            <span>{fastApplyLoading ? 'Loading...' : 'Ready'}</span>
+            <span>{fastApplyLoading ? 'Loading...' : 'Fast Edit'}</span>
           </div>
         )}
 

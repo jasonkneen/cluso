@@ -13,10 +13,11 @@
     "preview": "vite preview",
     "electron": "electron .",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && NODE_ENV=development electron .\"",
-    "electron:build": "npm run build && electron-builder",
-    "electron:build:mac": "npm run build && electron-builder --mac",
-    "electron:build:win": "npm run build && electron-builder --win",
-    "electron:build:linux": "npm run build && electron-builder --linux",
+    "electron:prebuild": "mkdir -p node_modules/@img/sharp-darwin-x64 node_modules/@img/sharp-linux-x64 node_modules/@img/sharp-win32-x64",
+    "electron:build": "npm run electron:prebuild && npm run build && electron-builder",
+    "electron:build:mac": "npm run electron:prebuild && npm run build && electron-builder --mac",
+    "electron:build:win": "npm run electron:prebuild && npm run build && electron-builder --win",
+    "electron:build:linux": "npm run electron:prebuild && npm run build && electron-builder --linux",
     "serve:dev": "npm run build && npm run serve:copy-public && npm -w cluso run dev",
     "serve:build": "npm run build && npm run serve:copy-public && npm -w cluso run build",
     "serve:copy-public": "rm -rf packages/serve/public && cp -r dist packages/serve/public",
@@ -39,6 +40,10 @@
     "@ai-sdk/react": "^2.0.104",
     "@anthropic-ai/claude-agent-sdk": "0.1.63",
     "@anthropic/lsp-client": "file:packages/lsp",
+    "@babel/generator": "^7.28.5",
+    "@babel/parser": "^7.28.5",
+    "@babel/traverse": "^7.28.5",
+    "@babel/types": "^7.28.5",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/modifiers": "^9.0.0",
     "@dnd-kit/sortable": "^10.0.0",
@@ -94,6 +99,7 @@
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
     "diff-match-patch": "^1.0.5",
+    "electron-liquid-glass": "^1.1.1",
     "electron-updater": "^6.6.2",
     "elkjs": "^0.11.0",
     "ghostty-web": "^0.4.0",
@@ -128,6 +134,7 @@
     "electron-builder": "^26.0.12",
     "jsdom": "^27.2.0",
     "postcss": "^8.5.6",
+    "recast": "^0.23.11",
     "tailwindcss": "^3.4.18",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
@@ -140,22 +147,55 @@
     "directories": {
       "output": "release"
     },
+    "npmRebuild": true,
+    "buildDependenciesFromSource": false,
+    "nativeRebuilder": "sequential",
+    "nodeGypRebuild": false,
     "files": [
       "dist/**/*",
-      "electron/**/*"
+      "electron/**/*",
+      "!**/node_modules/*/{test,__tests__,tests,example,examples}",
+      "!**/node_modules/*/{README.md,readme.md,CHANGELOG.md}",
+      "!**/*.map",
+      "!**/node_modules/@lancedb/**/*",
+      "!**/node_modules/onnxruntime-node/**/*",
+      "!**/node_modules/@xenova/**/*",
+      "!**/node_modules/node-llama-cpp/**/*",
+      "!**/node_modules/@node-llama-cpp/**/*",
+      "!**/node_modules/apache-arrow/**/*",
+      "!**/node_modules/@ai-cluso/mgrep-local/**/*",
+      "!**/node_modules/sharp/**/*",
+      "!**/node_modules/@img/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/@lydell/node-pty/**/*",
+      "node_modules/@anthropic-ai/**/*"
     ],
     "publish": [
       {
-        "provider": "generic",
-        "url": "https://updates.ai-cluso.com"
+        "provider": "github",
+        "owner": "jkneen",
+        "repo": "flows"
       }
     ],
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
-        "dmg",
-        "zip"
-      ]
+        {
+          "target": "dmg",
+          "arch": "arm64"
+        },
+        {
+          "target": "zip",
+          "arch": "arm64"
+        }
+      ],
+      "notarize": false,
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "win": {
       "target": [

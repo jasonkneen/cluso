@@ -278,6 +278,67 @@ function formatRelativeTime(date: Date): string {
   return `${diffDay}d ago`;
 }
 
+/**
+ * Format element context like react-grab does for optimal AI understanding.
+ * This provides exact file/line info so the AI doesn't need to search.
+ */
+function formatElementContext(element: SelectedElement): string {
+  const { outerHTML, tagName, sourceLocation } = element;
+  
+  // Format HTML (clean up for display)
+  const html = outerHTML || `<${tagName.toLowerCase()}>...</${tagName.toLowerCase()}>`;
+  
+  // Build source chain like react-grab
+  let sourceChain = '';
+  if (sourceLocation?.sources) {
+    sourceChain = sourceLocation.sources
+      .map(src => {
+        // Clean up file path: http://localhost:4000/src/LandingPage.tsx?t=123 -> /src/LandingPage.tsx
+        const file = src.file
+          ?.replace(/^https?:\/\/localhost:\d+/, '')
+          ?.replace(/\?.*$/, '') || 'unknown';
+        return `  in ${src.name} (at ${file}:${src.line || 0})`;
+      })
+      .join('\n');
+  }
+  
+  return `ELEMENT:\n${html}\n${sourceChain}`;
+}
+
+/**
+ * Build a focused prompt for instant UI edits.
+ * Tells the AI exactly where to edit, no searching needed.
+ */
+function buildInstantUIPrompt(element: SelectedElement, userRequest: string, fileContent?: string): string {
+  const context = formatElementContext(element);
+  const src = element.sourceLocation?.sources?.[0];
+  const filePath = src?.file
+    ?.replace(/^https?:\/\/localhost:\d+/, '')
+    ?.replace(/\?.*$/, '') || '';
+  const lineNum = src?.line || 0;
+  
+  let prompt = `${context}
+
+INSTRUCTION: ${userRequest}
+
+IMPORTANT:
+- The element is in ${filePath} around line ${lineNum}
+- DO NOT search or grep - the file location is provided above
+- Make ONLY the requested change
+- Return the updated code snippet`;
+
+  if (fileContent) {
+    // Add relevant lines from the file for context
+    const lines = fileContent.split('\n');
+    const startLine = Math.max(0, lineNum - 10);
+    const endLine = Math.min(lines.length, lineNum + 20);
+    const relevantLines = lines.slice(startLine, endLine).join('\n');
+    prompt += `\n\nFILE CONTENT (lines ${startLine + 1}-${endLine}):\n\`\`\`tsx\n${relevantLines}\n\`\`\``;
+  }
+  
+  return prompt;
+}
+
 // --- Constants ---
 
 // Custom AI Provider Icons
@@ -350,6 +411,151 @@ const MODELS = [
 ];
 
 const DEFAULT_URL = ''; // Empty string shows project selection (NewTabPage)
+
+// ============================================================================
+// GroupedToolChips Component - Groups consecutive same-type tool calls
+// e.g., [grep x3] instead of [grep] [grep] [grep]
+// ============================================================================
+interface ToolCallItem {
+  id: string
+  name: string
+  args?: unknown
+  status: 'pending' | 'running' | 'complete' | 'done' | 'error' | 'success'
+  result?: unknown
+}
+
+interface GroupedTool {
+  name: string
+  count: number
+  tools: ToolCallItem[]
+  hasRunning: boolean
+  hasError: boolean
+  allComplete: boolean
+}
+
+function groupConsecutiveTools(tools: ToolCallItem[]): GroupedTool[] {
+  const groups: GroupedTool[] = []
+  let currentGroup: GroupedTool | null = null
+
+  for (const tool of tools) {
+    if (currentGroup && currentGroup.name === tool.name) {
+      currentGroup.count++
+      currentGroup.tools.push(tool)
+      if (tool.status === 'running') currentGroup.hasRunning = true
+      if (tool.status === 'error') currentGroup.hasError = true
+      if (tool.status !== 'complete' && tool.status !== 'done' && tool.status !== 'success') {
+        currentGroup.allComplete = false
+      }
+    } else {
+      if (currentGroup) groups.push(currentGroup)
+      currentGroup = {
+        name: tool.name,
+        count: 1,
+        tools: [tool],
+        hasRunning: tool.status === 'running',
+        hasError: tool.status === 'error',
+        allComplete: tool.status === 'complete' || tool.status === 'done' || tool.status === 'success',
+      }
+    }
+  }
+  if (currentGroup) groups.push(currentGroup)
+  return groups
+}
+
+function GroupedToolChips({
+  toolCalls,
+  isDarkMode,
+  isStreaming = false,
+}: {
+  toolCalls: ToolCallItem[]
+  isDarkMode: boolean
+  isStreaming?: boolean
+}) {
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+
+  const groups = useMemo(() => groupConsecutiveTools(toolCalls), [toolCalls])
+
+  const toggleGroup = useCallback((groupKey: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(groupKey)) {
+        next.delete(groupKey)
+      } else {
+        next.add(groupKey)
+      }
+      return next
+    })
+  }, [])
+
+  const getChipStyle = (status: string, isGroup = false) => {
+    if (status === 'running') {
+      return isDarkMode ? 'bg-blue-500/20 text-blue-300' : 'bg-blue-100 text-blue-700'
+    }
+    if (status === 'error') {
+      return isDarkMode ? 'bg-red-500/20 text-red-300' : 'bg-red-100 text-red-700'
+    }
+    return isDarkMode ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
+  }
+
+  return (
+    <div className="mb-2 flex flex-wrap gap-1.5">
+      {groups.map((group, groupIdx) => {
+        const groupKey = `${group.name}-${groupIdx}`
+        const isExpanded = expandedGroups.has(groupKey)
+        const showGrouped = group.count > 1 && !isExpanded
+
+        if (showGrouped) {
+          // Render grouped chip: [read_file x3]
+          const groupStatus = group.hasRunning ? 'running' : group.hasError ? 'error' : 'complete'
+          return (
+            <button
+              key={groupKey}
+              onClick={() => toggleGroup(groupKey)}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all cursor-pointer hover:opacity-80 ${getChipStyle(groupStatus, true)}`}
+              title={`Click to expand ${group.count} ${group.name} calls`}
+            >
+              {group.hasRunning && <Loader2 size={10} className="animate-spin" />}
+              {!group.hasRunning && !group.hasError && <Check size={10} />}
+              {!group.hasRunning && group.hasError && <X size={10} />}
+              <span className="font-mono">{group.name}</span>
+              <span className={`text-[9px] px-1 rounded ${isDarkMode ? 'bg-white/10' : 'bg-black/10'}`}>
+                ×{group.count}
+              </span>
+            </button>
+          )
+        }
+
+        // Render individual chips (either single tool or expanded group)
+        return (
+          <React.Fragment key={groupKey}>
+            {group.count > 1 && isExpanded && (
+              <button
+                onClick={() => toggleGroup(groupKey)}
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium transition-all cursor-pointer ${
+                  isDarkMode ? 'bg-neutral-700 text-neutral-400 hover:bg-neutral-600' : 'bg-stone-200 text-stone-500 hover:bg-stone-300'
+                }`}
+                title="Collapse group"
+              >
+                <ChevronDown size={8} />
+              </button>
+            )}
+            {group.tools.map((tool, idx) => (
+              <div
+                key={tool.id || `${groupKey}-${idx}`}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all ${getChipStyle(tool.status)}`}
+              >
+                {tool.status === 'running' && <Loader2 size={10} className="animate-spin" />}
+                {(tool.status === 'done' || tool.status === 'complete' || tool.status === 'success') && <Check size={10} />}
+                {tool.status === 'error' && <X size={10} />}
+                <span className="font-mono">{tool.name}</span>
+              </div>
+            ))}
+          </React.Fragment>
+        )
+      })}
+    </div>
+  )
+}
 
 // Type for webview element (Electron)
 interface WebviewElement extends HTMLElement {
@@ -630,7 +836,7 @@ export default function App() {
               role: 'user',
               content: `${request.message}\n\n${pageContext}${elementContext}`
             }],
-            modelId: 'gemini-2.0-flash',
+            modelId: selectedModelRef.current.id, // Use selected model, not hardcoded Gemini
             systemPrompt: 'You are Cluso, a helpful AI assistant for web development. The user is inspecting elements on a web page and may ask questions about them or request changes. Keep responses concise.',
           });
 
@@ -711,12 +917,15 @@ export default function App() {
           const autoInit = localStorage.getItem('mgrep-auto-init')
           if (autoInit === 'true') {
             console.log('[mgrep] Initializing for:', projectPath)
+            setIndexingStatus('indexing')
             window.electronAPI.mgrep.initialize(projectPath).then(() => {
               // Mark as initialized - won't init again even if we switch back to this tab
               mgrepInitializedProjects.current.add(projectPath)
+              setIndexingStatus('indexed')
               console.log('[mgrep] ✓ Initialized for:', projectPath)
             }).catch(err => {
               console.error('[mgrep] Auto-init failed:', err)
+              setIndexingStatus('idle')
             })
           } else {
             // User opted out - mark as "handled" so we don't keep checking
@@ -725,6 +934,7 @@ export default function App() {
         } else if (result.success && result.status && result.status.ready) {
           // Already initialized - mark it so we don't check again
           mgrepInitializedProjects.current.add(projectPath)
+          setIndexingStatus('indexed')
           console.log('[mgrep] Already ready for:', projectPath)
         }
       } catch (err) {
@@ -944,30 +1154,57 @@ export default function App() {
   const [selectedLayerClassNames, setSelectedLayerClassNames] = useState<string[] | null>(null)
 
   // Avoid referencing `isElectron` before it is initialized (it is declared later in this file).
-  const isElectronEnv = typeof window !== 'undefined' && !!window.electronAPI?.isElectron
+	const isElectronEnv = typeof window !== 'undefined' && !!window.electronAPI?.isElectron
 
-  const resolveSourceFilePath = useCallback((projectPath: string, raw: string) => {
-    let file = String(raw || '').trim()
-    if (!file) return { absPath: '', displayPath: '' }
-    try {
-      if (file.startsWith('http://') || file.startsWith('https://')) {
-        file = new URL(file).pathname
-      }
-    } catch (e) {
-      // ignore
-    }
-    file = file.split('?')[0]
-    file = file.replace(/^webpack-internal:\/\//, '')
-    file = file.replace(/^file:\/\//, '')
-    const displayPath = file
-    const isAbs =
-      file.startsWith('/') ||
-      file.startsWith('C:\\') ||
-      file.startsWith('D:\\') ||
-      file.startsWith('E:\\')
-    const absPath = isAbs ? file : `${projectPath}/${file.replace(/^\/+/, '')}`.replace(/\/{2,}/g, '/')
-    return { absPath, displayPath }
-  }, [])
+	const resolveSourceFilePath = useCallback((projectPath: string, raw: string) => {
+		let file = String(raw || '').trim()
+		if (!file) return { absPath: '', displayPath: '' }
+
+		let fromHttpUrl = false
+		let fromFileUrl = false
+		try {
+			if (file.startsWith('http://') || file.startsWith('https://')) {
+				const u = new URL(file)
+				file = u.pathname
+				fromHttpUrl = true
+			} else if (file.startsWith('file://')) {
+				const u = new URL(file)
+				file = u.pathname
+				fromFileUrl = true
+			}
+		} catch (e) {
+			// ignore
+		}
+
+		// Drop any query/hash noise from sourcemap-style URLs.
+		file = file.split('?')[0].split('#')[0]
+		file = file.replace(/^webpack-internal:\/\//, '')
+			file = file.replace(/^webpack:\/{3}/, '') // webpack:///src/App.tsx
+		file = file.replace(/^webpack:\/\//, '') // webpack://src/App.tsx
+		// Fallback if URL parsing failed (keeps old behavior for file:// URLs)
+		file = file.replace(/^file:\/\//, '')
+		// Vite dev URLs can show file system paths as /@fs/Users/...; normalize back.
+		file = file.replace(/^\/@fs\//, '/')
+
+		const displayPath = fromHttpUrl ? file.replace(/^\/+/, '') : file
+
+		const isWindowsAbs = /^[A-Z]:\\/.test(file)
+		const isPosixAbs = file.startsWith('/')
+
+		// IMPORTANT: If a file path came from an http(s) URL, its pathname is *project-relative*.
+		// Also treat /src/... as project-relative, since this is a common URL pathname shape.
+		const treatPosixAbsAsProjectRelative =
+			!!projectPath &&
+			isPosixAbs &&
+			!fromFileUrl &&
+			(fromHttpUrl || file.startsWith('/src/'))
+
+		const absPath =
+			isWindowsAbs || (isPosixAbs && !treatPosixAbsAsProjectRelative)
+				? file
+				: `${projectPath}/${file.replace(/^\/+/, '')}`.replace(/\/{2,}/g, '/')
+		return { absPath, displayPath }
+	}, [])
 
   const getCodeLanguageFromPath = useCallback((path: string) => {
     const ext = (path.split('.').pop() || '').toLowerCase()
@@ -1224,6 +1461,9 @@ export default function App() {
   // File Watcher Status
   const [fileWatcherActive, setFileWatcherActive] = useState(false);
 
+  // Indexing Status
+  const [indexingStatus, setIndexingStatus] = useState<'idle' | 'indexing' | 'indexed'>('idle');
+
   // Extension Bridge Status (Chrome extension connected)
   const [extensionConnected, setExtensionConnected] = useState(false);
 
@@ -1346,6 +1586,12 @@ export default function App() {
     }
   }, [appSettings]);
 
+  // Keep a ref for callbacks that intentionally have empty deps.
+  const appSettingsRef = useRef(appSettings)
+  useEffect(() => {
+    appSettingsRef.current = appSettings
+  }, [appSettings])
+
   // Apply Electron window appearance settings
   useEffect(() => {
     const isElectronEnv = typeof window !== 'undefined' && !!window.electronAPI?.isElectron;
@@ -1358,6 +1604,7 @@ export default function App() {
       console.warn('[App] Failed to apply window appearance:', err);
     });
   }, [appSettings.transparencyEnabled, appSettings.windowOpacity, appSettings.windowBlur]);
+
 
   // Close onboarding modal when project changes (but not on initial load)
   const prevProjectPathRef = useRef<string | null | undefined>(undefined)
@@ -1508,7 +1755,186 @@ export default function App() {
   }
   const [pendingDOMApproval, setPendingDOMApproval] = useState<PendingDOMApproval | null>(null)
   const cancelledApprovalsRef = useRef<Set<string>>(new Set())
+  // Per-approval timeout tracking to avoid false timeout logs after success/cancel.
+  const domApprovalPatchTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const domApprovalPatchTimeoutTokensRef = useRef<Map<string, string>>(new Map())
   const [isGeneratingSourcePatch, setIsGeneratingSourcePatch] = useState(false)
+
+  const clearDomApprovalPatchTimeout = useCallback((approvalId: string) => {
+    const handle = domApprovalPatchTimeoutsRef.current.get(approvalId)
+    if (handle) {
+      clearTimeout(handle)
+      domApprovalPatchTimeoutsRef.current.delete(approvalId)
+    }
+    domApprovalPatchTimeoutTokensRef.current.delete(approvalId)
+  }, [])
+
+  type DomEditTelemetryEvent =
+    | 'preview_applied'
+    | 'patch_generation_started'
+    | 'patch_ready'
+    | 'patch_failed'
+    | 'user_accept'
+    | 'user_reject'
+    | 'auto_cancel'
+    | 'source_write_started'
+    | 'source_write_succeeded'
+    | 'source_write_failed'
+
+  type DomEditTelemetry = {
+    id: string
+    createdAtMs: number
+    tabId: string
+    elementXpath?: string
+    events: Partial<Record<DomEditTelemetryEvent, number>>
+  }
+
+  const domEditTelemetryRef = useRef<Record<string, DomEditTelemetry>>({})
+  const domEditContextRef = useRef<{ id: string; tabId: string; elementXpath?: string } | null>(null)
+
+  const nowMs = () => {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') return performance.now()
+    return Date.now()
+  }
+
+  const ensureDomTelemetry = useCallback((id: string, init?: Partial<DomEditTelemetry>) => {
+    if (!domEditTelemetryRef.current[id]) {
+      domEditTelemetryRef.current[id] = {
+        id,
+        createdAtMs: nowMs(),
+        tabId: init?.tabId || String(activeTabId),
+        elementXpath: init?.elementXpath,
+        events: {},
+      }
+    }
+    const existing = domEditTelemetryRef.current[id]
+    domEditTelemetryRef.current[id] = {
+      ...existing,
+      ...init,
+      events: { ...existing.events, ...(init?.events || {}) },
+    }
+  }, [activeTabId])
+
+  const markDomTelemetry = useCallback((id: string, event: DomEditTelemetryEvent) => {
+    ensureDomTelemetry(id)
+    const telemetry = domEditTelemetryRef.current[id]
+    if (!telemetry.events[event]) {
+      telemetry.events[event] = nowMs()
+    }
+  }, [ensureDomTelemetry])
+
+  const finalizeDomTelemetry = useCallback((id: string, outcome: 'accepted' | 'rejected' | 'cancelled') => {
+    const telemetry = domEditTelemetryRef.current[id]
+    if (!telemetry) return
+    const e = telemetry.events
+    const ms = (a?: number, b?: number) => (a !== undefined && b !== undefined) ? Math.round(b - a) : undefined
+
+    const summary = {
+      outcome,
+      tabId: telemetry.tabId,
+      xpath: telemetry.elementXpath,
+      previewToPatchReadyMs: ms(e.preview_applied, e.patch_ready),
+      patchGenMs: ms(e.patch_generation_started, e.patch_ready ?? e.patch_failed),
+      acceptToWriteMs: ms(e.user_accept, e.source_write_succeeded ?? e.source_write_failed),
+      createdToEndMs: ms(telemetry.createdAtMs, e.source_write_succeeded ?? e.source_write_failed ?? e.user_reject ?? e.auto_cancel ?? e.patch_failed),
+    }
+
+    console.log('[Telemetry][DOM Edit]', id, summary)
+    cancelledApprovalsRef.current.delete(id)
+    delete domEditTelemetryRef.current[id]
+  }, [])
+
+  const cancelDomApprovalValue = useCallback((
+    approval: PendingDOMApproval,
+    params: { tabIdForUndo: string; reason: 'superseded' | 'context_change' }
+  ) => {
+    const { tabIdForUndo, reason } = params
+    const webview = webviewRefs.current.get(tabIdForUndo)
+
+    console.log('[DOM Approval] Cancelling pending change:', { id: approval.id, reason })
+    clearDomApprovalPatchTimeout(approval.id)
+    markDomTelemetry(approval.id, 'auto_cancel')
+    cancelledApprovalsRef.current.add(approval.id)
+    if (approval.undoCode && webview) {
+      ;(webview as Electron.WebviewTag).executeJavaScript(approval.undoCode)
+    }
+    finalizeDomTelemetry(approval.id, 'cancelled')
+  }, [markDomTelemetry, finalizeDomTelemetry, clearDomApprovalPatchTimeout])
+
+  const cancelPendingDomApproval = useCallback((reason: 'superseded' | 'context_change') => {
+    if (!pendingDOMApproval) return
+    if (pendingDOMApproval.userApproved || isGeneratingSourcePatch) return
+
+    const ctx = domEditContextRef.current
+    const tabIdForUndo = ctx?.id === pendingDOMApproval.id ? ctx.tabId : String(activeTabId)
+    cancelDomApprovalValue(pendingDOMApproval, { tabIdForUndo, reason })
+    setPendingDOMApproval(null)
+    setPendingChange(null)
+  }, [pendingDOMApproval, isGeneratingSourcePatch, activeTabId, cancelDomApprovalValue])
+
+  // Latest-wins: if a new DOM approval replaces an older pending one, auto-cancel the older preview.
+  const lastPendingDomApprovalRef = useRef<PendingDOMApproval | null>(null)
+  useEffect(() => {
+    const prev = lastPendingDomApprovalRef.current
+    const next = pendingDOMApproval
+    lastPendingDomApprovalRef.current = next
+
+    if (!prev || !next) return
+    if (prev.id === next.id) return
+    if (prev.userApproved || isGeneratingSourcePatch) return
+
+    // If telemetry wasn't initialized yet (e.g. rapid supersede), create a minimal record now.
+    const ctx = domEditContextRef.current
+    const tabIdForUndo = ctx?.id === prev.id
+      ? ctx.tabId
+      : (domEditTelemetryRef.current[prev.id]?.tabId || String(activeTabId))
+
+    ensureDomTelemetry(prev.id, { tabId: tabIdForUndo, elementXpath: prev.element?.xpath })
+    cancelDomApprovalValue(prev, { tabIdForUndo, reason: 'superseded' })
+  }, [pendingDOMApproval?.id, isGeneratingSourcePatch, activeTabId, ensureDomTelemetry, cancelDomApprovalValue])
+
+  // Initialize telemetry whenever a new pending DOM approval appears.
+  useEffect(() => {
+    if (!pendingDOMApproval) {
+      domEditContextRef.current = null
+      return
+    }
+    domEditContextRef.current = {
+      id: pendingDOMApproval.id,
+      tabId: String(activeTabId),
+      elementXpath: pendingDOMApproval.element?.xpath,
+    }
+    ensureDomTelemetry(pendingDOMApproval.id, {
+      tabId: String(activeTabId),
+      elementXpath: pendingDOMApproval.element?.xpath,
+    })
+    markDomTelemetry(pendingDOMApproval.id, 'preview_applied')
+  }, [pendingDOMApproval?.id, activeTabId, ensureDomTelemetry, markDomTelemetry])
+
+  // Auto-cancel an unapproved DOM edit if the user switches tabs.
+  useEffect(() => {
+    if (!pendingDOMApproval || !domEditContextRef.current) return
+    const ctx = domEditContextRef.current
+    if (ctx.id !== pendingDOMApproval.id) return
+    if (ctx.tabId === String(activeTabId)) return
+
+    console.log('[DOM Approval] Auto-cancelling pending change due to tab switch:', { from: ctx.tabId, to: activeTabId })
+    cancelPendingDomApproval('context_change')
+  }, [activeTabId, pendingDOMApproval, cancelPendingDomApproval])
+
+  // Auto-cancel if the user changes the selection to a different element (keeps unapproved previews from lingering).
+  useEffect(() => {
+    if (!pendingDOMApproval || !domEditContextRef.current) return
+    const ctx = domEditContextRef.current
+    if (ctx.id !== pendingDOMApproval.id) return
+    if (!ctx.elementXpath) return
+    const selectedXpath = selectedElement?.xpath
+    if (!selectedXpath) return
+    if (selectedXpath === ctx.elementXpath) return
+
+    console.log('[DOM Approval] Auto-cancelling pending change due to selection change:', { from: ctx.elementXpath, to: selectedXpath })
+    cancelPendingDomApproval('context_change')
+  }, [activeTabId, pendingDOMApproval, selectedElement?.xpath, cancelPendingDomApproval])
 
   // Initialize AI Chat hook with streaming support
   const { generate: generateAI, stream: streamAI, cancel: cancelAI, isLoading: isAILoading, isGenerating: isAIGenerating, isInitialized: isAIInitialized } = useAIChat({
@@ -1964,6 +2390,27 @@ export default function App() {
   useEffect(() => {
     console.log('isElectron:', isElectron);
     console.log('electronAPI:', window.electronAPI);
+  }, [isElectron]);
+
+  // Get PTY server port dynamically
+  const [ptyPort, setPtyPort] = useState<number | null>(null);
+  useEffect(() => {
+    const fetchPtyPort = async () => {
+      if (!isElectron || !window.electronAPI?.pty) return;
+      try {
+        const result = await window.electronAPI.pty.getPort();
+        if (result.success && result.port) {
+          setPtyPort(result.port);
+          console.log('[PTY] Server port:', result.port);
+        }
+      } catch (err) {
+        console.error('[PTY] Failed to get port:', err);
+      }
+    };
+    // Fetch immediately and retry after a delay in case server is still starting
+    fetchPtyPort();
+    const timer = setTimeout(fetchPtyPort, 1000);
+    return () => clearTimeout(timer);
   }, [isElectron]);
 
   // Persist dark mode preference
@@ -2589,6 +3036,291 @@ export default function App() {
     }
   }, [isWebviewReady, activeTabId]);
 
+  // DOM Navigation handlers for voice agent - these communicate with iframe-injection.ts
+  const handleSelectParent = useCallback(async (levels: number = 1): Promise<{ success: boolean; element?: Record<string, unknown>; error?: string }> => {
+    console.log('[AI] Select parent, levels:', levels);
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      return { success: false, error: 'Webview not ready' };
+    }
+
+    return new Promise((resolve) => {
+      const handleResponse = (event: MessageEvent) => {
+        if (event.data?.type === 'SELECT_PARENT_RESULT') {
+          window.removeEventListener('message', handleResponse);
+          if (event.data.success && event.data.element) {
+            resolve({ success: true, element: event.data.element });
+          } else {
+            resolve({ success: false, error: event.data.error || 'Failed to select parent' });
+          }
+        }
+      };
+      window.addEventListener('message', handleResponse);
+
+      // Send message to webview
+      webview.contentWindow?.postMessage({ type: 'SELECT_PARENT', levels }, '*');
+
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        window.removeEventListener('message', handleResponse);
+        resolve({ success: false, error: 'Timeout waiting for parent selection' });
+      }, 5000);
+    });
+  }, [isWebviewReady, activeTabId]);
+
+  const handleSelectChildren = useCallback(async (selector?: string): Promise<{ success: boolean; children?: Record<string, unknown>[]; error?: string }> => {
+    console.log('[AI] Select children, filter:', selector);
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      return { success: false, error: 'Webview not ready' };
+    }
+
+    return new Promise((resolve) => {
+      const handleResponse = (event: MessageEvent) => {
+        if (event.data?.type === 'SELECT_CHILDREN_RESULT') {
+          window.removeEventListener('message', handleResponse);
+          if (event.data.success) {
+            const children = event.data.children?.map((c: { element: Record<string, unknown> }) => c.element) || [];
+            resolve({ success: true, children });
+          } else {
+            resolve({ success: false, error: event.data.error || 'Failed to get children' });
+          }
+        }
+      };
+      window.addEventListener('message', handleResponse);
+
+      webview.contentWindow?.postMessage({ type: 'SELECT_CHILDREN', selector }, '*');
+
+      setTimeout(() => {
+        window.removeEventListener('message', handleResponse);
+        resolve({ success: false, error: 'Timeout waiting for children' });
+      }, 5000);
+    });
+  }, [isWebviewReady, activeTabId]);
+
+  const handleSelectSiblings = useCallback(async (direction: 'next' | 'prev' | 'all'): Promise<{ success: boolean; siblings?: Record<string, unknown>[]; error?: string }> => {
+    console.log('[AI] Select siblings, direction:', direction);
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      return { success: false, error: 'Webview not ready' };
+    }
+
+    return new Promise((resolve) => {
+      const handleResponse = (event: MessageEvent) => {
+        if (event.data?.type === 'SELECT_SIBLINGS_RESULT') {
+          window.removeEventListener('message', handleResponse);
+          if (event.data.success) {
+            const siblings = event.data.siblings?.map((s: { element: Record<string, unknown> }) => s.element) || [];
+            resolve({ success: true, siblings });
+          } else {
+            resolve({ success: false, error: event.data.error || 'Failed to get siblings' });
+          }
+        }
+      };
+      window.addEventListener('message', handleResponse);
+
+      webview.contentWindow?.postMessage({ type: 'SELECT_SIBLINGS', direction }, '*');
+
+      setTimeout(() => {
+        window.removeEventListener('message', handleResponse);
+        resolve({ success: false, error: 'Timeout waiting for siblings' });
+      }, 5000);
+    });
+  }, [isWebviewReady, activeTabId]);
+
+  const handleSelectAllMatching = useCallback(async (matchBy: 'tag' | 'class' | 'both'): Promise<{ success: boolean; matches?: Record<string, unknown>[]; error?: string }> => {
+    console.log('[AI] Select all matching, by:', matchBy);
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      return { success: false, error: 'Webview not ready' };
+    }
+
+    return new Promise((resolve) => {
+      const handleResponse = (event: MessageEvent) => {
+        if (event.data?.type === 'SELECT_ALL_MATCHING_RESULT') {
+          window.removeEventListener('message', handleResponse);
+          if (event.data.success) {
+            const matches = event.data.matches?.map((m: { element: Record<string, unknown> }) => m.element) || [];
+            resolve({ success: true, matches });
+          } else {
+            resolve({ success: false, error: event.data.error || 'Failed to find matching elements' });
+          }
+        }
+      };
+      window.addEventListener('message', handleResponse);
+
+      webview.contentWindow?.postMessage({ type: 'SELECT_ALL_MATCHING', matchBy }, '*');
+
+      setTimeout(() => {
+        window.removeEventListener('message', handleResponse);
+        resolve({ success: false, error: 'Timeout waiting for matching elements' });
+      }, 5000);
+    });
+  }, [isWebviewReady, activeTabId]);
+
+  // --- Hierarchical Drill-Down Selection Handlers ---
+  const handleStartDrillSelection = useCallback(async (): Promise<{ success: boolean; sections?: Record<string, unknown>[]; level?: number; error?: string }> => {
+    console.log('[AI] Starting drill-down selection');
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      return { success: false, error: 'Webview not ready' };
+    }
+
+    return new Promise((resolve) => {
+      const handleResponse = (event: MessageEvent) => {
+        if (event.data?.type === 'START_DRILL_SELECTION_RESULT') {
+          window.removeEventListener('message', handleResponse);
+          if (event.data.success) {
+            resolve({ success: true, sections: event.data.sections, level: event.data.level });
+          } else {
+            resolve({ success: false, error: event.data.error || 'Failed to start drill selection' });
+          }
+        }
+      };
+      window.addEventListener('message', handleResponse);
+
+      webview.contentWindow?.postMessage({ type: 'START_DRILL_SELECTION' }, '*');
+
+      setTimeout(() => {
+        window.removeEventListener('message', handleResponse);
+        resolve({ success: false, error: 'Timeout starting drill selection' });
+      }, 5000);
+    });
+  }, [isWebviewReady, activeTabId]);
+
+  const handleDrillInto = useCallback(async (elementNumber: number): Promise<{ success: boolean; isFinalSelection?: boolean; element?: Record<string, unknown>; children?: Record<string, unknown>[]; description?: string; level?: number; canGoBack?: boolean; canGoForward?: boolean; error?: string }> => {
+    console.log('[AI] Drill into element:', elementNumber);
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      return { success: false, error: 'Webview not ready' };
+    }
+
+    return new Promise((resolve) => {
+      const handleResponse = (event: MessageEvent) => {
+        if (event.data?.type === 'DRILL_INTO_RESULT') {
+          window.removeEventListener('message', handleResponse);
+          if (event.data.success) {
+            resolve({
+              success: true,
+              isFinalSelection: event.data.isFinalSelection,
+              element: event.data.element,
+              children: event.data.children,
+              description: event.data.description || event.data.parentDescription,
+              level: event.data.level,
+              canGoBack: event.data.canGoBack,
+              canGoForward: event.data.canGoForward,
+            });
+          } else {
+            resolve({ success: false, error: event.data.error || 'Failed to drill into element' });
+          }
+        }
+      };
+      window.addEventListener('message', handleResponse);
+
+      webview.contentWindow?.postMessage({ type: 'DRILL_INTO', elementNumber }, '*');
+
+      setTimeout(() => {
+        window.removeEventListener('message', handleResponse);
+        resolve({ success: false, error: 'Timeout drilling into element' });
+      }, 5000);
+    });
+  }, [isWebviewReady, activeTabId]);
+
+  const handleDrillBack = useCallback(async (): Promise<{ success: boolean; children?: Record<string, unknown>[]; level?: number; canGoBack?: boolean; canGoForward?: boolean; error?: string }> => {
+    console.log('[AI] Drill back');
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      return { success: false, error: 'Webview not ready' };
+    }
+
+    return new Promise((resolve) => {
+      const handleResponse = (event: MessageEvent) => {
+        if (event.data?.type === 'DRILL_BACK_RESULT') {
+          window.removeEventListener('message', handleResponse);
+          if (event.data.success) {
+            resolve({
+              success: true,
+              children: event.data.children,
+              level: event.data.level,
+              canGoBack: event.data.canGoBack,
+              canGoForward: event.data.canGoForward,
+            });
+          } else {
+            resolve({ success: false, error: event.data.error || 'Cannot go back' });
+          }
+        }
+      };
+      window.addEventListener('message', handleResponse);
+
+      webview.contentWindow?.postMessage({ type: 'DRILL_BACK' }, '*');
+
+      setTimeout(() => {
+        window.removeEventListener('message', handleResponse);
+        resolve({ success: false, error: 'Timeout going back' });
+      }, 5000);
+    });
+  }, [isWebviewReady, activeTabId]);
+
+  const handleDrillForward = useCallback(async (): Promise<{ success: boolean; children?: Record<string, unknown>[]; level?: number; canGoBack?: boolean; canGoForward?: boolean; error?: string }> => {
+    console.log('[AI] Drill forward');
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      return { success: false, error: 'Webview not ready' };
+    }
+
+    return new Promise((resolve) => {
+      const handleResponse = (event: MessageEvent) => {
+        if (event.data?.type === 'DRILL_FORWARD_RESULT') {
+          window.removeEventListener('message', handleResponse);
+          if (event.data.success) {
+            resolve({
+              success: true,
+              children: event.data.children,
+              level: event.data.level,
+              canGoBack: event.data.canGoBack,
+              canGoForward: event.data.canGoForward,
+            });
+          } else {
+            resolve({ success: false, error: event.data.error || 'No forward history' });
+          }
+        }
+      };
+      window.addEventListener('message', handleResponse);
+
+      webview.contentWindow?.postMessage({ type: 'DRILL_FORWARD' }, '*');
+
+      setTimeout(() => {
+        window.removeEventListener('message', handleResponse);
+        resolve({ success: false, error: 'Timeout going forward' });
+      }, 5000);
+    });
+  }, [isWebviewReady, activeTabId]);
+
+  const handleExitDrillMode = useCallback(async (): Promise<{ success: boolean }> => {
+    console.log('[AI] Exit drill mode');
+    const webview = webviewRefs.current.get(activeTabId);
+    if (!webview || !isWebviewReady) {
+      return { success: false };
+    }
+
+    return new Promise((resolve) => {
+      const handleResponse = (event: MessageEvent) => {
+        if (event.data?.type === 'EXIT_DRILL_MODE_RESULT') {
+          window.removeEventListener('message', handleResponse);
+          resolve({ success: event.data.success });
+        }
+      };
+      window.addEventListener('message', handleResponse);
+
+      webview.contentWindow?.postMessage({ type: 'EXIT_DRILL_MODE' }, '*');
+
+      setTimeout(() => {
+        window.removeEventListener('message', handleResponse);
+        resolve({ success: true }); // Assume success on timeout
+      }, 2000);
+    });
+  }, [isWebviewReady, activeTabId]);
+
   // Layers panel handlers
   const handleRefreshLayers = useCallback(async () => {
     setIsLayersLoading(true);
@@ -2826,12 +3558,37 @@ export default function App() {
               if (isClusoUi(child)) continue;
               if (shouldInclude(child)) {
                 elementNumber++;
+
+                // Extract Cluso metadata if present
+                const clusoId = child.getAttribute('data-cluso-id');
+                const clusoName = child.getAttribute('data-cluso-name');
+
+                let sourceFile = null;
+                let sourceLine = null;
+                let sourceColumn = null;
+
+				if (clusoId) {
+					// Parse format: "src/App.tsx:45:12"
+					const parts = clusoId.split(':');
+					const colStr = parts.pop();
+					const lineStr = parts.pop();
+					const col = colStr ? parseInt(colStr, 10) : NaN;
+					const line = lineStr ? parseInt(lineStr, 10) : NaN;
+					sourceColumn = Number.isFinite(col) ? col : null;
+					sourceLine = Number.isFinite(line) ? line : null;
+					const sf = parts.join(':'); // Handle Windows paths (e.g. C:\\...)
+					sourceFile = sf || null;
+				}
+
                 const node = {
                   id: getXPath(child) || ('element-' + elementNumber),
-                  name: getElementName(child),
+                  name: clusoName || getElementName(child), // Prefer data-cluso-name
                   type: getElementType(child),
                   tagName: child.tagName.toLowerCase(),
                   elementNumber,
+                  sourceFile,
+                  sourceLine,
+                  sourceColumn,
                   children: []
                 };
                 elementMap.set(elementNumber, child);
@@ -4354,12 +5111,88 @@ export default function App() {
     onSetViewport: handleSetViewport,
     onSwitchTab: handleSwitchTab,
     onFindElementByText: handleFindElementByText,
+    // DOM Navigation handlers for voice
+    onSelectParent: handleSelectParent,
+    onSelectChildren: handleSelectChildren,
+    onSelectSiblings: handleSelectSiblings,
+    onSelectAllMatching: handleSelectAllMatching,
+    // Drill-Down Selection handlers for voice
+    onStartDrillSelection: handleStartDrillSelection,
+    onDrillInto: handleDrillInto,
+    onDrillBack: handleDrillBack,
+    onDrillForward: handleDrillForward,
+    onExitDrillMode: handleExitDrillMode,
     selectedElement: selectedElement,
     // Pass Google API key from settings
     googleApiKey: appSettings.providers.find(p => p.id === 'google')?.apiKey,
     // Pass selected model for Live Gemini streaming
     selectedModelId: selectedModel.id,
   });
+
+  const isVoiceSessionActive = !!streamState.isConnected
+
+  const pendingEditSession = pendingDOMApproval
+    ? ({
+        kind: 'dom' as const,
+        description: pendingDOMApproval.description,
+        patchStatus: pendingDOMApproval.patchStatus,
+        patchError: pendingDOMApproval.patchError,
+        userApproved: pendingDOMApproval.userApproved,
+        patch: pendingDOMApproval.patch,
+      })
+    : pendingChange?.source === 'code'
+      ? ({
+          kind: 'code' as const,
+          description: pendingChange.description,
+        })
+      : null
+
+  const pendingPreview = pendingDOMApproval
+    ? ({
+        applyCode: pendingDOMApproval.applyCode,
+        undoCode: pendingDOMApproval.undoCode,
+        additions: 1,
+        deletions: 1,
+      })
+    : pendingChange
+      ? ({
+          applyCode: pendingChange.code,
+          undoCode: pendingChange.undoCode,
+          additions: pendingChange.additions,
+          deletions: pendingChange.deletions,
+        })
+      : null
+
+  const showWideApprovalCard = !!pendingDOMApproval || (isVoiceSessionActive && !!pendingChange)
+  const showCompactApprovalPopup = !!pendingPreview && !isVoiceSessionActive && !pendingDOMApproval
+
+  useEffect(() => {
+    setIsPreviewingOriginal(false)
+  }, [pendingDOMApproval?.id, pendingChange?.code])
+
+  const showOriginalPreview = useCallback(async () => {
+    if (!pendingPreview?.undoCode) return
+    const webview = webviewRefs.current.get(activeTabId)
+    if (!webview) return
+    try {
+      await webview.executeJavaScript(pendingPreview.undoCode)
+      setIsPreviewingOriginal(true)
+    } catch (err) {
+      console.error('[Preview] Failed to show original:', err)
+    }
+  }, [pendingPreview, activeTabId])
+
+  const showChangedPreview = useCallback(async () => {
+    if (!pendingPreview?.applyCode) return
+    const webview = webviewRefs.current.get(activeTabId)
+    if (!webview) return
+    try {
+      await webview.executeJavaScript(pendingPreview.applyCode)
+      setIsPreviewingOriginal(false)
+    } catch (err) {
+      console.error('[Preview] Failed to show change:', err)
+    }
+  }, [pendingPreview, activeTabId])
 
   // Load available prompts and directory files on mount
   useEffect(() => {
@@ -4878,6 +5711,8 @@ export default function App() {
         setHoveredElement(null);
       } else if (channel === 'inspector-select') {
         const data = args[0] as { element: SelectedElement; x: number; y: number; rect: unknown; source?: string };
+        console.log('[Inspector Select] Full element data:', data.element);
+        console.log('[Inspector Select] sourceLocation:', data.element.sourceLocation);
         setSelectedElement({
           ...data.element,
           x: data.x,
@@ -4885,6 +5720,24 @@ export default function App() {
           rect: data.rect as SelectedElement['rect']
         });
         setHoveredElement(null); // Clear hover on selection
+
+        // Copy element info to clipboard (use Electron API since webview steals focus)
+        const el = data.element;
+        const sourceInfo = el.sourceLocation?.summary || 'no source';
+        const clipboardText = `${el.outerHTML || `<${el.tagName}>`}\n\nSource: ${sourceInfo}`;
+        try {
+          if (window.electronAPI?.clipboard?.writeText) {
+            window.electronAPI.clipboard.writeText(clipboardText);
+            console.log('[Inspector] Copied to clipboard via Electron:', sourceInfo);
+          } else {
+            // Fallback for web mode - may fail if document not focused
+            await navigator.clipboard.writeText(clipboardText);
+            console.log('[Inspector] Copied to clipboard via navigator:', sourceInfo);
+          }
+        } catch (err) {
+          // Clipboard copy failed (expected when webview has focus)
+          console.log('[Inspector] Clipboard copy skipped (webview focused)');
+        }
 
         // If selection comes from Layers -> inspector sync, don't bounce back
         if (data.source === 'layers') {
@@ -5426,18 +6279,54 @@ export default function App() {
           const textChangePayload = { oldText: data.oldText, newText: data.newText };
 
           const approvalId = `inline-${Date.now()}`;
-          setPendingDOMApproval({
-            id: approvalId,
-            element: elementWithSource,
-            cssChanges: {},
-            textChange: data.newText,
-            description: `Change text: "${data.oldText?.substring(0, 20)}..." → "${data.newText?.substring(0, 20)}..."`,
-            undoCode: `document.querySelector('*').textContent = ${JSON.stringify(data.oldText)}`,
-            applyCode: `document.querySelector('*').textContent = ${JSON.stringify(data.newText)}`,
-            userRequest: 'Inline text edit',
-            patchStatus: 'preparing',
-            userApproved: true, // Auto-approve: user already clicked tick to accept
-          });
+			setPendingDOMApproval({
+				id: approvalId,
+				element: elementWithSource,
+				cssChanges: {},
+				textChange: data.newText,
+				description: `Change text: "${data.oldText?.substring(0, 20)}..." → "${data.newText?.substring(0, 20)}..."`,
+				undoCode: `(function() {
+					function getElementByXPath(xpath) {
+						try {
+							if (!xpath || typeof xpath !== 'string') return null;
+							return document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+						} catch (e) {
+							return null;
+						}
+					}
+					const xpath = ${JSON.stringify((elementWithSource as any)?.xpath || '')};
+					const elementNumber = ${JSON.stringify((elementWithSource as any)?.elementNumber ?? null)};
+					let el = getElementByXPath(xpath);
+					if (!el && elementNumber && window.__layersElements && typeof window.__layersElements.get === 'function') {
+						el = window.__layersElements.get(elementNumber);
+					}
+					if (!el) return 'Element not found';
+					el.textContent = ${JSON.stringify(data.oldText)};
+					return 'Reverted';
+				})()`,
+				applyCode: `(function() {
+					function getElementByXPath(xpath) {
+						try {
+							if (!xpath || typeof xpath !== 'string') return null;
+							return document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+						} catch (e) {
+							return null;
+						}
+					}
+					const xpath = ${JSON.stringify((elementWithSource as any)?.xpath || '')};
+					const elementNumber = ${JSON.stringify((elementWithSource as any)?.elementNumber ?? null)};
+					let el = getElementByXPath(xpath);
+					if (!el && elementNumber && window.__layersElements && typeof window.__layersElements.get === 'function') {
+						el = window.__layersElements.get(elementNumber);
+					}
+					if (!el) return 'Element not found';
+					el.textContent = ${JSON.stringify(data.newText)};
+					return 'Applied';
+				})()`,
+				userRequest: 'Inline text edit',
+				patchStatus: 'preparing',
+				userApproved: true, // Auto-approve: user already clicked tick to accept
+			});
 
           prepareDomPatch(
             approvalId,
@@ -5570,6 +6459,7 @@ export default function App() {
   // Initialize ghostty terminal when terminal tab is selected
   useEffect(() => {
     if (consolePanelTab !== 'terminal' || !terminalContainerRef.current || terminalInstanceRef.current) return
+    if (!ptyPort) return // Wait for PTY port to be available
 
     let mounted = true
 
@@ -5601,8 +6491,8 @@ export default function App() {
 
         terminalInstanceRef.current = { term, fitAddon }
 
-        // Connect to WebSocket PTY
-        const wsUrl = 'ws://localhost:3001/pty'
+        // Connect to WebSocket PTY using dynamic port
+        const wsUrl = `ws://127.0.0.1:${ptyPort}`
         const cols = term.cols || 80
         const rows = term.rows || 12
         const url = `${wsUrl}?cols=${cols}&rows=${rows}`
@@ -5613,8 +6503,22 @@ export default function App() {
           console.log('[Terminal Panel] Connected to PTY')
         }
 
+        let pendingWrites = ''
+        let flushScheduled = false
+        const scheduleFlush = () => {
+          if (flushScheduled) return
+          flushScheduled = true
+          requestAnimationFrame(() => {
+            flushScheduled = false
+            if (!pendingWrites) return
+            term.write(pendingWrites)
+            pendingWrites = ''
+          })
+        }
+
         ws.onmessage = (event) => {
-          term.write(event.data)
+          pendingWrites += typeof event.data === 'string' ? event.data : String(event.data)
+          scheduleFlush()
         }
 
         ws.onclose = () => {
@@ -5653,7 +6557,7 @@ export default function App() {
         terminalInstanceRef.current = null
       }
     }
-  }, [consolePanelTab, isDarkMode])
+  }, [consolePanelTab, isDarkMode, ptyPort])
 
   // Fit terminal when console panel resizes
   useEffect(() => {
@@ -6665,7 +7569,14 @@ If you're not sure what the user wants, ask for clarification.
       const { intent, systemPrompt: agentSystemPrompt, tools, promptMode } = processCodingMessage(userMessage.content);
       console.log(`[Coding Agent] Intent: ${intent.type} (${Math.round(intent.confidence * 100)}%) | Mode: ${promptMode}`);
 
+      // Get the provider for the SELECTED MODEL (not hardcoded to Google!)
+      const selectedModelProvider = appSettings.providers.find(p =>
+        p.id === selectedModel.provider && p.enabled && p.apiKey
+      );
+
+      // Fallback to Google if selected model's provider not found (backwards compatibility)
       const googleProvider = appSettings.providers.find(p => p.id === 'google' && p.enabled && p.apiKey);
+      const providerForUIUpdate = selectedModelProvider || googleProvider;
 
       // 🖼️ IMAGE ATTACHMENT HANDLER - works WITH or WITHOUT selected element
       // Must be BEFORE the selectedElement check to handle standalone image attachments
@@ -6918,22 +7829,11 @@ If you're not sure what the user wants, ask for clarification.
         hasSourceLocation: !!selectedElement?.sourceLocation?.sources?.[0],
       });
 
-      // Check if UI modify but missing requirements
-      if (intent.type === 'ui_modify' && !selectedElement) {
-        console.log('[Instant UI] ui_modify detected but no element selected');
-        const noElementMessage: ChatMessage = {
-          id: `msg-nosel-${Date.now()}`,
-          role: 'assistant',
-          content: `To modify the UI, first select an element using the inspector (crosshair icon) or say "highlight the buttons" to see what's available.`,
-          timestamp: new Date(),
-          model: 'system',
-          intent: 'ui_modify',
-        };
-        setMessages(prev => [...prev, noElementMessage]);
-        return;
-      }
+      // If ui_modify intent but no element selected, let it fall through to normal chat
+      // (don't block - user might want to describe the element)
 
-      if (intent.type === 'ui_modify' && selectedElement && googleProvider?.apiKey) {
+      // INSTANT UI PATH: Element selected with source location = fast path
+      if (intent.type === 'ui_modify' && selectedElement && selectedElement.sourceLocation?.sources?.[0]) {
         console.log('[Instant UI] Triggering instant UI update with source patch...');
         console.log('[Instant UI] Selected element:', {
           tagName: selectedElement.tagName,
@@ -7275,7 +8175,7 @@ If you're not sure what the user wants, ask for clarification.
         const uiResult = await generateUIUpdate(
           selectedElement,
           userMessage.content,
-          googleProvider.apiKey,
+          providerForUIUpdate?.apiKey || '',
           uiModelForUpdate,
           providerConfigsRef.current,
         );
@@ -8053,6 +8953,8 @@ If you're not sure what the user wants, ask for clarification.
   ) => {
     // Ensure this approval id is not considered cancelled
     cancelledApprovalsRef.current.delete(approvalId);
+    clearDomApprovalPatchTimeout(approvalId)
+    markDomTelemetry(approvalId, 'patch_generation_started')
     console.log('='.repeat(60));
     console.log('[DOM Approval] === PREPARING SOURCE PATCH ===');
     console.log('[DOM Approval] Inputs:', {
@@ -8069,7 +8971,9 @@ If you're not sure what the user wants, ask for clarification.
     console.log('='.repeat(60));
     // Use refs to get current values (prevents stale closures during async operations)
     const providerConfig = { modelId: selectedModelRef.current.id, providers: providerConfigsRef.current };
-    generateSourcePatch({
+    
+    // Wrap in timeout to prevent indefinite hangs
+    const patchPromise = generateSourcePatch({
       element,
       cssChanges,
       providerConfig,
@@ -8077,11 +8981,32 @@ If you're not sure what the user wants, ask for clarification.
       userRequest,
       textChange,
       srcChange,
-      disableFastApply: appSettings.clusoCloudEditsEnabled,
-      morphApiKey: appSettings.providers.find(p => p.id === 'morph')?.apiKey,
+      disableFastApply: appSettingsRef.current.clusoCloudEditsEnabled,
+      morphApiKey: appSettingsRef.current.providers.find(p => p.id === 'morph')?.apiKey,
+    });
+
+    const timeoutToken = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    domApprovalPatchTimeoutTokensRef.current.set(approvalId, timeoutToken)
+
+    const timeoutPromise = new Promise<null>((resolve) => {
+      const handle = setTimeout(() => {
+        // Ignore if superseded/cancelled/cleared.
+        const currentToken = domApprovalPatchTimeoutTokensRef.current.get(approvalId)
+        if (currentToken !== timeoutToken) return
+        // Cleanup so it can't fire again.
+        clearDomApprovalPatchTimeout(approvalId)
+        console.log('[DOM Approval] Patch generation TIMED OUT after 30s', { approvalId })
+        resolve(null)
+      }, 30000)
+      domApprovalPatchTimeoutsRef.current.set(approvalId, handle)
     })
+    
+    Promise.race([patchPromise, timeoutPromise])
       .then(patch => {
+        clearDomApprovalPatchTimeout(approvalId)
         console.log('[DOM Approval] Patch generation completed:', { approvalId, success: !!patch });
+        if (cancelledApprovalsRef.current.has(approvalId)) return
+        markDomTelemetry(approvalId, patch ? 'patch_ready' : 'patch_failed')
         setPendingDOMApproval(prev => {
           if (!prev || prev.id !== approvalId) return prev;
           if (cancelledApprovalsRef.current.has(approvalId)) return prev;
@@ -8100,11 +9025,14 @@ If you're not sure what the user wants, ask for clarification.
               durationMs: patch.durationMs,
             };
             console.log('[DOM Approval] Patch ready:', { approvalId, filePath: patch.filePath, generatedBy: patch.generatedBy });
+            const autoApproveFastPath =
+              !!appSettingsRef.current.fastPathAutoApplyEnabled && patch.generatedBy === 'fast-path'
             return {
               ...prev,
               patchStatus: 'ready',
               patch: patchPayload,
               patchError: undefined,
+              userApproved: prev.userApproved || autoApproveFastPath,
             };
           }
           console.warn('[DOM Approval] Patch generation returned null:', approvalId);
@@ -8112,15 +9040,21 @@ If you're not sure what the user wants, ask for clarification.
         });
       })
       .catch((error: unknown) => {
+        clearDomApprovalPatchTimeout(approvalId)
         const errorMessage = error instanceof Error ? error.message : 'Failed to generate source patch';
         console.error('[DOM Approval] Patch generation failed:', { approvalId, error: errorMessage });
+        if (cancelledApprovalsRef.current.has(approvalId)) return
+        markDomTelemetry(approvalId, 'patch_failed')
         setPendingDOMApproval(prev => {
           if (!prev || prev.id !== approvalId) return prev;
           if (cancelledApprovalsRef.current.has(approvalId)) return prev;
           return { ...prev, patchStatus: 'error', patch: undefined, patchError: errorMessage };
         });
+      })
+      .finally(() => {
+        clearDomApprovalPatchTimeout(approvalId)
       });
-  }, []); // No dependencies - using refs for current values
+  }, [clearDomApprovalPatchTimeout, markDomTelemetry]);
 
   // Handle accepting DOM preview - generates source patch and auto-approves
   const handleAcceptDOMApproval = useCallback(async () => {
@@ -8129,6 +9063,9 @@ If you're not sure what the user wants, ask for clarification.
       console.log('[DOM Approval] Accept aborted - approval was cancelled:', pendingDOMApproval.id);
       return;
     }
+
+    // Patch generation timeout is only relevant while waiting; clear it once we move into accept flow.
+    clearDomApprovalPatchTimeout(pendingDOMApproval.id)
 
     console.log('[DOM Approval] Accept clicked:', {
       id: pendingDOMApproval.id,
@@ -8144,6 +9081,8 @@ If you're not sure what the user wants, ask for clarification.
       return;
     }
 
+    markDomTelemetry(pendingDOMApproval.id, 'user_accept')
+
     if (pendingDOMApproval.patchStatus === 'error' || !pendingDOMApproval.patch) {
       setMessages(prev => [...prev, {
         id: `msg-error-${Date.now()}`,
@@ -8153,6 +9092,7 @@ If you're not sure what the user wants, ask for clarification.
       }]);
       setPendingDOMApproval(null);
       setPendingChange(null);
+      finalizeDomTelemetry(pendingDOMApproval.id, 'cancelled')
       return;
     }
 
@@ -8191,6 +9131,7 @@ If you're not sure what the user wants, ask for clarification.
       console.log('[DOM Approval] Patched length:', patch.patchedContent?.length || 0);
       console.log('[DOM Approval] First 200 chars of patched content:', patch.patchedContent?.substring(0, 200));
 
+      markDomTelemetry(pendingDOMApproval.id, 'source_write_started')
       const result = await fileService.writeFile(patch.filePath, patch.patchedContent);
       console.log('[DOM Approval] writeFile result:', result);
 
@@ -8208,6 +9149,7 @@ If you're not sure what the user wants, ask for clarification.
       }
 
       if (result.success) {
+        markDomTelemetry(pendingDOMApproval.id, 'source_write_succeeded')
         console.log('[Source Patch] ✅ Applied successfully to:', patch.filePath);
         setMessages(prev => [...prev, {
           id: `msg-patch-${Date.now()}`,
@@ -8225,6 +9167,7 @@ If you're not sure what the user wants, ask for clarification.
         throw new Error(result.error || 'Failed to save file');
       }
     } catch (e) {
+      markDomTelemetry(pendingDOMApproval.id, 'source_write_failed')
       console.error('[Source Patch] Failed:', e);
       setMessages(prev => [...prev, {
         id: `msg-error-${Date.now()}`,
@@ -8239,7 +9182,8 @@ If you're not sure what the user wants, ask for clarification.
     setPendingChange(null); // Clear pill toolbar too
     // Cleanup cancellation marker once lifecycle ends
     cancelledApprovalsRef.current.delete(pendingDOMApproval.id);
-  }, [pendingDOMApproval, addEditedFile]);
+    finalizeDomTelemetry(pendingDOMApproval.id, 'accepted')
+  }, [pendingDOMApproval, addEditedFile, markDomTelemetry, finalizeDomTelemetry, clearDomApprovalPatchTimeout]);
 
   // Auto-apply when patch is ready and user has pre-approved
   useEffect(() => {
@@ -8253,6 +9197,9 @@ If you're not sure what the user wants, ask for clarification.
   const handleRejectDOMApproval = useCallback(() => {
     if (!pendingDOMApproval) return;
 
+    clearDomApprovalPatchTimeout(pendingDOMApproval.id)
+
+    markDomTelemetry(pendingDOMApproval.id, 'user_reject')
     cancelledApprovalsRef.current.add(pendingDOMApproval.id);
     const webview = webviewRefs.current.get(activeTabId);
     if (pendingDOMApproval.undoCode && webview) {
@@ -8260,7 +9207,8 @@ If you're not sure what the user wants, ask for clarification.
     }
     setPendingDOMApproval(null);
     setPendingChange(null); // Clear pill toolbar too
-  }, [pendingDOMApproval, activeTabId]);
+    finalizeDomTelemetry(pendingDOMApproval.id, 'rejected')
+  }, [pendingDOMApproval, activeTabId, markDomTelemetry, finalizeDomTelemetry, clearDomApprovalPatchTimeout]);
 
   // Keyboard shortcuts for Accept/Reject pending changes
   // CMD+Enter = Accept, Escape = Reject
@@ -8389,11 +9337,16 @@ If you're not sure what the user wants, ask for clarification.
   // Background color - MUST match title bar. This is THE source of truth.
   const appBgColor = themeColors?.background || (isDarkMode ? '#171717' : '#d6d3d1');
 
+  // Transparency settings for CSS backdrop-filter blur
+  const isTransparent = !!appSettings.transparencyEnabled;
+  const blurAmount = appSettings.windowBlur ?? 0;
+
   return (
     <div
-      className={`flex flex-col h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'dark text-neutral-100' : 'text-neutral-900'}`}
-      style={{ backgroundColor: appBgColor }}
+      className={`relative flex flex-col h-screen w-full overflow-hidden font-sans ${isDarkMode ? 'dark bg-neutral-900 text-neutral-100' : 'bg-stone-50 text-neutral-900'}`}
     >
+      {/* Content wrapper */}
+      <div className="relative flex flex-col flex-1 overflow-hidden">
 
       {/* Tab Bar - at the very top with traffic light area */}
       <TabBar
@@ -8409,6 +9362,7 @@ If you're not sure what the user wants, ask for clarification.
         fastApplyReady={fastApplyReady}
         fileWatcherActive={fileWatcherActive}
         extensionConnected={extensionConnected}
+        indexingStatus={indexingStatus}
       />
 
       {/* Remote cursor from extension user */}
@@ -8486,6 +9440,7 @@ If you're not sure what the user wants, ask for clarification.
               isDarkMode={isDarkMode}
               panelBg={panelBg}
               panelBorder={panelBorder}
+              headerBg={headerBg}
               isLoading={isLayersLoading}
               selectedElementName={selectedLayerElementName}
               selectedElementNumber={selectedLayerElementNumber}
@@ -8584,7 +9539,7 @@ If you're not sure what the user wants, ask for clarification.
             {/* Browser Toolbar */}
             <div
               className="h-12 border-b flex items-center gap-2 px-3 flex-shrink-0"
-              style={{ borderColor: panelBorder, backgroundColor: headerBg }}
+              style={{ borderColor: panelBorder }}
             >
           {/* Layers Toggle */}
           <button
@@ -8986,6 +9941,7 @@ If you're not sure what the user wants, ask for clarification.
                 isInspectorActive={isInspectorActive}
                 isScreenshotActive={isScreenshotActive}
                 isMoveActive={isMoveActive}
+                terminalWsUrl={ptyPort ? `ws://127.0.0.1:${ptyPort}` : undefined}
                 onInspectorHover={(element, rect, _viewportId) => {
                   setHoveredElement({
                     element: element as SelectedElement,
@@ -9199,18 +10155,14 @@ If you're not sure what the user wants, ask for clarification.
 
                         <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
 
-                        {/* Layout controls */}
+                        {/* Layout control - auto arrange and fit */}
                         <button
-                          onClick={() => viewportControlsRef.current?.autoLayout('RIGHT')}
+                          onClick={() => {
+                            viewportControlsRef.current?.autoLayout('RIGHT')
+                            setTimeout(() => viewportControlsRef.current?.fitView(), 100)
+                          }}
                           className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
-                          title="Auto Arrange"
-                        >
-                          <AlignHorizontalSpaceAround size={16} />
-                        </button>
-                        <button
-                          onClick={() => viewportControlsRef.current?.fitView()}
-                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
-                          title="Fit View"
+                          title="Show All"
                         >
                           <Maximize size={16} />
                         </button>
@@ -10102,27 +11054,13 @@ If you're not sure what the user wants, ask for clarification.
               {/* Streaming Message Display */}
               {isStreaming && streamingMessage && (
                 <div className="flex flex-col items-start">
-                  {/* Streaming Tool Calls - Compact chips */}
+                  {/* Streaming Tool Calls - Grouped chips with expand/collapse */}
                   {streamingMessage.toolCalls.length > 0 && (
-                    <div className="mb-2 flex flex-wrap gap-1.5">
-                      {streamingMessage.toolCalls.map((tool, idx) => (
-                        <div
-                          key={tool.id || idx}
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all ${
-                            tool.status === 'running'
-                              ? isDarkMode ? 'bg-blue-500/20 text-blue-300' : 'bg-blue-100 text-blue-700'
-                              : tool.status === 'error'
-                              ? isDarkMode ? 'bg-red-500/20 text-red-300' : 'bg-red-100 text-red-700'
-                              : isDarkMode ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
-                          }`}
-                        >
-                          {tool.status === 'running' && <Loader2 size={10} className="animate-spin" />}
-                          {tool.status === 'done' && <Check size={10} />}
-                          {tool.status === 'error' && <X size={10} />}
-                          <span className="font-mono">{tool.name}</span>
-                        </div>
-                      ))}
-                    </div>
+                    <GroupedToolChips
+                      toolCalls={streamingMessage.toolCalls}
+                      isDarkMode={isDarkMode}
+                      isStreaming={true}
+                    />
                   )}
 
                   {/* Streaming Reasoning/Thinking */}
@@ -10161,20 +11099,16 @@ If you're not sure what the user wants, ask for clarification.
 
               {/* Completed Tool Calls - Shows success/error states after streaming ends */}
               {!isStreaming && completedToolCalls.length > 0 && (
-                <div className="mb-3 flex flex-wrap gap-1.5 animate-in fade-in duration-300">
-                  {completedToolCalls.map((tool) => (
-                    <div
-                      key={tool.id}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all ${
-                        tool.status === 'error'
-                          ? isDarkMode ? 'bg-red-500/20 text-red-300' : 'bg-red-100 text-red-700'
-                          : isDarkMode ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
-                      }`}
-                    >
-                      {tool.status === 'error' ? <X size={10} /> : <Check size={10} />}
-                      <span className="font-mono">{tool.name}</span>
-                    </div>
-                  ))}
+                <div className="mb-3 animate-in fade-in duration-300">
+                  <GroupedToolChips
+                    toolCalls={completedToolCalls.map(t => ({
+                      id: t.id,
+                      name: t.name,
+                      status: t.status,
+                    }))}
+                    isDarkMode={isDarkMode}
+                    isStreaming={false}
+                  />
                 </div>
               )}
 
@@ -10186,8 +11120,8 @@ If you're not sure what the user wants, ask for clarification.
                 </div>
               )}
 
-              {/* Pending DOM Approval in chat - uses shared handlers */}
-              {pendingDOMApproval && !isGeneratingSourcePatch && (
+              {/* Pending Edit Session in chat */}
+              {showWideApprovalCard && pendingEditSession && !(pendingEditSession.kind === 'dom' && isGeneratingSourcePatch) && (
                 <div className={`mx-4 my-3 p-3 rounded-xl border ${
                   isDarkMode
                     ? 'bg-blue-950/50 border-blue-800/50'
@@ -10195,13 +11129,30 @@ If you're not sure what the user wants, ask for clarification.
                 }`}>
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2 min-w-0">
-                      <Palette size={16} className={isDarkMode ? 'text-blue-400' : 'text-blue-600'} />
+                      {pendingEditSession.kind === 'dom' ? (
+                        <Palette size={16} className={isDarkMode ? 'text-blue-400' : 'text-blue-600'} />
+                      ) : (
+                        <Code2 size={16} className={isDarkMode ? 'text-blue-400' : 'text-blue-600'} />
+                      )}
                       <span className={`text-sm font-medium truncate ${isDarkMode ? 'text-blue-300' : 'text-blue-800'}`}>
-                        {pendingDOMApproval.description}
+                        {pendingEditSession.description}
                       </span>
                     </div>
                     <div className="flex gap-2 items-center shrink-0">
-                      {pendingDOMApproval.patchStatus === 'preparing' && (
+                      {pendingPreview?.undoCode && (
+                        <button
+                          onClick={isPreviewingOriginal ? showChangedPreview : showOriginalPreview}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                            isDarkMode
+                              ? 'bg-neutral-700 hover:bg-neutral-600 text-neutral-300'
+                              : 'bg-stone-200 hover:bg-stone-300 text-stone-700'
+                          }`}
+                          title={isPreviewingOriginal ? 'Show change' : 'Show original'}
+                        >
+                          {isPreviewingOriginal ? 'Preview on' : 'Preview off'}
+                        </button>
+                      )}
+                      {pendingEditSession.kind === 'dom' && pendingEditSession.patchStatus === 'preparing' && (
                         <div className={`flex items-center gap-1 text-xs ${
                           isDarkMode ? 'text-blue-300/70' : 'text-blue-700/70'
                         }`}>
@@ -10209,13 +11160,13 @@ If you're not sure what the user wants, ask for clarification.
                           <span>Preparing source patch…</span>
                         </div>
                       )}
-                      {pendingDOMApproval.patchStatus === 'error' && (
+                      {pendingEditSession.kind === 'dom' && pendingEditSession.patchStatus === 'error' && (
                         <div className={`text-xs ${isDarkMode ? 'text-red-300/80' : 'text-red-600/80'}`}>
-                          {pendingDOMApproval.patchError || 'Failed to prepare patch'}
+                          {pendingEditSession.patchError || 'Failed to prepare patch'}
                         </div>
                       )}
                       <button
-                        onClick={handleRejectDOMApproval}
+                        onClick={pendingEditSession.kind === 'dom' ? handleRejectDOMApproval : handleRejectChange}
                         className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
                           isDarkMode
                             ? 'bg-neutral-700 hover:bg-neutral-600 text-neutral-300'
@@ -10225,20 +11176,20 @@ If you're not sure what the user wants, ask for clarification.
                         Reject
                       </button>
                       <button
-                        onClick={handleAcceptDOMApproval}
-                        disabled={pendingDOMApproval.userApproved}
+                        onClick={pendingEditSession.kind === 'dom' ? handleAcceptDOMApproval : handleApproveChange}
+                        disabled={pendingEditSession.kind === 'dom' ? !!pendingEditSession.userApproved : false}
                         className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
                           isDarkMode
                             ? 'bg-blue-600 hover:bg-blue-500 text-white'
                             : 'bg-blue-600 hover:bg-blue-700 text-white'
-                        } ${pendingDOMApproval.userApproved ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        } ${pendingEditSession.kind === 'dom' && pendingEditSession.userApproved ? 'opacity-60 cursor-not-allowed' : ''}`}
                       >
-                        {pendingDOMApproval.userApproved ? (
+                        {pendingEditSession.kind === 'dom' && pendingEditSession.userApproved ? (
                           <>
                             <Loader2 size={14} className="animate-spin" />
                             Applying…
                           </>
-                        ) : pendingDOMApproval.patchStatus === 'ready' ? (
+                        ) : pendingEditSession.kind === 'dom' && pendingEditSession.patchStatus === 'ready' ? (
                           <>
                             <Check size={14} />
                             Accept
@@ -10253,17 +11204,17 @@ If you're not sure what the user wants, ask for clarification.
                     </div>
                   </div>
                   {/* Tool use indicator showing which method generated the patch */}
-                  {pendingDOMApproval.patchStatus === 'ready' && pendingDOMApproval.patch && (
+                  {pendingEditSession.kind === 'dom' && pendingEditSession.patchStatus === 'ready' && pendingEditSession.patch && (
                     <div className={`mt-2 pt-2 border-t ${isDarkMode ? 'border-blue-800/30' : 'border-blue-200'}`}>
                       <div className={`flex items-center gap-2 text-xs ${isDarkMode ? 'text-blue-300/70' : 'text-blue-700/70'}`}>
-                        {pendingDOMApproval.patch.generatedBy === 'fast-apply' ? (
+                        {pendingEditSession.patch.generatedBy === 'fast-apply' ? (
                           <>
                             <Zap size={12} className="text-yellow-500" />
                             <span className="font-medium text-yellow-500">Fast Apply</span>
                             <span>·</span>
-                            <span>{pendingDOMApproval.patch.durationMs}ms</span>
+                            <span>{pendingEditSession.patch.durationMs}ms</span>
                           </>
-                        ) : pendingDOMApproval.patch.generatedBy === 'fast-path' ? (
+                        ) : pendingEditSession.patch.generatedBy === 'fast-path' ? (
                           <>
                             <Zap size={12} className="text-green-500" />
                             <span className="font-medium text-green-500">Fast Path</span>
@@ -10273,56 +11224,26 @@ If you're not sure what the user wants, ask for clarification.
                           <>
                             <Sparkles size={12} />
                             <span className="font-medium">Gemini</span>
+                            {(() => {
+                              const telemetry = domEditTelemetryRef.current[pendingDOMApproval!.id]
+                              const started = telemetry?.events?.patch_generation_started
+                              const ready = telemetry?.events?.patch_ready
+                              const ms = (started !== undefined && ready !== undefined) ? Math.round(ready - started) : undefined
+                              if (ms === undefined) return null
+                              return (
+                                <>
+                                  <span>·</span>
+                                  <span>{ms}ms</span>
+                                </>
+                              )
+                            })()}
                           </>
                         )}
                         <span>·</span>
-                        <span className="truncate">{pendingDOMApproval.patch.filePath.split('/').pop()}</span>
+                        <span className="truncate">{pendingEditSession.patch.filePath.split('/').pop()}</span>
                       </div>
                     </div>
                   )}
-                </div>
-              )}
-
-              {/* Pending Code Change in chat (json-exec) */}
-              {pendingChange?.source === 'code' && (
-                <div className={`mx-4 my-3 p-3 rounded-xl border ${
-                  isDarkMode
-                    ? 'bg-blue-950/50 border-blue-800/50'
-                    : 'bg-blue-50 border-blue-200'
-                }`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Code2 size={16} className={isDarkMode ? 'text-blue-400' : 'text-blue-600'} />
-                      <span className={`text-sm font-medium truncate ${isDarkMode ? 'text-blue-300' : 'text-blue-800'}`}>
-                        {pendingChange.description}
-                      </span>
-                    </div>
-                    <div className="flex gap-2 items-center shrink-0">
-                      <button
-                        onClick={handleRejectChange}
-                        title="Reject (Esc)"
-                        className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                          isDarkMode
-                            ? 'bg-neutral-700 hover:bg-neutral-600 text-neutral-300'
-                            : 'bg-stone-200 hover:bg-stone-300 text-stone-700'
-                        }`}
-                      >
-                        Reject
-                      </button>
-                      <button
-                        onClick={handleApproveChange}
-                        title="Accept (⌘+Enter)"
-                        className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
-                          isDarkMode
-                            ? 'bg-blue-600 hover:bg-blue-500 text-white'
-                            : 'bg-blue-600 hover:bg-blue-700 text-white'
-                        }`}
-                      >
-                        <Check size={14} />
-                        Accept
-                      </button>
-                    </div>
-                  </div>
                 </div>
               )}
 
@@ -10654,7 +11575,12 @@ If you're not sure what the user wants, ask for clarification.
                                     ? 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100'
                                     : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
                                 }`}
-                                onClick={handleShowSourceCode}
+                                onClick={() => {
+                                  console.log('[Element Chip] selectedElement:', selectedElement);
+                                  console.log('[Element Chip] sourceLocation:', selectedElement.sourceLocation);
+                                  console.log('[Element Chip] sources:', selectedElement.sourceLocation?.sources);
+                                  handleShowSourceCode();
+                                }}
                                 title={selectedElement.targetPosition ? 'Element with repositioning target' : 'Click to view source code'}
                               >
                                   {selectedElement.targetPosition ? <Move size={12} /> : <Check size={12} />}
@@ -10667,7 +11593,11 @@ If you're not sure what the user wants, ask for clarification.
                                             let fileName = 'unknown';
                                             if (src.file) {
                                               // Remove localhost URL prefix and get just the filename
-                                              const cleanPath = src.file.replace(/^\/\/localhost:\d+\//, '');
+                                              // Handle both http://localhost:4000/src/File.tsx and //localhost:4000/src/File.tsx
+                                              const cleanPath = src.file
+                                                .replace(/^https?:\/\/localhost:\d+\//, '')
+                                                .replace(/^\/\/localhost:\d+\//, '')
+                                                .replace(/\?.*$/, ''); // Remove query params like ?t=123456
                                               const parts = cleanPath.split('/');
                                               fileName = parts[parts.length - 1] || cleanPath;
                                             }
@@ -11440,38 +12370,38 @@ If you're not sure what the user wants, ask for clarification.
           </div>
       )}
 
-      {/* Pending Code Change Preview - 3 Button Popup */}
-      {(pendingChange?.source === 'dom' || pendingChange?.source === 'code') && (
+      {/* Pending Change Preview - 3 Button Popup */}
+      {pendingPreview && showCompactApprovalPopup && (
           <div className={`absolute bottom-24 left-1/2 transform -translate-x-1/2 flex items-center gap-2 rounded-full shadow-xl p-2 z-50 ${isDarkMode ? 'bg-neutral-800 border border-neutral-700' : 'bg-white border border-neutral-200'}`}>
               {/* Diff Stats */}
               <div className="flex items-center gap-1.5 px-2 text-xs font-mono">
-                  <span className="text-green-500">+{pendingChange.additions}</span>
-                  <span className="text-red-500">-{pendingChange.deletions}</span>
+                  <span className="text-green-500">+{pendingPreview.additions}</span>
+                  <span className="text-red-500">-{pendingPreview.deletions}</span>
               </div>
               <div className={`w-[1px] h-6 ${isDarkMode ? 'bg-neutral-600' : 'bg-neutral-200'}`}></div>
               <button
                   onMouseDown={() => {
                     const webview = webviewRefs.current.get(activeTabId);
-                    if (pendingChange.undoCode && webview) {
+                    if (pendingPreview.undoCode && webview) {
                       console.log('[Preview] Showing original');
-                      webview.executeJavaScript(pendingChange.undoCode);
+                      webview.executeJavaScript(pendingPreview.undoCode);
                       setIsPreviewingOriginal(true);
                     }
                   }}
                   onMouseUp={() => {
                     const webview = webviewRefs.current.get(activeTabId);
-                    if (pendingChange.code && webview) {
+                    if (pendingPreview.applyCode && webview) {
                       console.log('[Preview] Showing change');
-                      webview.executeJavaScript(pendingChange.code);
+                      webview.executeJavaScript(pendingPreview.applyCode);
                       setIsPreviewingOriginal(false);
                     }
                   }}
                   onMouseLeave={() => {
                     if (!isPreviewingOriginal) return;
                     const webview = webviewRefs.current.get(activeTabId);
-                    if (pendingChange.code && webview) {
+                    if (pendingPreview.applyCode && webview) {
                       console.log('[Preview] Showing change (mouse leave)');
-                      webview.executeJavaScript(pendingChange.code);
+                      webview.executeJavaScript(pendingPreview.applyCode);
                       setIsPreviewingOriginal(false);
                     }
                   }}
@@ -11713,7 +12643,12 @@ If you're not sure what the user wants, ask for clarification.
           onAccept={() => {
             const projectPath = activeTab?.projectPath
             if (projectPath && window.electronAPI?.mgrep) {
-              window.electronAPI.mgrep.initialize(projectPath)
+              setIndexingStatus('indexing')
+              window.electronAPI.mgrep.initialize(projectPath).then(() => {
+                setIndexingStatus('indexed')
+              }).catch(() => {
+                setIndexingStatus('idle')
+              })
             }
             setShowMgrepOnboarding(false)
           }}
@@ -11766,6 +12701,7 @@ If you're not sure what the user wants, ask for clarification.
       )}
 
       </div>
+      </div>{/* End content wrapper */}
     </div>
   );
 }

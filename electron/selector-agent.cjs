@@ -39,11 +39,24 @@ let currentContext = {
  */
 function resolveClaudeCodeCli() {
   // Prefer global claude CLI which has working OAuth auth
-  const globalPaths = [
-    '/usr/local/bin/claude',
-    path.join(os.homedir(), '.npm', 'bin', 'claude'),
-    path.join(os.homedir(), '.local', 'bin', 'claude'),
-  ]
+  const isWindows = process.platform === 'win32'
+
+  const globalPaths = isWindows
+    ? [
+        // Windows paths (use .cmd extension for npm packages)
+        path.join(os.homedir(), 'AppData', 'Roaming', 'npm', 'claude.cmd'),
+        path.join(os.homedir(), 'AppData', 'Roaming', 'npm', 'claude'),
+        path.join(os.homedir(), 'AppData', 'Local', 'pnpm', 'claude.cmd'),
+        path.join(os.homedir(), 'AppData', 'Local', 'pnpm', 'claude'),
+        path.join(os.homedir(), '.yarn', 'bin', 'claude.cmd'),
+      ]
+    : [
+        // macOS/Linux paths
+        '/usr/local/bin/claude',
+        '/opt/homebrew/bin/claude',
+        path.join(os.homedir(), '.npm', 'bin', 'claude'),
+        path.join(os.homedir(), '.local', 'bin', 'claude'),
+      ]
 
   for (const globalPath of globalPaths) {
     if (existsSync(globalPath)) {
@@ -256,8 +269,8 @@ async function initializeSession(options = {}) {
       options: {
         model: modelId,
         maxThinkingTokens: 0, // Haiku doesn't support thinking
-        // Only read project-level config (.mcp.json), NOT user-level (Claude Desktop)
-        settingSources: ['project'],
+        // Read both project and user config for API keys
+        settingSources: ['project', 'user'],
         permissionMode: 'acceptEdits',
         allowedTools: [], // Selector agent doesn't need tools, just analysis
         pathToClaudeCodeExecutable: cliPath,

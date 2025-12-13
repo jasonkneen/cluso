@@ -11,3 +11,122 @@
   }
 }
 
+/* Code block syntax highlighting for dark mode - better contrast */
+.dark pre,
+.dark code {
+  background-color: rgba(0, 0, 0, 0.4);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.dark pre code {
+  background-color: transparent;
+}
+
+/* Inline code styling for dark mode */
+.dark :not(pre) > code {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #f0abfc;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+}
+
+/* Shiki/Streamdown code block dark mode overrides for better contrast */
+.dark [data-theme="one-dark-pro"],
+.dark [data-theme="one-dark"],
+.dark .shiki,
+.dark pre[class*="language-"],
+.dark code[class*="language-"] {
+  color: #e4e4e7 !important;
+}
+
+/* Dark mode syntax highlighting - brighter colors for better contrast */
+.dark .token.keyword,
+.dark .hljs-keyword,
+.dark [style*="color:#C678DD"],
+.dark [style*="color:#c678dd"],
+.dark [style*="color: rgb(198, 120, 221)"] {
+  color: #ff7ab2 !important;
+}
+
+.dark .token.string,
+.dark .hljs-string,
+.dark [style*="color:#98C379"],
+.dark [style*="color:#98c379"],
+.dark [style*="color: rgb(152, 195, 121)"] {
+  color: #a5f3b5 !important;
+}
+
+.dark .token.function,
+.dark .hljs-function,
+.dark .hljs-title,
+.dark [style*="color:#61AFEF"],
+.dark [style*="color:#61afef"],
+.dark [style*="color: rgb(97, 175, 239)"] {
+  color: #7dd3fc !important;
+}
+
+.dark .token.number,
+.dark .hljs-number,
+.dark [style*="color:#D19A66"],
+.dark [style*="color:#d19a66"],
+.dark [style*="color: rgb(209, 154, 102)"] {
+  color: #fbbf24 !important;
+}
+
+.dark .token.comment,
+.dark .hljs-comment,
+.dark [style*="color:#5C6370"],
+.dark [style*="color:#5c6370"],
+.dark [style*="color: rgb(92, 99, 112)"] {
+  color: #9ca3af !important;
+}
+
+.dark .token.operator,
+.dark .hljs-operator {
+  color: #f9a8d4 !important;
+}
+
+.dark .token.punctuation,
+.dark .hljs-punctuation {
+  color: #d1d5db !important;
+}
+
+.dark .token.property,
+.dark .hljs-property,
+.dark .hljs-attr,
+.dark [style*="color:#E06C75"],
+.dark [style*="color:#e06c75"],
+.dark [style*="color: rgb(224, 108, 117)"] {
+  color: #fb7185 !important;
+}
+
+.dark .token.class-name,
+.dark .token.constant,
+.dark .hljs-literal,
+.dark .hljs-type,
+.dark [style*="color:#E5C07B"],
+.dark [style*="color:#e5c07b"],
+.dark [style*="color: rgb(229, 192, 123)"] {
+  color: #fde68a !important;
+}
+
+.dark .token.builtin,
+.dark .hljs-built_in,
+.dark .hljs-name {
+  color: #6ee7b7 !important;
+}
+
+.dark .token.variable,
+.dark .hljs-variable {
+  color: #93c5fd !important;
+}
+
+/* Import/export statements */
+.dark .token.imports,
+.dark .token.exports,
+.dark [style*="color:#56B6C2"],
+.dark [style*="color:#56b6c2"] {
+  color: #5eead4 !important;
+}
+

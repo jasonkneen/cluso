@@ -559,6 +559,369 @@ const toolHandlerRegistry: Record<string, ToolHandler> = {
       sendResponse(call.id, call.name, { error: errorMsg })
     }
   },
+
+  // DOM Navigation Tools - for voice-driven element traversal
+  select_parent: async (call, handlers, sendResponse) => {
+    const levels = call.args.elementNumber || 1 // Reuse elementNumber for levels
+    if (!handlers.onSelectParent) {
+      sendResponse(call.id, call.name, { error: 'select_parent not available' })
+      return
+    }
+    try {
+      const result = await withTimeout(
+        handlers.onSelectParent(levels),
+        TIMEOUTS.QUICK,
+        'select_parent'
+      )
+      if (result.success && result.element) {
+        const el = result.element as { tagName?: string; text?: string; className?: string }
+        sendResponse(call.id, call.name, {
+          result: `Selected parent: <${el.tagName}>${el.className ? ` class="${el.className}"` : ''}${el.text ? ` "${el.text.substring(0, 30)}..."` : ''}`,
+          element: result.element,
+        })
+      } else {
+        sendResponse(call.id, call.name, { error: result.error || 'No parent element found' })
+      }
+    } catch (err) {
+      const errorMsg =
+        err instanceof TimeoutError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to select parent'
+      sendResponse(call.id, call.name, { error: errorMsg })
+    }
+  },
+
+  select_children: async (call, handlers, sendResponse) => {
+    const selector = call.args.selector
+    if (!handlers.onSelectChildren) {
+      sendResponse(call.id, call.name, { error: 'select_children not available' })
+      return
+    }
+    try {
+      const result = await withTimeout(
+        handlers.onSelectChildren(selector),
+        TIMEOUTS.QUICK,
+        'select_children'
+      )
+      if (result.success && result.children && result.children.length > 0) {
+        const childList = result.children
+          .slice(0, 10) // Show max 10
+          .map((c, i) => {
+            const child = c as { tagName?: string; text?: string }
+            return `[${i + 1}] <${child.tagName}> "${(child.text || '').substring(0, 30)}"`
+          })
+          .join('\n')
+        sendResponse(call.id, call.name, {
+          result: `Found ${result.children.length} children:\n${childList}${result.children.length > 10 ? '\n...' : ''}\n\nSay a number to select one.`,
+          children: result.children,
+        })
+      } else {
+        sendResponse(call.id, call.name, {
+          result: 'No children found for the selected element.',
+        })
+      }
+    } catch (err) {
+      const errorMsg =
+        err instanceof TimeoutError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to select children'
+      sendResponse(call.id, call.name, { error: errorMsg })
+    }
+  },
+
+  select_siblings: async (call, handlers, sendResponse) => {
+    const direction = (call.args.action as 'next' | 'prev' | 'all') || 'all'
+    if (!handlers.onSelectSiblings) {
+      sendResponse(call.id, call.name, { error: 'select_siblings not available' })
+      return
+    }
+    try {
+      const result = await withTimeout(
+        handlers.onSelectSiblings(direction),
+        TIMEOUTS.QUICK,
+        'select_siblings'
+      )
+      if (result.success && result.siblings && result.siblings.length > 0) {
+        if (direction === 'next' || direction === 'prev') {
+          const sibling = result.siblings[0] as { tagName?: string; text?: string }
+          sendResponse(call.id, call.name, {
+            result: `Selected ${direction} sibling: <${sibling.tagName}> "${(sibling.text || '').substring(0, 30)}"`,
+            siblings: result.siblings,
+          })
+        } else {
+          const siblingList = result.siblings
+            .slice(0, 10)
+            .map((s, i) => {
+              const sib = s as { tagName?: string; text?: string }
+              return `[${i + 1}] <${sib.tagName}> "${(sib.text || '').substring(0, 30)}"`
+            })
+            .join('\n')
+          sendResponse(call.id, call.name, {
+            result: `Found ${result.siblings.length} siblings:\n${siblingList}${result.siblings.length > 10 ? '\n...' : ''}`,
+            siblings: result.siblings,
+          })
+        }
+      } else {
+        sendResponse(call.id, call.name, {
+          result: `No ${direction === 'all' ? '' : direction + ' '}siblings found.`,
+        })
+      }
+    } catch (err) {
+      const errorMsg =
+        err instanceof TimeoutError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to select siblings'
+      sendResponse(call.id, call.name, { error: errorMsg })
+    }
+  },
+
+  select_all_matching: async (call, handlers, sendResponse) => {
+    const matchBy = (call.args.type as 'tag' | 'class' | 'both') || 'both'
+    if (!handlers.onSelectAllMatching) {
+      sendResponse(call.id, call.name, { error: 'select_all_matching not available' })
+      return
+    }
+    try {
+      const result = await withTimeout(
+        handlers.onSelectAllMatching(matchBy),
+        TIMEOUTS.TOOL_CALL,
+        'select_all_matching'
+      )
+      if (result.success && result.matches && result.matches.length > 0) {
+        const matchList = result.matches
+          .slice(0, 10)
+          .map((m, i) => {
+            const match = m as { tagName?: string; text?: string; className?: string }
+            return `[${i + 1}] <${match.tagName}>${match.className ? ` .${match.className.split(' ')[0]}` : ''} "${(match.text || '').substring(0, 25)}"`
+          })
+          .join('\n')
+        sendResponse(call.id, call.name, {
+          result: `Found ${result.matches.length} matching elements:\n${matchList}${result.matches.length > 10 ? `\n... and ${result.matches.length - 10} more` : ''}\n\nSay a number to select one.`,
+          matches: result.matches,
+        })
+      } else {
+        sendResponse(call.id, call.name, {
+          result: 'No matching elements found.',
+        })
+      }
+    } catch (err) {
+      const errorMsg =
+        err instanceof TimeoutError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to select matching elements'
+      sendResponse(call.id, call.name, { error: errorMsg })
+    }
+  },
+
+  // --- Hierarchical Drill-Down Selection Tools ---
+  start_drill_selection: async (call, handlers, sendResponse) => {
+    if (!handlers.onStartDrillSelection) {
+      sendResponse(call.id, call.name, { error: 'start_drill_selection not available' })
+      return
+    }
+    try {
+      const result = await withTimeout(
+        handlers.onStartDrillSelection(),
+        TIMEOUTS.QUICK,
+        'start_drill_selection'
+      )
+      if (result.success && result.sections && result.sections.length > 0) {
+        const sectionList = result.sections
+          .map((s) => {
+            const section = s as { number?: number; description?: string; tagName?: string }
+            return `[${section.number}] ${section.description || `<${section.tagName}>`}`
+          })
+          .join('\n')
+        sendResponse(call.id, call.name, {
+          result: `Found ${result.sections.length} main sections:\n${sectionList}\n\nSay a number to drill into that section.`,
+          sections: result.sections,
+          level: result.level,
+        })
+      } else {
+        sendResponse(call.id, call.name, {
+          error: result.error || 'No sections found on this page.',
+        })
+      }
+    } catch (err) {
+      const errorMsg =
+        err instanceof TimeoutError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to start drill selection'
+      sendResponse(call.id, call.name, { error: errorMsg })
+    }
+  },
+
+  drill_into: async (call, handlers, sendResponse) => {
+    const elementNumber = call.args.elementNumber
+    if (!elementNumber) {
+      sendResponse(call.id, call.name, { error: 'elementNumber is required' })
+      return
+    }
+    if (!handlers.onDrillInto) {
+      sendResponse(call.id, call.name, { error: 'drill_into not available' })
+      return
+    }
+    try {
+      const result = await withTimeout(
+        handlers.onDrillInto(elementNumber),
+        TIMEOUTS.QUICK,
+        'drill_into'
+      )
+      if (result.success) {
+        if (result.isFinalSelection) {
+          // Final selection - element has no children
+          sendResponse(call.id, call.name, {
+            result: `Selected: ${result.description || 'element'}. This is the final element. Say "done" to finish or "go back" to return.`,
+            element: result.element,
+            isFinalSelection: true,
+            canGoBack: result.canGoBack,
+          })
+        } else {
+          // Has children - show them
+          const childList = (result.children || [])
+            .map((c) => {
+              const child = c as { number?: number; description?: string; tagName?: string }
+              return `[${child.number}] ${child.description || `<${child.tagName}>`}`
+            })
+            .join('\n')
+          sendResponse(call.id, call.name, {
+            result: `Inside ${result.description || 'element'}:\n${childList}\n\nSay a number to drill deeper, or "go back" to return.`,
+            children: result.children,
+            level: result.level,
+            canGoBack: result.canGoBack,
+            canGoForward: result.canGoForward,
+          })
+        }
+      } else {
+        sendResponse(call.id, call.name, { error: result.error || 'Failed to drill into element' })
+      }
+    } catch (err) {
+      const errorMsg =
+        err instanceof TimeoutError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to drill into element'
+      sendResponse(call.id, call.name, { error: errorMsg })
+    }
+  },
+
+  drill_back: async (call, handlers, sendResponse) => {
+    if (!handlers.onDrillBack) {
+      sendResponse(call.id, call.name, { error: 'drill_back not available' })
+      return
+    }
+    try {
+      const result = await withTimeout(
+        handlers.onDrillBack(),
+        TIMEOUTS.QUICK,
+        'drill_back'
+      )
+      if (result.success) {
+        const childList = (result.children || [])
+          .map((c) => {
+            const child = c as { number?: number; description?: string; tagName?: string }
+            return `[${child.number}] ${child.description || `<${child.tagName}>`}`
+          })
+          .join('\n')
+        sendResponse(call.id, call.name, {
+          result: `Went back. Now showing:\n${childList}\n\nSay a number to select, or "go back" again.`,
+          children: result.children,
+          level: result.level,
+          canGoBack: result.canGoBack,
+          canGoForward: result.canGoForward,
+        })
+      } else {
+        sendResponse(call.id, call.name, { error: result.error || 'Cannot go back further' })
+      }
+    } catch (err) {
+      const errorMsg =
+        err instanceof TimeoutError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to go back'
+      sendResponse(call.id, call.name, { error: errorMsg })
+    }
+  },
+
+  drill_forward: async (call, handlers, sendResponse) => {
+    if (!handlers.onDrillForward) {
+      sendResponse(call.id, call.name, { error: 'drill_forward not available' })
+      return
+    }
+    try {
+      const result = await withTimeout(
+        handlers.onDrillForward(),
+        TIMEOUTS.QUICK,
+        'drill_forward'
+      )
+      if (result.success) {
+        const childList = (result.children || [])
+          .map((c) => {
+            const child = c as { number?: number; description?: string; tagName?: string }
+            return `[${child.number}] ${child.description || `<${child.tagName}>`}`
+          })
+          .join('\n')
+        sendResponse(call.id, call.name, {
+          result: `Went forward. Now showing:\n${childList}`,
+          children: result.children,
+          level: result.level,
+          canGoBack: result.canGoBack,
+          canGoForward: result.canGoForward,
+        })
+      } else {
+        sendResponse(call.id, call.name, { error: result.error || 'No forward history' })
+      }
+    } catch (err) {
+      const errorMsg =
+        err instanceof TimeoutError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to go forward'
+      sendResponse(call.id, call.name, { error: errorMsg })
+    }
+  },
+
+  exit_drill_mode: async (call, handlers, sendResponse) => {
+    if (!handlers.onExitDrillMode) {
+      sendResponse(call.id, call.name, { error: 'exit_drill_mode not available' })
+      return
+    }
+    try {
+      const result = await withTimeout(
+        handlers.onExitDrillMode(),
+        TIMEOUTS.QUICK,
+        'exit_drill_mode'
+      )
+      if (result.success) {
+        sendResponse(call.id, call.name, {
+          result: 'Exited drill selection mode. Badges cleared.',
+        })
+      } else {
+        sendResponse(call.id, call.name, { error: 'Failed to exit drill mode' })
+      }
+    } catch (err) {
+      const errorMsg =
+        err instanceof TimeoutError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to exit drill mode'
+      sendResponse(call.id, call.name, { error: errorMsg })
+    }
+  },
 }
 
 /**

@@ -54,8 +54,8 @@
   --mt-overlay: rgba(31, 32, 35, 0.75);
   --mt-transparent-foreground: rgba(255, 255, 255, 0.4);
   --mt-bg-secondary: rgba(31, 32, 35, 0.8);
-  --mt-code-background: #ffffff13;
-  --mt-code-color: #2c2e33;
+  --mt-code-background: #ffffff1a;
+  --mt-code-color: #e4e4e7;
   --mt-secondary: #595a5c;
   --mt-pre-background: #080808;
   --mt-pre-border: #23252a;
@@ -85,15 +85,15 @@
   --mt-accent-red-subtler: #5d1f1a;
   --mt-accent-purple-subtler: #352c63;
 
-  --hljs-string: #da936b;
-  --hljs-title: #f1d59d;
-  --hljs-comment: #aaaaaa;
-  --hljs-keyword: #6699cc;
-  --hljs-attr: #90cae8;
-  --hljs-literal: #f2777a;
-  --hljs-name: #5fc0a0;
-  --hljs-selector-tag: #e8c785;
-  --hljs-number: #b6e7b6;
+  --hljs-string: #f9a870;
+  --hljs-title: #ffd97a;
+  --hljs-comment: #7f8c98;
+  --hljs-keyword: #ff7ab2;
+  --hljs-attr: #7ee8fa;
+  --hljs-literal: #ff8a8a;
+  --hljs-name: #6ee7b7;
+  --hljs-selector-tag: #fbbf24;
+  --hljs-number: #a5f3fc;
 }
 
 .minimal-tiptap-editor .ProseMirror {
@@ -186,4 +186,8 @@
 /* Override native selection when custom selection is present */
 .minimal-tiptap-editor .ProseMirror .selection::selection {
   background: transparent;
+}
+
+html, body, #root {
+  background: transparent !important;
 }

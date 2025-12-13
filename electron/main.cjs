@@ -1,5 +1,9 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron')
 const { autoUpdater } = require('electron-updater')
+
+const liquidGlassMod = require('electron-liquid-glass')
+const liquidGlass = liquidGlassMod.default ?? liquidGlassMod
+ 
 const path = require('path')
 const { execSync, exec, spawn, spawnSync } = require('child_process')
 const fs = require('fs').promises
@@ -16,6 +20,7 @@ const agentTodos = require('./agent-todos.cjs')
 const lsp = require('./lsp-bridge.cjs')
 const mgrep = require('./mgrep.cjs')
 const backupManager = require('./backup-manager.cjs')
+const patchHistory = require('./patch-history.cjs')
 const morph = require('./shared/morph.cjs')
 const registerGitHandlers = require('./ipc/git-handlers.cjs')
 const registerFileHandlers = require('./ipc/file-handlers.cjs')
@@ -27,6 +32,10 @@ const ptyServer = require('./pty-server.cjs')
 const extensionBridge = require('./extension-bridge.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
+
+// Prefer Electron's native vibrancy (Warp-like) by default on macOS.
+// Set USE_LIQUID_GLASS=1 to force the electron-liquid-glass path for debugging.
+const USE_LIQUID_GLASS = process.env.USE_LIQUID_GLASS === '1'
 
 // GPU optimization for multi-viewport rendering
 // Enable hardware acceleration and GPU compositing for webviews
@@ -550,29 +559,42 @@ function registerWindowHandlers() {
 
     const transparencyEnabled = !!appearance.transparencyEnabled
     const opacityRaw = typeof appearance.opacity === 'number' ? appearance.opacity : 1
-    const blurRaw = typeof appearance.blur === 'number' ? appearance.blur : 0
-
+    
     const opacity = Math.min(1, Math.max(0.2, opacityRaw))
-    const blur = Math.min(30, Math.max(0, blurRaw))
-
+    
     try {
-      // Background: transparent when enabled, solid otherwise
+      // Background: transparent when enabled
       win.setBackgroundColor(transparencyEnabled ? '#00000000' : '#1a1a1a')
 
-      // Opacity
+      // macOS: toggle native vibrancy when transparency is enabled
+if (process.platform === 'darwin' && typeof win.setVibrancy === 'function') {
+  if (transparencyEnabled) {
+    win.setBackgroundColor('#00000000')
+    win.setVibrancy('hud')
+    if (typeof win.setVisualEffectState === 'function') {
+      win.setVisualEffectState('active')
+    }
+  } else {
+    // best-effort: remove vibrancy
+    win.setVibrancy(null)
+    win.setBackgroundColor('#1a1a1a')
+  }
+}
+
+      // Window opacity
       win.setOpacity(transparencyEnabled ? opacity : 1)
 
-      // Blur (platform-specific)
-      if (typeof win.setVibrancy === 'function') {
-        // macOS
-        win.setVibrancy(transparencyEnabled && blur > 0 ? 'sidebar' : null)
-      }
-      if (typeof win.setBackgroundMaterial === 'function') {
-        // Windows 11+ (best-effort)
-        win.setBackgroundMaterial(transparencyEnabled && blur > 0 ? 'mica' : 'none')
+      // macOS native blur (vibrancy)
+      // Windows 11 blur (acrylic/mica)
+      if (process.platform === 'win32' && typeof win.setBackgroundMaterial === 'function') {
+        if (transparencyEnabled) {
+          win.setBackgroundMaterial('acrylic')
+        } else {
+          win.setBackgroundMaterial('none')
+        }
       }
 
-      return { success: true, applied: { transparencyEnabled, opacity, blur } }
+      return { success: true, applied: { transparencyEnabled, opacity } }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Failed to set appearance' }
     }
@@ -1225,6 +1247,107 @@ function registerBackupHandlers() {
     } catch (error) {
       console.error('[Backup] Cleanup error:', error)
       return { success: false, error: error instanceof Error ? error.message : 'Failed to cleanup backups' }
+    }
+  })
+
+  // === Patch History Handlers (Undo/Redo/Checkpoints) ===
+  
+  ipcMain.handle('patch-history:record', async (_event, filePath, beforeContent, afterContent, description, options) => {
+    try {
+      return await patchHistory.recordPatch(filePath, beforeContent, afterContent, description, options)
+    } catch (error) {
+      console.error('[PatchHistory] Record error:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to record patch' }
+    }
+  })
+
+  ipcMain.handle('patch-history:undo', async (_event, filePath) => {
+    try {
+      return await patchHistory.undo(filePath)
+    } catch (error) {
+      console.error('[PatchHistory] Undo error:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to undo' }
+    }
+  })
+
+  ipcMain.handle('patch-history:redo', async (_event, filePath) => {
+    try {
+      return await patchHistory.redo(filePath)
+    } catch (error) {
+      console.error('[PatchHistory] Redo error:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to redo' }
+    }
+  })
+
+  ipcMain.handle('patch-history:create-checkpoint', async (_event, filePath, name) => {
+    try {
+      return await patchHistory.createCheckpoint(filePath, name)
+    } catch (error) {
+      console.error('[PatchHistory] Create checkpoint error:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to create checkpoint' }
+    }
+  })
+
+  ipcMain.handle('patch-history:restore-checkpoint', async (_event, filePath, checkpointId) => {
+    try {
+      return await patchHistory.restoreCheckpoint(filePath, checkpointId)
+    } catch (error) {
+      console.error('[PatchHistory] Restore checkpoint error:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to restore checkpoint' }
+    }
+  })
+
+  ipcMain.handle('patch-history:list-checkpoints', async (_event, filePath) => {
+    try {
+      return await patchHistory.listCheckpoints(filePath)
+    } catch (error) {
+      console.error('[PatchHistory] List checkpoints error:', error)
+      return { success: false, checkpoints: [], error: error instanceof Error ? error.message : 'Failed to list checkpoints' }
+    }
+  })
+
+  ipcMain.handle('patch-history:delete-checkpoint', async (_event, filePath, checkpointId) => {
+    try {
+      return await patchHistory.deleteCheckpoint(filePath, checkpointId)
+    } catch (error) {
+      console.error('[PatchHistory] Delete checkpoint error:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to delete checkpoint' }
+    }
+  })
+
+  ipcMain.handle('patch-history:status', async (_event, filePath) => {
+    try {
+      return await patchHistory.getHistoryStatus(filePath)
+    } catch (error) {
+      console.error('[PatchHistory] Status error:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to get status' }
+    }
+  })
+
+  ipcMain.handle('patch-history:get-history', async (_event, filePath, options) => {
+    try {
+      return await patchHistory.getPatchHistory(filePath, options)
+    } catch (error) {
+      console.error('[PatchHistory] Get history error:', error)
+      return { success: false, history: [], error: error instanceof Error ? error.message : 'Failed to get history' }
+    }
+  })
+
+  ipcMain.handle('patch-history:clear', async (_event, filePath) => {
+    try {
+      return await patchHistory.clearHistory(filePath)
+    } catch (error) {
+      console.error('[PatchHistory] Clear error:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to clear history' }
+    }
+  })
+
+  ipcMain.handle('patch-history:get-diff', async (_event, filePath) => {
+    try {
+      return await patchHistory.getLastPatchDiff(filePath)
+    } catch (error) {
+      console.error('[PatchHistory] Get diff error:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to get diff' }
     }
   })
 }
@@ -1977,11 +2100,19 @@ function createWindow(options = {}) {
   const newWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    // Create transparent-capable window; renderer can emulate opaque mode.
-    transparent: true,
-    backgroundColor: '#00000000',
-    titleBarStyle: 'hiddenInset', // Hide title bar but keep traffic lights
-    trafficLightPosition: { x: 12, y: 12 }, // Position traffic lights
+    // macOS: allow the desktop/app content to show through so vibrancy can blur it.
+    transparent: process.platform === 'darwin',
+    backgroundColor: process.platform === 'darwin' ? '#00000000' : '#1a1a1a',
+
+    // Warp-like blur: use Electron's native vibrancy by default.
+    // IMPORTANT: do not combine vibrancy with electron-liquid-glass.
+    vibrancy: process.platform === 'darwin' && !USE_LIQUID_GLASS ? 'hud' : false,
+    visualEffectState: process.platform === 'darwin' && !USE_LIQUID_GLASS ? 'active' : undefined,
+
+    // Frameless on macOS so the blur reads like a native "glass" surface.
+    frame: process.platform !== 'darwin' ? true : false,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : undefined,
+
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -1990,6 +2121,29 @@ function createWindow(options = {}) {
       webviewTag: true,
     },
   })
+
+  // macOS: force-apply vibrancy after creation (constructor option can be flaky)
+if (process.platform === 'darwin' && !USE_LIQUID_GLASS) {
+  try {
+    newWindow.setBackgroundColor('#00000000')
+    if (typeof newWindow.setVibrancy === 'function') {
+      newWindow.setVibrancy('hud')
+    }
+    if (typeof newWindow.setVisualEffectState === 'function') {
+      newWindow.setVisualEffectState('active')
+    }
+    console.log('[Glass] Native vibrancy enabled')
+  } catch (e) {
+    console.warn('[Glass] Failed to enable native vibrancy:', e)
+  }
+}
+
+  // Show window buttons immediately (required for liquid glass)
+  if (process.platform === 'darwin') {
+    newWindow.setWindowButtonVisibility(true)
+  }
+
+  
 
   // Register window in registry
   windowRegistry.set(windowId, {
@@ -2126,16 +2280,6 @@ function createWindow(options = {}) {
     })
   })
 
-  newWindow.once('ready-to-show', () => {
-    newWindow.show()
-    // Send window info to renderer once ready
-    newWindow.webContents.send('window:info', {
-      windowId,
-      projectPath,
-      projectName
-    })
-  })
-
   if (isDev) {
     // Pass windowId and project info via URL params so renderer knows its identity
     const urlParams = new URLSearchParams()
@@ -2154,6 +2298,78 @@ function createWindow(options = {}) {
       hash: urlParams.toString()
     })
   }
+
+  // Optional: apply electron-liquid-glass ONLY when explicitly enabled.
+  // Default path is native vibrancy (above), which is closest to Warp.
+  let liquidGlassId = null
+
+  function applyLiquidGlassIfNeeded() {
+    if (process.platform !== 'darwin') return
+    if (!USE_LIQUID_GLASS) return
+    if (liquidGlassId !== null) return
+    if (newWindow.isDestroyed()) return
+
+    try {
+      console.log('[LiquidGlass] Applying', {
+        electron: process.versions.electron,
+        node: process.versions.node,
+      })
+
+      // Ensure the window background is actually transparent
+      newWindow.setBackgroundColor('#00000000')
+
+      liquidGlassId = liquidGlass.addView(newWindow.getNativeWindowHandle(), {
+        cornerRadius: 16,
+        tintColor: '#44000010',
+        opaque: false,
+      })
+
+      console.log('[LiquidGlass] addView OK', { glassId: liquidGlassId })
+    } catch (e) {
+      console.warn('[LiquidGlass] addView failed:', e)
+    }
+  }
+
+  // Apply after both: content loaded + window shown
+  let didFinishLoad = false
+  newWindow.webContents.once('did-finish-load', () => {
+    didFinishLoad = true
+
+    // Force renderer backgrounds transparent so vibrancy (or liquid glass) can be seen.
+   newWindow.webContents
+  .insertCSS(`
+    html, body, #root {
+      background: rgba(0,0,0,0.35) !important;
+    }
+    /* Common React mounts / app shells */
+    #app, #__next, #main, .app, .App, [data-reactroot], body > div {
+      background: rgba(0,0,0,0.35) !important;
+    }
+  `)
+  .catch((e) => console.warn('[Glass] insertCSS failed:', e))
+
+    if (newWindow.isVisible()) applyLiquidGlassIfNeeded()
+  })
+
+  newWindow.once('show', () => {
+    if (didFinishLoad) applyLiquidGlassIfNeeded()
+  })
+
+  // Clean up if the window is closed
+  newWindow.on('closed', () => {
+    liquidGlassId = null
+  })
+
+  newWindow.once('ready-to-show', () => {
+    newWindow.show()
+
+    // Send window info to renderer once ready
+    newWindow.webContents.send('window:info', {
+      windowId,
+      projectPath,
+      projectName
+    })
+  })
 
   console.log(`[Window] Created window ${windowId}${projectPath ? ` for project: ${projectPath}` : ' (no project)'}`)
 
@@ -2180,6 +2396,12 @@ app.whenReady().then(async () => {
   registerUpdateHandlers()
   registerProjectRunnerHandlers()
 
+  // Register PTY port handler
+  ipcMain.handle('pty:get-port', () => {
+    const port = ptyServer.getPort()
+    return { success: true, port }
+  })
+
   // Register AI SDK handlers and initialize
   aiSdkWrapper.registerHandlers()
 
@@ -2191,6 +2413,14 @@ app.whenReady().then(async () => {
     console.log('[Main] AI SDK wrapper initialized')
   } catch (e) {
     console.warn('[Main] AI SDK wrapper initialization deferred:', e.message)
+  }
+
+  // Start PTY WebSocket server BEFORE creating window so port is available
+  try {
+    const ptyPort = await ptyServer.start(54321)
+    console.log(`[Main] PTY server started on port ${ptyPort}`)
+  } catch (err) {
+    console.error('[Main] PTY server failed to start:', err.message)
   }
 
   createWindow()
@@ -2205,9 +2435,6 @@ app.whenReady().then(async () => {
   fileWatcher.setMainWindow(mainWindow)
   lsp.setMainWindow(mainWindow)
   mgrep.setMainWindow(mainWindow)
-
-  // Start PTY WebSocket server for terminal support
-  ptyServer.start(3001)
 
   // Initialize Chrome extension bridge on port 3002
   extensionBridge.initialize(mainWindow)

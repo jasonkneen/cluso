@@ -1120,8 +1120,19 @@ interface ElectronAPI {
   projectRunner?: ElectronProjectRunnerAPI
   window?: ElectronWindowAPI
   extensionBridge?: ElectronExtensionBridgeAPI
+  pty?: ElectronPtyAPI
+  clipboard?: ElectronClipboardAPI
   getWebviewPreloadPath: () => Promise<string>
   isElectron: boolean
+}
+
+interface ElectronPtyAPI {
+  getPort: () => Promise<{ success: boolean; port: number | null }>
+}
+
+interface ElectronClipboardAPI {
+  writeText: (text: string) => void
+  readText: () => string
 }
 
 declare global {

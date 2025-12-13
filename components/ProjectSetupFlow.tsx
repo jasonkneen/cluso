@@ -469,9 +469,9 @@ export function ProjectSetupFlow({
           <span
             key={chip.name}
             className={`
-              px-3 py-1.5 text-xs font-medium rounded-full border
+              px-3 py-1.5 text-sm font-medium rounded-lg border
               animate-in fade-in zoom-in-95 duration-200
-              ${chip.color}
+              bg-transparent border-neutral-500/50 text-neutral-300
             `}
             style={{ animationDelay: `${index * 80}ms` }}
           >

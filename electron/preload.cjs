@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, clipboard } = require('electron')
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // Git operations
@@ -25,6 +25,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getContent: (filePath, backupId) => ipcRenderer.invoke('backup:get-content', filePath, backupId),
     delete: (filePath, backupId) => ipcRenderer.invoke('backup:delete', filePath, backupId),
     cleanup: () => ipcRenderer.invoke('backup:cleanup'),
+  },
+
+  // Patch history - undo/redo/checkpoints
+  patchHistory: {
+    record: (filePath, beforeContent, afterContent, description, options) => 
+      ipcRenderer.invoke('patch-history:record', filePath, beforeContent, afterContent, description, options),
+    undo: (filePath) => ipcRenderer.invoke('patch-history:undo', filePath),
+    redo: (filePath) => ipcRenderer.invoke('patch-history:redo', filePath),
+    createCheckpoint: (filePath, name) => ipcRenderer.invoke('patch-history:create-checkpoint', filePath, name),
+    restoreCheckpoint: (filePath, checkpointId) => ipcRenderer.invoke('patch-history:restore-checkpoint', filePath, checkpointId),
+    listCheckpoints: (filePath) => ipcRenderer.invoke('patch-history:list-checkpoints', filePath),
+    deleteCheckpoint: (filePath, checkpointId) => ipcRenderer.invoke('patch-history:delete-checkpoint', filePath, checkpointId),
+    getStatus: (filePath) => ipcRenderer.invoke('patch-history:status', filePath),
+    getHistory: (filePath, options) => ipcRenderer.invoke('patch-history:get-history', filePath, options),
+    clear: (filePath) => ipcRenderer.invoke('patch-history:clear', filePath),
+    getDiff: (filePath) => ipcRenderer.invoke('patch-history:get-diff', filePath),
   },
 
   // OAuth operations (for Anthropic API keys and Claude Code)
@@ -75,6 +91,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('updates:event', handler)
       return () => ipcRenderer.removeListener('updates:event', handler)
     }
+  },
+
+  // PTY terminal server
+  pty: {
+    getPort: () => ipcRenderer.invoke('pty:get-port'),
   },
 
   // API proxy to bypass CORS restrictions
@@ -645,6 +666,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('extension:chat-request', handler)
       return () => ipcRenderer.removeListener('extension:chat-request', handler)
     },
+  },
+
+  // Clipboard operations (for webview focus issues)
+  clipboard: {
+    writeText: (text) => clipboard.writeText(text),
+    readText: () => clipboard.readText(),
   },
 
   // Check if running in Electron

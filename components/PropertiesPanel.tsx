@@ -280,10 +280,10 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
       style={embedded ? undefined : { backgroundColor: panelBg, borderColor: panelBorder }}
     >
       {/* Tab Header */}
-      <div className="p-2 border-b" style={{ borderColor: panelBorder }}>
+      <div className="h-12 border-b flex items-center px-3" style={{ borderColor: panelBorder }}>
         <div
           className={[
-            'flex items-center p-1 rounded-md border',
+            'flex items-center p-1 rounded-md border flex-1',
             isDarkMode ? 'bg-neutral-900' : 'bg-stone-100',
           ].join(' ')}
           style={{ borderColor: panelBorder }}

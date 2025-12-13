@@ -142,6 +142,9 @@ export function ViewportGrid({
     maxZIndexRef.current = maxZIndex
   }, [maxZIndex])
 
+  // Ref for fitView to avoid stale closures in add functions
+  const fitViewRef = useRef<(() => void) | null>(null)
+
   // Sync URL on mount only
   useEffect(() => {
     if (!syncedUrl || syncedUrl === 'about:blank') {
@@ -208,8 +211,9 @@ export function ViewportGrid({
     const defaultWidth = type === 'desktop' ? 600 : type === 'tablet' ? 450 : 320
     const defaultHeight = type === 'desktop' ? 350 : type === 'tablet' ? 380 : 450
 
+    const newId = crypto.randomUUID()
     setViewports(prev => [...prev, {
-      id: crypto.randomUUID(),
+      id: newId,
       windowType: 'device',
       devicePresetId: preset.id,
       orientation: type === 'desktop' ? 'landscape' : 'portrait',
@@ -219,6 +223,8 @@ export function ViewportGrid({
       y,
       zIndex: newZ,
     }])
+    // Auto-fit view after adding
+    setTimeout(() => fitViewRef.current?.(), 50)
   }, [getNextPosition])
 
   // Add internal window - use ref to avoid stale closure
@@ -251,6 +257,8 @@ export function ViewportGrid({
       zIndex: newZ,
       linkedToViewportId: linkedToId,
     }])
+    // Auto-fit view after adding
+    setTimeout(() => fitViewRef.current?.(), 50)
   }, [viewports, getNextPosition])
 
   // Add terminal window - use ref to avoid stale closure
@@ -269,6 +277,8 @@ export function ViewportGrid({
       y,
       zIndex: newZ,
     }])
+    // Auto-fit view after adding
+    setTimeout(() => fitViewRef.current?.(), 50)
   }, [getNextPosition])
 
   // Update viewport
@@ -472,6 +482,11 @@ export function ViewportGrid({
     // Disable animation after transition completes
     setTimeout(() => setIsAnimating(false), ANIMATION_DURATION)
   }, [viewports])
+
+  // Keep fitView ref updated
+  useEffect(() => {
+    fitViewRef.current = fitView
+  }, [fitView])
 
   // Focus on a specific viewport - pan and zoom to center on it with animation
   const focusOnViewport = useCallback((id: string) => {

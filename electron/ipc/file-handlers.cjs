@@ -705,6 +705,50 @@ function registerFileHandlers() {
       return { success: false, error: error.message }
     }
   })
+
+  // Get specific lines from a source file
+  // Used by visual editor to fetch code for editing based on data-cluso-id metadata
+  ipcMain.handle('files:getSourceLines', async (event, params) => {
+    const { filePath, startLine, lineCount = 20, projectPath } = params
+
+    try {
+      // Resolve file path relative to project
+      let fullPath = filePath
+      if (projectPath && !path.isAbsolute(filePath)) {
+        fullPath = path.join(projectPath, filePath)
+      }
+
+      // Validate path
+      const validation = validatePath(fullPath, { allowHomeDir: true })
+      if (!validation.valid) {
+        return { success: false, error: validation.error }
+      }
+
+      // Read file
+      const content = await fs.readFile(validation.path, 'utf-8')
+      const lines = content.split('\n')
+
+      // Extract requested lines (1-indexed)
+      const start = Math.max(0, (startLine || 1) - 1)
+      const end = Math.min(lines.length, start + lineCount)
+      const sourceLines = lines.slice(start, end)
+
+      return {
+        success: true,
+        data: {
+          filePath: validation.path,
+          startLine: start + 1,
+          endLine: end,
+          totalLines: lines.length,
+          lines: sourceLines,
+          content: sourceLines.join('\n')
+        }
+      }
+    } catch (error) {
+      console.error('[Files] getSourceLines error:', error.message)
+      return { success: false, error: error.message }
+    }
+  })
 }
 
 module.exports = registerFileHandlers

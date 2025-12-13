@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Folder, Clock, X, Plus, Pencil, Check, Server } from 'lucide-react'
+import { Folder, Clock, X, Plus, Pencil, Check, Server, Sparkles } from 'lucide-react'
 import { debugLog } from '../utils/debug'
 import { apiClient } from '../services/apiClient'
 
@@ -335,27 +335,15 @@ export function NewTabPage({
     <div className={`flex-1 flex flex-col items-center pt-16 px-8 min-h-full ${
       isDarkMode ? 'bg-neutral-900 text-white' : 'bg-white text-stone-900'
     }`}>
-      {/* Logo and Title */}
-      <div className="flex items-center gap-3 mb-2">
-        <ClusoLogo className="w-12 h-12" />
-        <h1 className="text-4xl font-semibold tracking-tight">Cluso</h1>
-      </div>
+      {/* Logo */}
+      <img 
+        src={isDarkMode ? "/logo_dark.png" : "/logo_light.png"} 
+        alt="Cluso" 
+        className="h-18 mb-6"
+        style={{ height: '4.5rem' }}
+      />
 
-      {/* Subtitle */}
-      <p className={`text-sm mb-4 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-        AI-Powered Browser Dev Tools
-      </p>
 
-      {/* Locked Project Indicator */}
-      {lockedProjectPath && (
-        <div className={`
-          flex items-center gap-2 px-3 py-1.5 rounded-full mb-6 text-xs
-          ${isDarkMode ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'}
-        `}>
-          <Folder size={12} />
-          <span>Window locked to: {formatPath(lockedProjectPath)}</span>
-        </div>
-      )}
 
       {/* Web Mode: Server Project Card */}
       {isWebMode() && serverProject && (
@@ -404,49 +392,93 @@ export function NewTabPage({
         </div>
       )}
 
-      {/* Open Project Card - In Electron mode this opens folder picker, in web mode shows info */}
-      <button
-        onClick={isElectronMode() ? handleOpenFolder : undefined}
-        disabled={!isElectronMode()}
-        className={`
-          w-72 p-6 rounded-xl border-2 border-dashed mb-10 text-left
-          transition-all duration-200 group
-          ${!isElectronMode()
-            ? (isDarkMode ? 'border-neutral-800 opacity-50' : 'border-stone-200 opacity-50')
-            : (isDarkMode
-              ? 'border-neutral-700 hover:border-blue-500/50 hover:bg-blue-500/5'
-              : 'border-stone-200 hover:border-blue-500/50 hover:bg-blue-50/50'
-            )
-          }
-        `}
-      >
-        <div className="flex items-center gap-3">
-          <div className={`
-            w-10 h-10 rounded-lg flex items-center justify-center
-            transition-colors
-            ${isDarkMode
-              ? 'bg-neutral-800 group-hover:bg-blue-500/20'
-              : 'bg-stone-100 group-hover:bg-blue-100'
+      {/* Action Cards */}
+      <div className="w-full max-w-xl flex gap-4 mb-10">
+        {/* Open Project Card */}
+        <button
+          onClick={isElectronMode() ? handleOpenFolder : undefined}
+          disabled={!isElectronMode()}
+          className={`
+            flex-1 p-5 rounded-xl border-2 border-dashed text-left
+            transition-all duration-200 group
+            ${!isElectronMode()
+              ? (isDarkMode ? 'border-neutral-800 opacity-50' : 'border-stone-200 opacity-50')
+              : (isDarkMode
+                ? 'border-neutral-700 hover:border-blue-500/50 hover:bg-blue-500/5'
+                : 'border-stone-200 hover:border-blue-500/50 hover:bg-blue-50/50'
+              )
             }
-          `}>
-            <Plus
-              size={20}
-              className={`${isDarkMode ? 'text-neutral-400 group-hover:text-blue-400' : 'text-stone-500 group-hover:text-blue-600'}`}
-            />
-          </div>
-          <div>
-            <span className={`block text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`}>
-              {lockedProjectPath ? 'Open Project in New Window' : 'Open Project'}
-            </span>
-            <span className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-              {!isElectronMode()
-                ? 'Use cluso CLI with --cwd to open a project'
-                : (lockedProjectPath ? 'Opens in separate window' : 'Select a local folder')
+          `}
+        >
+          <div className="flex items-center gap-3">
+            <div className={`
+              w-10 h-10 rounded-lg flex items-center justify-center
+              transition-colors
+              ${isDarkMode
+                ? 'bg-neutral-800 group-hover:bg-blue-500/20'
+                : 'bg-stone-100 group-hover:bg-blue-100'
               }
-            </span>
+            `}>
+              <Folder
+                size={20}
+                className={`${isDarkMode ? 'text-neutral-400 group-hover:text-blue-400' : 'text-stone-500 group-hover:text-blue-600'}`}
+              />
+            </div>
+            <div>
+              <span className={`block text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`}>
+                Open Project
+              </span>
+              <span className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                Select a local folder
+              </span>
+            </div>
           </div>
-        </div>
-      </button>
+        </button>
+
+        {/* Create Project Card */}
+        <button
+          onClick={() => {
+            // TODO: Implement create project flow
+            console.log('Create project clicked')
+          }}
+          disabled={!isElectronMode()}
+          className={`
+            flex-1 p-5 rounded-xl border-2 border-dashed text-left
+            transition-all duration-200 group
+            ${!isElectronMode()
+              ? (isDarkMode ? 'border-neutral-800 opacity-50' : 'border-stone-200 opacity-50')
+              : (isDarkMode
+                ? 'border-neutral-700 hover:border-purple-500/50 hover:bg-purple-500/5'
+                : 'border-stone-200 hover:border-purple-500/50 hover:bg-purple-50/50'
+              )
+            }
+          `}
+        >
+          <div className="flex items-center gap-3">
+            <div className={`
+              w-10 h-10 rounded-lg flex items-center justify-center
+              transition-colors
+              ${isDarkMode
+                ? 'bg-neutral-800 group-hover:bg-purple-500/20'
+                : 'bg-stone-100 group-hover:bg-purple-100'
+              }
+            `}>
+              <Sparkles
+                size={20}
+                className={`${isDarkMode ? 'text-neutral-400 group-hover:text-purple-400' : 'text-stone-500 group-hover:text-purple-600'}`}
+              />
+            </div>
+            <div>
+              <span className={`block text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-stone-700'}`}>
+                Create Project
+              </span>
+              <span className={`text-xs ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
+                Start from a template
+              </span>
+            </div>
+          </div>
+        </button>
+      </div>
 
       {/* Recent Projects Section */}
       {recentProjects.length > 0 && (
