@@ -77,6 +77,21 @@ export interface KanbanCard {
 }
 
 // Todo types
+export interface TodoElementContext {
+  tagName: string
+  id?: string
+  className?: string
+  text?: string
+  xpath?: string
+  outerHTML?: string
+  sourceLocation?: {
+    file?: string
+    line?: number
+    column?: number
+    summary?: string
+  }
+}
+
 export interface TodoItem {
   id: string
   text: string
@@ -85,8 +100,10 @@ export interface TodoItem {
   dueDate?: string
   createdAt: string
   completedAt?: string
-  source?: 'user' | 'agent' // Who created it
+  source?: 'user' | 'agent' | 'element-inspection' // Who/what created it
   agentName?: string // Which agent created it
+  userComment?: string // Comment from the mini chat popup
+  elementContext?: TodoElementContext // Captured element details
 }
 
 const TAB_TITLES: Record<TabType, string> = {

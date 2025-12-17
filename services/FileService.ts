@@ -1,4 +1,5 @@
 import { getElectronAPI } from '../hooks/useElectronAPI';
+import type { TodoItem } from '../types/tab';
 
 type Result<T = unknown> = {
   success: boolean;
@@ -404,6 +405,125 @@ class FileService {
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to get status' };
     }
+  }
+
+  // =====================
+  // Todo File Operations
+  // =====================
+
+  private getTodosDir(projectPath: string): string {
+    return `${projectPath}/.cluso/todos`;
+  }
+
+  private getTodoFilePath(projectPath: string, todoId: string): string {
+    return `${this.getTodosDir(projectPath)}/${todoId}.json`;
+  }
+
+  async ensureTodosDir(projectPath: string): Promise<Result<void>> {
+    const todosDir = this.getTodosDir(projectPath);
+    const existsResult = await this.exists(todosDir);
+    if (!existsResult.exists) {
+      // Create .cluso directory first if needed
+      const clusoDir = `${projectPath}/.cluso`;
+      const clusoDirExists = await this.exists(clusoDir);
+      if (!clusoDirExists.exists) {
+        const createClusoResult = await this.createDirectory(clusoDir);
+        if (!createClusoResult.success) {
+          return createClusoResult;
+        }
+      }
+      // Create todos directory
+      return this.createDirectory(todosDir);
+    }
+    return { success: true };
+  }
+
+  async writeTodo(projectPath: string, todoItem: TodoItem): Promise<Result<void>> {
+    const ensureResult = await this.ensureTodosDir(projectPath);
+    if (!ensureResult.success) {
+      return ensureResult;
+    }
+
+    const filePath = this.getTodoFilePath(projectPath, todoItem.id);
+    const content = JSON.stringify(todoItem, null, 2);
+    return this.writeFile(filePath, content);
+  }
+
+  async readTodo(projectPath: string, todoId: string): Promise<Result<TodoItem>> {
+    const filePath = this.getTodoFilePath(projectPath, todoId);
+    const result = await this.readFile(filePath);
+    if (!result.success || !result.data) {
+      return { success: false, error: result.error || 'Could not read todo' };
+    }
+    try {
+      const todoItem = JSON.parse(result.data) as TodoItem;
+      return { success: true, data: todoItem };
+    } catch (e) {
+      return { success: false, error: 'Invalid todo JSON' };
+    }
+  }
+
+  async listTodos(projectPath: string): Promise<Result<TodoItem[]>> {
+    const todosDir = this.getTodosDir(projectPath);
+    const existsResult = await this.exists(todosDir);
+    if (!existsResult.exists) {
+      // No todos directory yet, return empty list
+      return { success: true, data: [] };
+    }
+
+    const dirResult = await this.listDirectory(todosDir);
+    if (!dirResult.success || !dirResult.data) {
+      return { success: false, error: dirResult.error || 'Could not list todos directory' };
+    }
+
+    const todos: TodoItem[] = [];
+    for (const entry of dirResult.data) {
+      if (entry.name.endsWith('.json') && !entry.isDirectory) {
+        const todoId = entry.name.replace('.json', '');
+        const todoResult = await this.readTodo(projectPath, todoId);
+        if (todoResult.success && todoResult.data) {
+          todos.push(todoResult.data);
+        }
+      }
+    }
+
+    // Sort by createdAt descending (newest first)
+    todos.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return { success: true, data: todos };
+  }
+
+  async deleteTodo(projectPath: string, todoId: string): Promise<Result<void>> {
+    const filePath = this.getTodoFilePath(projectPath, todoId);
+    return this.deleteFile(filePath);
+  }
+
+  async updateTodo(projectPath: string, todoId: string, updates: Partial<TodoItem>): Promise<Result<TodoItem>> {
+    const readResult = await this.readTodo(projectPath, todoId);
+    if (!readResult.success || !readResult.data) {
+      return { success: false, error: readResult.error || 'Todo not found' };
+    }
+
+    const updatedTodo: TodoItem = {
+      ...readResult.data,
+      ...updates,
+      id: todoId, // Ensure ID is preserved
+    };
+
+    // If completing, set completedAt
+    if (updates.completed === true && !readResult.data.completed) {
+      updatedTodo.completedAt = new Date().toISOString();
+    }
+    // If uncompleting, clear completedAt
+    if (updates.completed === false && readResult.data.completed) {
+      updatedTodo.completedAt = undefined;
+    }
+
+    const writeResult = await this.writeTodo(projectPath, updatedTodo);
+    if (!writeResult.success) {
+      return { success: false, error: writeResult.error };
+    }
+
+    return { success: true, data: updatedTodo };
   }
 }
 

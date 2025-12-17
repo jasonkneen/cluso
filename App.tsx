@@ -119,6 +119,7 @@ import {
   AlignHorizontalSpaceAround,
   Ghost,
   Layers,
+  Calendar,
 } from 'lucide-react';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { generateText } from 'ai';
@@ -127,6 +128,7 @@ import { useErrorPrefetch } from './hooks/useErrorPrefetch';
 import { ErrorSolutionPanel } from './components/ErrorSolutionPanel';
 import { fileService } from './services/FileService';
 import { ViewportGrid } from './components/multi-viewport';
+import { TodoListOverlay } from './components/TodoListOverlay';
 
 // --- Helper Functions ---
 
@@ -1311,6 +1313,14 @@ export default function App() {
   // Popup Input State
   const [popupInput, setPopupInput] = useState('');
   const [showElementChat, setShowElementChat] = useState(false);
+
+  // Add Todo State (for mini chat popup)
+  const [isAddingTodo, setIsAddingTodo] = useState(false);
+  const [todoPriority, setTodoPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const [todoDueDate, setTodoDueDate] = useState<string>('');
+
+  // Todo Overlay State
+  const [showTodoOverlay, setShowTodoOverlay] = useState(false);
 
   // Auto-show floating chat when element is selected
   useEffect(() => {
@@ -7365,6 +7375,136 @@ Keep the summary brief but comprehensive enough to continue the conversation eff
     return false; // Not a built-in command
   }, [thinkingLevel]);
 
+  // Create Todo from Selected Element
+  const createTodoFromElement = async (comment: string, priority: 'low' | 'medium' | 'high', dueDate?: string) => {
+    if (!selectedElement) return;
+
+    const projectPath = activeTab?.projectPath;
+    if (!projectPath) {
+      console.warn('[Todo] No project path available for saving todo');
+      return;
+    }
+
+    const todoItem: TodoItem = {
+      id: `todo-${Date.now()}`,
+      text: comment || `${selectedElement.tagName}${selectedElement.id ? `#${selectedElement.id}` : ''} - inspect this element`,
+      completed: false,
+      priority,
+      dueDate: dueDate || undefined,
+      createdAt: new Date().toISOString(),
+      source: 'element-inspection',
+      userComment: comment,
+      elementContext: {
+        tagName: selectedElement.tagName,
+        id: selectedElement.id || undefined,
+        className: selectedElement.className || undefined,
+        text: selectedElement.text?.substring(0, 200) || undefined,
+        xpath: selectedElement.xpath || undefined,
+        outerHTML: selectedElement.outerHTML?.substring(0, 500) || undefined,
+        sourceLocation: selectedElement.sourceLocation ? {
+          file: selectedElement.sourceLocation.sources?.[0]?.file,
+          line: selectedElement.sourceLocation.sources?.[0]?.line,
+          column: selectedElement.sourceLocation.sources?.[0]?.column,
+          summary: selectedElement.sourceLocation.summary,
+        } : undefined,
+      },
+    };
+
+    // Save to file system
+    const result = await fileService.writeTodo(projectPath, todoItem);
+    if (result.success) {
+      console.log('[Todo] Saved todo:', todoItem.id);
+      // Also add to active tab's todos if available
+      if (activeTab?.todosData) {
+        setTabs(prev => prev.map(tab =>
+          tab.id === activeTabId
+            ? {
+                ...tab,
+                todosData: {
+                  items: [...(tab.todosData?.items || []), todoItem]
+                }
+              }
+            : tab
+        ));
+      }
+    } else {
+      console.error('[Todo] Failed to save todo:', result.error);
+    }
+  };
+
+  // Toggle Todo Completion
+  const handleToggleTodo = async (id: string, completed: boolean) => {
+    const projectPath = activeTab?.projectPath;
+    if (!projectPath) return;
+
+    // Update in file system
+    const result = await fileService.updateTodo(projectPath, id, { completed });
+    if (result.success && result.data) {
+      // Update in state
+      setTabs(prev => prev.map(tab =>
+        tab.id === activeTabId
+          ? {
+              ...tab,
+              todosData: {
+                items: (tab.todosData?.items || []).map(todo =>
+                  todo.id === id ? { ...todo, completed, completedAt: completed ? new Date().toISOString() : undefined } : todo
+                )
+              }
+            }
+          : tab
+      ));
+    }
+  };
+
+  // Delete Todo
+  const handleDeleteTodo = async (id: string) => {
+    const projectPath = activeTab?.projectPath;
+    if (!projectPath) return;
+
+    // Delete from file system
+    const result = await fileService.deleteTodo(projectPath, id);
+    if (result.success) {
+      // Remove from state
+      setTabs(prev => prev.map(tab =>
+        tab.id === activeTabId
+          ? {
+              ...tab,
+              todosData: {
+                items: (tab.todosData?.items || []).filter(todo => todo.id !== id)
+              }
+            }
+          : tab
+      ));
+    }
+  };
+
+  // Load Todos from File System
+  const loadTodosFromDisk = async () => {
+    const projectPath = activeTab?.projectPath;
+    if (!projectPath) return;
+
+    const result = await fileService.listTodos(projectPath);
+    if (result.success && result.data) {
+      setTabs(prev => prev.map(tab =>
+        tab.id === activeTabId
+          ? {
+              ...tab,
+              todosData: {
+                items: result.data || []
+              }
+            }
+          : tab
+      ));
+    }
+  };
+
+  // Load todos when project path changes
+  React.useEffect(() => {
+    if (activeTab?.projectPath) {
+      loadTodosFromDisk();
+    }
+  }, [activeTab?.projectPath]);
+
   // Handle Text Submission
   const processPrompt = async (promptText: string) => {
     // Check for built-in commands first
@@ -10339,38 +10479,93 @@ If you're not sure what the user wants, ask for clarification.
                         </div>
 
                         <form
-                            onSubmit={(e) => {
+                            onSubmit={async (e) => {
                                 e.preventDefault();
-                                processPrompt(popupInput);
-                                setPopupInput('');
-                                setShowElementChat(false);
+                                if (isAddingTodo && popupInput.trim()) {
+                                    await createTodoFromElement(popupInput, todoPriority, todoDueDate || undefined);
+                                    setPopupInput('');
+                                    setTodoPriority('medium');
+                                    setTodoDueDate('');
+                                    setShowElementChat(false);
+                                } else {
+                                    processPrompt(popupInput);
+                                    setPopupInput('');
+                                    setShowElementChat(false);
+                                }
                             }}
                         >
+                            {/* Add Todo Checkbox */}
+                            <div className="flex items-center gap-2 mb-2">
+                                <label className={`flex items-center gap-1.5 cursor-pointer text-xs ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>
+                                    <input
+                                        type="checkbox"
+                                        checked={isAddingTodo}
+                                        onChange={(e) => setIsAddingTodo(e.target.checked)}
+                                        className="w-3.5 h-3.5 rounded border-2 accent-blue-500"
+                                    />
+                                    <ListTodo size={14} className={isAddingTodo ? 'text-blue-500' : ''} />
+                                    <span className={isAddingTodo ? 'text-blue-500 font-medium' : ''}>Add Todo</span>
+                                </label>
+                            </div>
+
+                            {/* Priority and Due Date (shown when checkbox is checked) */}
+                            {isAddingTodo && (
+                                <div className="flex items-center gap-2 mb-2">
+                                    <select
+                                        value={todoPriority}
+                                        onChange={(e) => setTodoPriority(e.target.value as 'low' | 'medium' | 'high')}
+                                        className={`text-xs px-2 py-1 rounded border focus:outline-none focus:ring-1 focus:ring-blue-500 ${isDarkMode ? 'bg-neutral-700 border-neutral-600 text-neutral-100' : 'bg-stone-50 border-stone-200'}`}
+                                    >
+                                        <option value="low">Low</option>
+                                        <option value="medium">Medium</option>
+                                        <option value="high">High</option>
+                                    </select>
+                                    <div className="relative flex-1">
+                                        <input
+                                            type="date"
+                                            value={todoDueDate}
+                                            onChange={(e) => setTodoDueDate(e.target.value)}
+                                            className={`w-full text-xs px-2 py-1 rounded border focus:outline-none focus:ring-1 focus:ring-blue-500 ${isDarkMode ? 'bg-neutral-700 border-neutral-600 text-neutral-100' : 'bg-stone-50 border-stone-200'}`}
+                                            placeholder="Due date"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
                             <textarea
                                 value={popupInput}
                                 onChange={(e) => setPopupInput(e.target.value)}
-                                placeholder="What would you like to change?"
+                                placeholder={isAddingTodo ? "Add a comment about this element..." : "What would you like to change?"}
                                 className={`w-full text-sm p-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none ${isDarkMode ? 'bg-neutral-700 border-neutral-600 text-neutral-100 placeholder-neutral-400' : 'bg-stone-50 border-stone-200'}`}
                                 rows={2}
                                 autoFocus
-                                onKeyDown={(e) => {
+                                onKeyDown={async (e) => {
                                     if (e.key === 'Enter' && !e.shiftKey) {
                                         e.preventDefault();
-                                        processPrompt(popupInput);
-                                        setPopupInput('');
-                                        setShowElementChat(false);
+                                        if (isAddingTodo && popupInput.trim()) {
+                                            await createTodoFromElement(popupInput, todoPriority, todoDueDate || undefined);
+                                            setPopupInput('');
+                                            setTodoPriority('medium');
+                                            setTodoDueDate('');
+                                            setShowElementChat(false);
+                                        } else {
+                                            processPrompt(popupInput);
+                                            setPopupInput('');
+                                            setShowElementChat(false);
+                                        }
                                     }
                                     if (e.key === 'Escape') {
                                         setShowElementChat(false);
                                         setSelectedElement(null);
+                                        setIsAddingTodo(false);
                                         const webview = webviewRefs.current.get(activeTabId);
                                         webview?.send('clear-selection');
                                     }
                                 }}
                             />
                             <div className="flex justify-end mt-2">
-                                <button type="submit" disabled={!popupInput.trim()} className={`w-7 h-7 rounded-full flex items-center justify-center disabled:opacity-50 ${isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-700'}`}>
-                                    <ArrowUp size={14} />
+                                <button type="submit" disabled={!popupInput.trim()} className={`w-7 h-7 rounded-full flex items-center justify-center disabled:opacity-50 ${isAddingTodo ? 'bg-blue-600 text-white hover:bg-blue-500' : isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-700'}`}>
+                                    {isAddingTodo ? <Check size={14} /> : <ArrowUp size={14} />}
                                 </button>
                             </div>
                         </form>
@@ -10382,6 +10577,40 @@ If you're not sure what the user wants, ask for clarification.
           {/* Resize overlay - captures mouse events during console resize */}
           {isConsoleResizing && (
             <div className="fixed inset-0 z-50 cursor-ns-resize" />
+          )}
+
+          {/* Todo Toggle Button - floating in bottom left */}
+          {!isMultiViewportMode && (
+            <button
+              onClick={() => setShowTodoOverlay(!showTodoOverlay)}
+              className={`fixed bottom-20 left-4 z-40 w-10 h-10 rounded-full shadow-lg flex items-center justify-center transition-all ${
+                showTodoOverlay
+                  ? 'bg-blue-600 text-white'
+                  : isDarkMode
+                    ? 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-white'
+                    : 'bg-white text-stone-500 hover:bg-stone-100 hover:text-stone-900 border border-stone-200'
+              }`}
+              title={showTodoOverlay ? 'Hide Todos' : 'Show Todos'}
+            >
+              <ListTodo size={18} />
+              {/* Badge showing todo count */}
+              {(activeTab?.todosData?.items?.filter(t => !t.completed).length || 0) > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+                  {activeTab?.todosData?.items?.filter(t => !t.completed).length}
+                </span>
+              )}
+            </button>
+          )}
+
+          {/* Todo List Overlay */}
+          {showTodoOverlay && !isMultiViewportMode && (
+            <TodoListOverlay
+              todos={activeTab?.todosData?.items || []}
+              isDarkMode={isDarkMode}
+              onClose={() => setShowTodoOverlay(false)}
+              onToggleTodo={handleToggleTodo}
+              onDeleteTodo={handleDeleteTodo}
+            />
           )}
 
           {/* Cluso Agent Demo Panel */}
