@@ -191,8 +191,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "jkneen",
-        "repo": "flows"
+        "owner": "jasonkneen",
+        "repo": "ai-cluso"
       }
     ],
     "mac": {

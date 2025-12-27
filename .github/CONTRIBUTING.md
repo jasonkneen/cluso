@@ -33,7 +33,7 @@ Thank you for your interest in contributing to Cluso! This document provides gui
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/jkneen/flows.git
+   git clone https://github.com/jasonkneen/ai-cluso.git
    cd flows/cluso/ai-cluso
    ```
 
