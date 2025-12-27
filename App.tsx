@@ -9545,21 +9545,6 @@ If you're not sure what the user wants, ask for clarification.
             <MousePointer2 size={16} />
           </button>
 
-          {/* Move Mode Toggle - can work alongside screenshot */}
-          <button
-            onClick={() => {
-              setIsMoveActive(!isMoveActive);
-              setIsInspectorActive(false);
-              // DON'T disable screenshot mode - they work together
-            }}
-            data-control-id="move-button"
-            data-control-type="button"
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isMoveActive ? 'bg-orange-100 text-orange-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500')}`}
-            title="Move & Resize Element"
-          >
-            <Move size={16} />
-          </button>
-
           {/* Floating Toolbar Toggle */}
           <button
             onClick={() => setIsFloatingToolbarVisible(!isFloatingToolbarVisible)}
@@ -10042,18 +10027,6 @@ If you're not sure what the user wants, ask for clarification.
                         title="Toggle Element Inspector"
                     >
                         <MousePointer2 size={16} />
-                    </button>
-
-                    <button
-                        onClick={() => {
-                            setIsMoveActive(!isMoveActive);
-                            setIsInspectorActive(false);
-                            // DON'T disable screenshot mode - they work together
-                        }}
-                        className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isMoveActive ? 'bg-orange-100 text-orange-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500')}`}
-                        title="Move & Resize Element"
-                    >
-                        <Move size={16} />
                     </button>
 
                     <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
@@ -12074,19 +12047,6 @@ If you're not sure what the user wants, ask for clarification.
                               title="Select Element"
                           >
                               <MousePointer2 size={18} />
-                          </button>
-
-                          {/* Move/Reposition - works alongside screenshot */}
-                          <button
-                              onClick={() => {
-                                  setIsMoveActive(!isMoveActive);
-                                  setIsInspectorActive(false);
-                                  // DON'T disable screenshot mode - they work together
-                              }}
-                              className={`p-2 rounded-lg transition-colors ${isMoveActive ? 'bg-orange-100 text-orange-600' : (isDarkMode ? 'hover:bg-neutral-600 text-neutral-400' : 'hover:bg-stone-100 text-stone-400')}`}
-                              title="Move & Resize Element"
-                          >
-                              <Move size={18} />
                           </button>
 
                           {/* Console Logs */}
