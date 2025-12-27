@@ -441,8 +441,10 @@ let numberBadges = [] // Store number badge elements
 let selectionTrackRaf = null // requestAnimationFrame id for selection tracking
 
 // Move mode state - single element at a time
-let activeMoveOverlay = null // { overlay, toolbar, infoLabel, element, summary, xpath, sourceLocation, helperContainer, trackingRaf }
+let activeMoveOverlay = null // { overlay, toolbar, infoLabel, element, summary, xpath, sourceLocation }
 let isMoveDragging = false
+let isResizing = false
+let resizeHandle = null
 let moveStartX = 0
 let moveStartY = 0
 
@@ -669,9 +671,10 @@ function createSelectionOverlay(element, summary, xpath, sourceLocation, rect) {
     dragHandle.style.background = 'transparent'
   })
   dragHandle.addEventListener('click', (e) => {
-    console.log('[Selection] ===== DRAG HANDLE CLICK EVENT FIRED =====')
     e.preventDefault()
     e.stopPropagation()
+
+    console.log('[Selection] ===== DRAG HANDLE CLICK EVENT FIRED =====')
     console.log('[Selection] Drag handle clicked - creating move overlay')
 
     try {
@@ -681,7 +684,7 @@ function createSelectionOverlay(element, summary, xpath, sourceLocation, rect) {
       console.log('[Selection] Selection data:', selectionData)
 
       if (!selectionData) {
-        console.warn('[Selection] No selection data found for element')
+        console.error('[Selection] No selection data found for element')
         return
       }
 
@@ -690,11 +693,7 @@ function createSelectionOverlay(element, summary, xpath, sourceLocation, rect) {
       // Remove the selection overlay since we're entering move mode
       removeSelectionOverlay(element)
 
-      console.log('[Selection] About to call createMoveOverlay with:', {
-        element: element.tagName,
-        summary: selectionData.summary,
-        xpath: selectionData.xpath
-      })
+      console.log('[Selection] Removed selection overlay, now calling createMoveOverlay...')
 
       // Create move overlay using the same function as the dedicated move button
       createMoveOverlay(element, selectionData.summary, selectionData.xpath, selectionData.sourceLocation)
@@ -789,13 +788,36 @@ function updateSelectionPosition(overlay, toolbar, element) {
 }
 
 function removeSelectionOverlay(element) {
+  console.log('[Selection] removeSelectionOverlay called for:', element.tagName)
   const index = selectionOverlays.findIndex(s => s.element === element)
-  if (index === -1) return
+  console.log('[Selection] Found index:', index, 'Total overlays:', selectionOverlays.length)
+
+  if (index === -1) {
+    console.warn('[Selection] Element not found in selectionOverlays')
+    return
+  }
 
   const sel = selectionOverlays[index]
-  if (sel.trackingRaf) cancelAnimationFrame(sel.trackingRaf)
-  if (sel.overlay && sel.overlay.parentNode) sel.overlay.parentNode.removeChild(sel.overlay)
-  if (sel.toolbar && sel.toolbar.parentNode) sel.toolbar.parentNode.removeChild(sel.toolbar)
+  console.log('[Selection] Removing overlay:', {
+    hasOverlay: !!sel.overlay,
+    hasToolbar: !!sel.toolbar,
+    hasRaf: !!sel.trackingRaf
+  })
+
+  if (sel.trackingRaf) {
+    cancelAnimationFrame(sel.trackingRaf)
+    console.log('[Selection] Cancelled tracking RAF')
+  }
+
+  if (sel.overlay && sel.overlay.parentNode) {
+    sel.overlay.parentNode.removeChild(sel.overlay)
+    console.log('[Selection] Removed overlay from DOM')
+  }
+
+  if (sel.toolbar && sel.toolbar.parentNode) {
+    sel.toolbar.parentNode.removeChild(sel.toolbar)
+    console.log('[Selection] Removed toolbar from DOM')
+  }
 
   selectionOverlays.splice(index, 1)
   selectedElements = selectedElements.filter(el => el !== element)
@@ -803,6 +825,8 @@ function removeSelectionOverlay(element) {
   if (currentSelected === element) {
     currentSelected = selectedElements[0] || null
   }
+
+  console.log('[Selection] Selection overlay removed. Remaining overlays:', selectionOverlays.length)
 }
 
 function clearAllSelectionOverlays() {
@@ -1562,6 +1586,10 @@ ipcRenderer.on('set-inspector-mode', (event, active) => {
       const hover = document.getElementById('cluso-hover-overlay')
       if (hover) hover.classList.remove('selected')
     } catch (e) {}
+    // Exit move mode if active
+    if (activeMoveOverlay) {
+      exitMoveMode(activeMoveOverlay.element)
+    }
     hideAllOverlays()
     hideDropLabel()
   }
@@ -2638,11 +2666,19 @@ function createMoveOverlay(element, summary, xpath, sourceLocation) {
   // Disable inspector to prevent interference
   isInspectorActive = false
 
-  // Remove any hover highlights
-  if (hoverTarget && hoverTarget.parentNode) {
-    hoverTarget.parentNode.removeChild(hoverTarget)
-    hoverTarget = null
-  }
+  // Force remove ALL selection overlays to ensure blue doesn't show
+  console.log('[Move] Force removing all selection overlays')
+  const allSelectionOverlays = document.querySelectorAll('.cluso-selection-overlay')
+  const allSelectionToolbars = document.querySelectorAll('.cluso-selection-toolbar')
+
+  allSelectionOverlays.forEach(el => {
+    console.log('[Move] Removing selection overlay element')
+    el.remove()
+  })
+  allSelectionToolbars.forEach(el => {
+    console.log('[Move] Removing selection toolbar element')
+    el.remove()
+  })
 
   // Change cursor to indicate move mode
   document.body.style.cursor = 'default'
@@ -2650,18 +2686,39 @@ function createMoveOverlay(element, summary, xpath, sourceLocation) {
   const rect = element.getBoundingClientRect()
   console.log('[Move] Element rect:', rect)
 
-  // Create overlay with orange border
+  // Create overlay with orange border (draggable and resizable)
   const overlay = document.createElement('div')
   overlay.className = 'cluso-move-overlay'
   overlay.style.cssText = `
     position: fixed;
     border: 2px solid #f97316;
     background: rgba(249, 115, 22, 0.1);
-    pointer-events: none;
+    pointer-events: auto;
+    cursor: move;
     z-index: 2147483646;
-    transition: all 0.1s ease;
   `
   markClusoUi(overlay)
+
+  // Add resize handles
+  const handles = ['tl', 'tr', 'bl', 'br']
+  handles.forEach(pos => {
+    const handle = document.createElement('div')
+    handle.className = 'move-resize-handle ' + pos
+    handle.dataset.handle = pos
+    handle.style.cssText = `
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background: #f97316;
+      border: 1px solid white;
+      z-index: 10;
+      ${pos.includes('t') ? 'top: -5px;' : 'bottom: -5px;'}
+      ${pos.includes('l') ? 'left: -5px;' : 'right: -5px;'}
+      cursor: ${pos === 'tl' || pos === 'br' ? 'nwse-resize' : 'nesw-resize'};
+    `
+    markClusoUi(handle)
+    overlay.appendChild(handle)
+  })
 
   // Create orange toolbar with same layout as selection toolbar
   const toolbar = document.createElement('div')
@@ -2692,7 +2749,7 @@ function createMoveOverlay(element, summary, xpath, sourceLocation) {
   markClusoUi(infoLabel)
   toolbar.appendChild(infoLabel)
 
-  // Move icon button (active state)
+  // Move icon button (active state) - just for show, actual dragging happens on overlay
   const moveBtn = document.createElement('button')
   moveBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <polyline points="5 9 2 12 5 15"></polyline>
@@ -2702,12 +2759,11 @@ function createMoveOverlay(element, summary, xpath, sourceLocation) {
     <line x1="2" y1="12" x2="22" y2="12"></line>
     <line x1="12" y1="2" x2="12" y2="22"></line>
   </svg>`
-  moveBtn.title = 'Move Mode Active'
+  moveBtn.title = 'Move Mode Active - Drag overlay to move'
   moveBtn.style.cssText = `
     background: rgba(255,255,255,0.3);
     border: none;
     color: white;
-    cursor: move;
     padding: 4px 6px;
     border-radius: 2px;
     pointer-events: auto;
@@ -2716,38 +2772,6 @@ function createMoveOverlay(element, summary, xpath, sourceLocation) {
     justify-content: center;
   `
   markClusoUi(moveBtn)
-  moveBtn.addEventListener('mousedown', (e) => {
-    // Start drag on mousedown
-    e.preventDefault()
-    e.stopPropagation()
-
-    console.log('[Move] Move button mousedown - starting drag')
-    isMoveDragging = true
-    moveStartX = e.clientX
-    moveStartY = e.clientY
-
-    // Create helper lines container
-    const helperContainer = document.createElement('div')
-    helperContainer.id = 'cluso-move-helpers'
-    helperContainer.style.cssText = `
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 2147483645;
-    `
-    markClusoUi(helperContainer)
-    document.body.appendChild(helperContainer)
-    activeMoveOverlay.helperContainer = helperContainer
-    console.log('[Move] Helper container created')
-
-    // Add global mouse event listeners
-    document.addEventListener('mousemove', handleMoveMove)
-    document.addEventListener('mouseup', handleMoveEnd)
-    console.log('[Move] Event listeners added')
-
-    // Change cursor during drag
-    document.body.style.cursor = 'move'
-  })
   toolbar.appendChild(moveBtn)
 
   // Close button (exits move mode and returns to selection)
@@ -2815,21 +2839,55 @@ function createMoveOverlay(element, summary, xpath, sourceLocation) {
 
   console.log('[Move] activeMoveOverlay set:', !!activeMoveOverlay)
 
-  // Start tracking to follow scroll/resize
-  const trackingRaf = requestAnimationFrame(function tick() {
-    if (document.contains(element)) {
-      updateMovePosition(overlay, toolbar, infoLabel, element)
-      if (activeMoveOverlay && activeMoveOverlay.element === element) {
-        activeMoveOverlay.trackingRaf = requestAnimationFrame(tick)
-      }
-    } else {
-      exitMoveMode(element)
-    }
-  })
-  activeMoveOverlay.trackingRaf = trackingRaf
+  // Add drag and resize handlers to overlay
+  overlay.addEventListener('mousedown', handleOverlayMouseDown)
+
+  // Create helper lines container for snap indicators
+  const helperContainer = document.createElement('div')
+  helperContainer.id = 'cluso-move-helpers'
+  helperContainer.style.cssText = `
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2147483645;
+  `
+  markClusoUi(helperContainer)
+  document.body.appendChild(helperContainer)
+  activeMoveOverlay.helperContainer = helperContainer
 
   console.log('[Move] ===== CREATE MOVE OVERLAY COMPLETE =====')
   console.log('[Move] Created move overlay for element:', summary.tagName)
+}
+
+// Handle mousedown on overlay for dragging or resizing
+function handleOverlayMouseDown(e) {
+  if (!activeMoveOverlay) return
+
+  const handle = e.target.dataset?.handle
+  if (handle) {
+    // Clicked on resize handle
+    e.preventDefault()
+    e.stopPropagation()
+    console.log('[Move] Resize handle clicked:', handle)
+    isResizing = true
+    resizeHandle = handle
+  } else if (e.target === activeMoveOverlay.overlay || activeMoveOverlay.overlay.contains(e.target)) {
+    // Clicked on overlay itself (not toolbar)
+    if (e.target.hasAttribute('data-cluso-ui') && e.target !== activeMoveOverlay.overlay) {
+      // Clicked on toolbar or other UI, don't drag
+      return
+    }
+    e.preventDefault()
+    e.stopPropagation()
+    console.log('[Move] Overlay clicked - starting drag')
+    isMoveDragging = true
+  }
+
+  moveStartX = e.clientX
+  moveStartY = e.clientY
+
+  document.addEventListener('mousemove', handleMoveMove)
+  document.addEventListener('mouseup', handleMoveEnd)
 }
 
 function updateMovePosition(overlay, toolbar, infoLabel, element) {
@@ -2882,29 +2940,94 @@ function exitMoveMode(element) {
   console.log('[Move] Exited move mode')
 }
 
-// Mouse move handler for dragging
+// Mouse move handler for dragging and resizing
 function handleMoveMove(e) {
-  if (!activeMoveOverlay || !isMoveDragging) {
-    console.log('[Move] handleMoveMove called but conditions not met:', {
-      hasOverlay: !!activeMoveOverlay,
-      isDragging: isMoveDragging
-    })
+  if (!activeMoveOverlay || (!isMoveDragging && !isResizing)) {
     return
   }
 
-  console.log('[Move] Mouse move at:', e.clientX, e.clientY)
+  const overlay = activeMoveOverlay.overlay
+  const toolbar = activeMoveOverlay.toolbar
+  const infoLabel = activeMoveOverlay.infoLabel
 
-  // Perform live DOM reordering
-  performLiveReorder(activeMoveOverlay.element, activeMoveOverlay.overlay, e.clientX, e.clientY)
+  const deltaX = e.clientX - moveStartX
+  const deltaY = e.clientY - moveStartY
+
+  if (isMoveDragging) {
+    // Dragging the overlay
+    const currentLeft = parseFloat(overlay.style.left) || 0
+    const currentTop = parseFloat(overlay.style.top) || 0
+
+    overlay.style.left = (currentLeft + deltaX) + 'px'
+    overlay.style.top = (currentTop + deltaY) + 'px'
+
+    // Update toolbar position
+    toolbar.style.left = overlay.style.left
+    toolbar.style.top = (parseFloat(overlay.style.top) - 28) + 'px'
+
+  } else if (isResizing) {
+    // Resizing the overlay
+    const currentLeft = parseFloat(overlay.style.left) || 0
+    const currentTop = parseFloat(overlay.style.top) || 0
+    const currentWidth = parseFloat(overlay.style.width) || 100
+    const currentHeight = parseFloat(overlay.style.height) || 100
+
+    let newLeft = currentLeft
+    let newTop = currentTop
+    let newWidth = currentWidth
+    let newHeight = currentHeight
+
+    if (resizeHandle.includes('l')) {
+      newLeft = currentLeft + deltaX
+      newWidth = currentWidth - deltaX
+    }
+    if (resizeHandle.includes('r')) {
+      newWidth = currentWidth + deltaX
+    }
+    if (resizeHandle.includes('t')) {
+      newTop = currentTop + deltaY
+      newHeight = currentHeight - deltaY
+    }
+    if (resizeHandle.includes('b')) {
+      newHeight = currentHeight + deltaY
+    }
+
+    if (newWidth >= 20 && newHeight >= 20) {
+      overlay.style.left = newLeft + 'px'
+      overlay.style.top = newTop + 'px'
+      overlay.style.width = newWidth + 'px'
+      overlay.style.height = newHeight + 'px'
+
+      // Update toolbar position
+      toolbar.style.left = newLeft + 'px'
+      toolbar.style.top = (newTop - 28) + 'px'
+    }
+  }
+
+  moveStartX = e.clientX
+  moveStartY = e.clientY
+
+  // Update info label with current position and size
+  const x = Math.round(parseFloat(overlay.style.left) || 0)
+  const y = Math.round(parseFloat(overlay.style.top) || 0)
+  const w = Math.round(parseFloat(overlay.style.width) || 0)
+  const h = Math.round(parseFloat(overlay.style.height) || 0)
+  infoLabel.textContent = `${x}, ${y} • ${w} × ${h}`
+
+  // Show snap indicators if dragging (not resizing)
+  if (isMoveDragging) {
+    showSnapIndicators(e.clientX, e.clientY)
+  }
 }
 
-// Perform live DOM reordering during drag
-function performLiveReorder(element, overlay, x, y) {
+// Show snap indicators when dragging near valid drop positions
+function showSnapIndicators(x, y) {
   if (!activeMoveOverlay || !activeMoveOverlay.helperContainer) return
 
-  // Clear existing helper lines
+  // Clear existing indicators
   activeMoveOverlay.helperContainer.innerHTML = ''
 
+  const element = activeMoveOverlay.element
   const parent = element.parentElement
   if (!parent) return
 
@@ -2912,16 +3035,88 @@ function performLiveReorder(element, overlay, x, y) {
     el !== element && !el.hasAttribute('data-cluso-ui')
   )
 
-  // Temporarily hide overlay to detect element underneath
+  // Find sibling at cursor position
+  const overlay = activeMoveOverlay.overlay
   const originalPointerEvents = overlay.style.pointerEvents
   overlay.style.pointerEvents = 'none'
 
   const hoverElement = document.elementFromPoint(x, y)
 
+  overlay.style.pointerEvents = originalPointerEvents
+
+  const sibling = siblings.find(el => el.contains(hoverElement) || el === hoverElement)
+
+  if (sibling) {
+    const siblingRect = sibling.getBoundingClientRect()
+    const mouseRelativeY = y - siblingRect.top
+    const insertBefore = mouseRelativeY < siblingRect.height / 2
+
+    // Show indicator line
+    const line = document.createElement('div')
+    line.style.cssText = `
+      position: fixed;
+      left: ${siblingRect.left}px;
+      width: ${siblingRect.width}px;
+      height: 3px;
+      background: linear-gradient(90deg, #3b82f6 0%, #f97316 100%);
+      box-shadow: 0 0 8px rgba(59, 130, 246, 0.6), 0 0 8px rgba(249, 115, 22, 0.6);
+      border-radius: 2px;
+      z-index: 2147483646;
+      pointer-events: none;
+    `
+
+    if (insertBefore) {
+      line.style.top = (siblingRect.top - 2) + 'px'
+    } else {
+      line.style.top = (siblingRect.bottom - 1) + 'px'
+    }
+
+    activeMoveOverlay.helperContainer.appendChild(line)
+
+    // Store the snap target for later use on drop
+    activeMoveOverlay.snapTarget = { sibling, insertBefore }
+  } else {
+    activeMoveOverlay.snapTarget = null
+  }
+}
+
+// Perform live DOM reordering during drag
+function performLiveReorder(element, overlay, x, y) {
+  if (!activeMoveOverlay || !activeMoveOverlay.helperContainer) {
+    console.log('[Move] performLiveReorder early return:', {
+      hasOverlay: !!activeMoveOverlay,
+      hasHelper: !!activeMoveOverlay?.helperContainer
+    })
+    return
+  }
+
+  // Clear existing helper lines
+  activeMoveOverlay.helperContainer.innerHTML = ''
+
+  const parent = element.parentElement
+  if (!parent) {
+    console.log('[Move] Element has no parent')
+    return
+  }
+
+  const siblings = Array.from(parent.children).filter(el =>
+    el !== element && !el.hasAttribute('data-cluso-ui')
+  )
+
+  console.log('[Move] Found', siblings.length, 'siblings for reordering')
+
+  // Temporarily hide overlay to detect element underneath
+  const originalPointerEvents = overlay.style.pointerEvents
+  overlay.style.pointerEvents = 'none'
+
+  const hoverElement = document.elementFromPoint(x, y)
+  console.log('[Move] Hover element:', hoverElement?.tagName, hoverElement?.className)
+
   // Restore overlay pointer events
   overlay.style.pointerEvents = originalPointerEvents
 
   const sibling = siblings.find(el => el.contains(hoverElement) || el === hoverElement)
+  console.log('[Move] Found sibling target:', !!sibling, sibling?.tagName)
 
   if (sibling) {
     const siblingRect = sibling.getBoundingClientRect()
@@ -2974,30 +3169,57 @@ function performLiveReorder(element, overlay, x, y) {
   }
 }
 
-// Mouse up handler - end drag
+// Mouse up handler - end drag or resize
 function handleMoveEnd(e) {
   if (!activeMoveOverlay) {
-    console.log('[Move] handleMoveEnd called but no active overlay')
     return
   }
 
-  console.log('[Move] Drag ended at:', e.clientX, e.clientY)
+  console.log('[Move] Drag/resize ended at:', e.clientX, e.clientY)
 
-  // Clean up helper lines
-  if (activeMoveOverlay.helperContainer && activeMoveOverlay.helperContainer.parentNode) {
-    activeMoveOverlay.helperContainer.parentNode.removeChild(activeMoveOverlay.helperContainer)
-    activeMoveOverlay.helperContainer = null
+  // If we were dragging and have a snap target, perform DOM reorder
+  if (isMoveDragging && activeMoveOverlay.snapTarget) {
+    const { sibling, insertBefore } = activeMoveOverlay.snapTarget
+    const element = activeMoveOverlay.element
+    const parent = element.parentElement
+
+    console.log('[Move] Snapping element to position near:', sibling.tagName)
+
+    if (parent) {
+      try {
+        if (insertBefore) {
+          parent.insertBefore(element, sibling)
+        } else {
+          parent.insertBefore(element, sibling.nextSibling)
+        }
+        console.log('[Move] DOM reordered successfully')
+
+        // Update overlay position to match new element position
+        const newRect = element.getBoundingClientRect()
+        activeMoveOverlay.overlay.style.left = newRect.left + 'px'
+        activeMoveOverlay.overlay.style.top = newRect.top + 'px'
+        activeMoveOverlay.toolbar.style.left = newRect.left + 'px'
+        activeMoveOverlay.toolbar.style.top = (newRect.top - 28) + 'px'
+      } catch (err) {
+        console.error('[Move] Failed to reorder:', err)
+      }
+    }
   }
 
-  isMoveDragging = false
+  // Clear snap indicators
+  if (activeMoveOverlay.helperContainer) {
+    activeMoveOverlay.helperContainer.innerHTML = ''
+  }
+  activeMoveOverlay.snapTarget = null
 
-  // Restore cursor
-  document.body.style.cursor = 'default'
+  isMoveDragging = false
+  isResizing = false
+  resizeHandle = null
 
   document.removeEventListener('mousemove', handleMoveMove)
   document.removeEventListener('mouseup', handleMoveEnd)
 
-  console.log('[Move] Drag complete - listeners removed')
+  console.log('[Move] Drag/resize complete - listeners removed')
 }
 
 // IPC handlers for move mode (simplified for single element)
