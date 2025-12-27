@@ -432,6 +432,7 @@ console.log('ipcRenderer available:', !!ipcRenderer)
 
 // Inspector state
 let currentSelected = null
+let selectedElements = [] // Store multiple selected elements for multi-select
 let isInspectorActive = false
 let isScreenshotActive = false
 let isMoveActive = false
@@ -564,6 +565,217 @@ function stopSelectionTracking() {
     cancelAnimationFrame(selectionTrackRaf)
   } catch (e) {}
   selectionTrackRaf = null
+}
+
+// --- Selection Overlay with Toolbar ---
+let selectionOverlays = [] // Array of { element, overlay, toolbar, trackingRaf, summary, xpath, sourceLocation }
+
+function createSelectionOverlay(element, summary, xpath, sourceLocation, rect) {
+  // Check if already has overlay
+  if (selectionOverlays.some(s => s.element === element)) return
+
+  // Create overlay div
+  const overlay = document.createElement('div')
+  overlay.className = 'cluso-selection-overlay'
+  overlay.style.cssText = `
+    position: fixed;
+    border: 2px solid #3b82f6;
+    background: rgba(59, 130, 246, 0.1);
+    pointer-events: none;
+    z-index: 2147483646;
+    transition: all 0.1s ease;
+  `
+  markClusoUi(overlay)
+
+  // Create toolbar
+  const toolbar = document.createElement('div')
+  toolbar.className = 'cluso-selection-toolbar'
+  toolbar.style.cssText = `
+    position: fixed;
+    background: #3b82f6;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    pointer-events: auto;
+    z-index: 2147483647;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  `
+  markClusoUi(toolbar)
+
+  // Add element info label
+  const infoLabel = document.createElement('div')
+  infoLabel.style.cssText = `
+    color: white;
+    font-size: 11px;
+    font-family: -apple-system, system-ui, sans-serif;
+    padding: 2px 4px;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `
+
+  // Build label text: tagName + file location if available
+  let labelText = summary.tagName.toLowerCase()
+  if (summary.id) labelText += `#${summary.id}`
+  else if (summary.className) {
+    const firstClass = summary.className.split(' ')[0]
+    if (firstClass) labelText += `.${firstClass}`
+  }
+
+  // Add file location if available
+  if (sourceLocation && sourceLocation.sources && sourceLocation.sources.length > 0) {
+    const src = sourceLocation.sources[0]
+    const fileName = src.file ? src.file.split('/').pop().split('?')[0] : null
+    if (fileName) {
+      labelText += ` · ${fileName}`
+      if (src.line) labelText += `:${src.line}`
+    }
+  }
+
+  infoLabel.textContent = labelText
+  infoLabel.title = labelText
+  toolbar.appendChild(infoLabel)
+
+  // Drag handle button
+  const dragHandle = document.createElement('button')
+  dragHandle.innerHTML = '⠿'
+  dragHandle.title = 'Drag to move'
+  dragHandle.style.cssText = `
+    background: transparent;
+    border: none;
+    color: white;
+    cursor: move;
+    font-size: 16px;
+    padding: 2px 6px;
+    border-radius: 2px;
+  `
+  dragHandle.addEventListener('mouseenter', () => {
+    dragHandle.style.background = 'rgba(255,255,255,0.2)'
+  })
+  dragHandle.addEventListener('mouseleave', () => {
+    dragHandle.style.background = 'transparent'
+  })
+  dragHandle.addEventListener('click', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    console.log('[Selection] Drag handle clicked - creating move overlay')
+
+    // Find the selection overlay data for this element
+    const selectionData = selectionOverlays.find(s => s.element === element)
+    if (!selectionData) {
+      console.warn('[Selection] No selection data found for element')
+      return
+    }
+
+    // Remove the selection overlay since we're entering move mode
+    removeSelectionOverlay(element)
+
+    // Create move overlay using the same function as the dedicated move button
+    createMoveOverlay(element, selectionData.summary, selectionData.xpath, selectionData.sourceLocation)
+  })
+
+  // Close button
+  const closeBtn = document.createElement('button')
+  closeBtn.innerHTML = '×'
+  closeBtn.title = 'Remove selection'
+  closeBtn.style.cssText = `
+    background: transparent;
+    border: none;
+    color: white;
+    cursor: pointer;
+    font-size: 18px;
+    padding: 0 6px;
+    border-radius: 2px;
+    line-height: 1;
+  `
+  closeBtn.addEventListener('mouseenter', () => {
+    closeBtn.style.background = 'rgba(255,255,255,0.2)'
+  })
+  closeBtn.addEventListener('mouseleave', () => {
+    closeBtn.style.background = 'transparent'
+  })
+  closeBtn.addEventListener('click', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    removeSelectionOverlay(element)
+  })
+
+  toolbar.appendChild(dragHandle)
+  toolbar.appendChild(closeBtn)
+
+  // Position overlay and toolbar
+  updateSelectionPosition(overlay, toolbar, element)
+
+  document.body.appendChild(overlay)
+  document.body.appendChild(toolbar)
+
+  // Start tracking to follow scroll/resize
+  const trackingRaf = requestAnimationFrame(function tick() {
+    if (document.contains(element)) {
+      updateSelectionPosition(overlay, toolbar, element)
+      const sel = selectionOverlays.find(s => s.element === element)
+      if (sel) sel.trackingRaf = requestAnimationFrame(tick)
+    } else {
+      removeSelectionOverlay(element)
+    }
+  })
+
+  selectionOverlays.push({ element, overlay, toolbar, trackingRaf, summary, xpath, sourceLocation })
+}
+
+function updateSelectionPosition(overlay, toolbar, element) {
+  try {
+    const rect = element.getBoundingClientRect()
+    overlay.style.left = rect.left + 'px'
+    overlay.style.top = rect.top + 'px'
+    overlay.style.width = rect.width + 'px'
+    overlay.style.height = rect.height + 'px'
+
+    // Position toolbar above element, or below if not enough space
+    const toolbarHeight = 32
+    const spaceAbove = rect.top
+    const placeAbove = spaceAbove >= toolbarHeight + 8
+
+    toolbar.style.left = rect.left + 'px'
+    if (placeAbove) {
+      toolbar.style.top = (rect.top - toolbarHeight - 4) + 'px'
+    } else {
+      toolbar.style.top = (rect.bottom + 4) + 'px'
+    }
+  } catch (e) {
+    console.warn('[Selection] Failed to update position:', e)
+  }
+}
+
+function removeSelectionOverlay(element) {
+  const index = selectionOverlays.findIndex(s => s.element === element)
+  if (index === -1) return
+
+  const sel = selectionOverlays[index]
+  if (sel.trackingRaf) cancelAnimationFrame(sel.trackingRaf)
+  if (sel.overlay && sel.overlay.parentNode) sel.overlay.parentNode.removeChild(sel.overlay)
+  if (sel.toolbar && sel.toolbar.parentNode) sel.toolbar.parentNode.removeChild(sel.toolbar)
+
+  selectionOverlays.splice(index, 1)
+  selectedElements = selectedElements.filter(el => el !== element)
+
+  if (currentSelected === element) {
+    currentSelected = selectedElements[0] || null
+  }
+}
+
+function clearAllSelectionOverlays() {
+  selectionOverlays.forEach(sel => {
+    if (sel.trackingRaf) cancelAnimationFrame(sel.trackingRaf)
+    if (sel.overlay && sel.overlay.parentNode) sel.overlay.parentNode.removeChild(sel.overlay)
+    if (sel.toolbar && sel.toolbar.parentNode) sel.toolbar.parentNode.removeChild(sel.toolbar)
+  })
+  selectionOverlays = []
+  selectedElements = []
+  currentSelected = null
 }
 
 function hideAllOverlays() {
@@ -977,6 +1189,21 @@ document.addEventListener('mouseover', function(e) {
   if (isEditing) return // Don't highlight while inline editing
   if (isRectSelecting) return // Don't hover while rect selecting
   if (isPartOfMoveOverlay(e.target)) return // Don't highlight move overlays
+
+  // For inspector mode:
+  // - If NO elements selected yet: always show hover (first selection)
+  // - If elements ARE selected: only show hover when Shift is pressed (multi-select)
+  // For screenshot/move modes: always show hover
+  if (isInspectorActive && selectedElements.length > 0 && !e.shiftKey) {
+    // Clear hover if Shift is not pressed and we have selections
+    if (currentHovered) {
+      currentHovered = null
+      renderInspectorOverlay()
+      ipcRenderer.sendToHost('inspector-hover-end')
+    }
+    return
+  }
+
   e.stopPropagation()
 
   // Update animated hover overlay
@@ -1018,6 +1245,54 @@ document.addEventListener('mouseout', function(e) {
   ipcRenderer.sendToHost('inspector-hover-end')
 }, true)
 
+// Handle Shift key for dynamic hover highlighting
+let lastMouseElement = null
+document.addEventListener('mousemove', function(e) {
+  if (!isInspectorActive) return
+  if (isEditing || isRectSelecting) return
+  lastMouseElement = e.target
+}, true)
+
+document.addEventListener('keydown', function(e) {
+  if (!isInspectorActive) return
+  if (e.key !== 'Shift') return
+  // Only trigger on Shift if we have selections (otherwise hover is automatic)
+  if (selectedElements.length === 0) return
+
+  // When Shift is pressed, trigger hover on current mouse position
+  if (lastMouseElement && !currentHovered) {
+    currentHovered = lastMouseElement
+    renderInspectorOverlay()
+    startSelectionTracking()
+
+    const summary = getElementSummary(lastMouseElement)
+    const rect = lastMouseElement.getBoundingClientRect()
+    ipcRenderer.sendToHost('inspector-hover', {
+      element: summary,
+      rect: {
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height
+      }
+    })
+  }
+}, true)
+
+document.addEventListener('keyup', function(e) {
+  if (!isInspectorActive) return
+  if (e.key !== 'Shift') return
+  // Only clear on Shift release if we have selections
+  if (selectedElements.length === 0) return
+
+  // When Shift is released, clear hover
+  if (currentHovered) {
+    currentHovered = null
+    renderInspectorOverlay()
+    ipcRenderer.sendToHost('inspector-hover-end')
+  }
+}, true)
+
 document.addEventListener('click', async function(e) {
   // Early return FIRST - don't intercept clicks when no mode is active
   if (!isInspectorActive && !isScreenshotActive && !isMoveActive) return
@@ -1040,14 +1315,22 @@ document.addEventListener('click', async function(e) {
   console.log('[Inspector] Element selected:', summary.tagName, summary.id || summary.className, 'source:', sourceLocation?.summary || 'none')
 
   if (isInspectorActive) {
-    currentSelected = e.target
+    // Multi-select: Shift+click adds to selection, regular click replaces
+    if (e.shiftKey) {
+      // Add to selection if not already selected
+      if (!selectedElements.includes(e.target)) {
+        selectedElements.push(e.target)
+        createSelectionOverlay(e.target, summary, xpath, sourceLocation, rect)
+      }
+    } else {
+      // Clear previous selections and select only this element
+      clearAllSelectionOverlays()
+      selectedElements = [e.target]
+      currentSelected = e.target
+      createSelectionOverlay(e.target, summary, xpath, sourceLocation, rect)
+    }
+
     currentHovered = null
-    // Use the single dotted overlay as the selection indicator (avoid mutating page DOM/classes)
-    ensureOverlays()
-    const overlay = document.getElementById('cluso-hover-overlay')
-    if (overlay) overlay.classList.add('selected')
-    renderInspectorOverlay()
-    startSelectionTracking()
 
     const payload = {
       element: { ...summary, xpath, sourceLocation },
@@ -1058,9 +1341,11 @@ document.addEventListener('click', async function(e) {
         left: rect.left,
         width: rect.width,
         height: rect.height
-      }
+      },
+      isMultiSelect: e.shiftKey,
+      selectedCount: selectedElements.length
     }
-    console.log('[Inspector] Sending inspector-select:', payload.element.tagName, 'source:', payload.element.sourceLocation?.summary || 'none')
+    console.log('[Inspector] Sending inspector-select:', payload.element.tagName, 'multi-select:', payload.isMultiSelect, 'count:', payload.selectedCount)
     ipcRenderer.sendToHost('inspector-select', payload)
   } else if (isScreenshotActive) {
     const payload = {
@@ -1221,6 +1506,7 @@ ipcRenderer.on('set-inspector-mode', (event, active) => {
     }
     currentHovered = null
     stopSelectionTracking()
+    clearAllSelectionOverlays()
     try {
       const hover = document.getElementById('cluso-hover-overlay')
       if (hover) hover.classList.remove('selected')
@@ -1278,6 +1564,7 @@ ipcRenderer.on('clear-selection', () => {
   }
   currentHovered = null
   stopSelectionTracking()
+  clearAllSelectionOverlays()
   try {
     const hover = document.getElementById('cluso-hover-overlay')
     if (hover) hover.classList.remove('selected')
