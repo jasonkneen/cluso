@@ -28,8 +28,8 @@ The first run will automatically download the correct Electron binary for your p
 ### From Source
 
 ```bash
-git clone https://github.com/jasonkneen/ai-cluso.git
-cd ai-cluso
+git clone https://github.com/jasonkneen/cluso.git
+cd cluso
 npm install
 npm run electron:dev
 ```
@@ -101,7 +101,7 @@ Jason Kneen
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/jasonkneen/ai-cluso/issues)
+- **Issues**: [GitHub Issues](https://github.com/jasonkneen/cluso/issues)
 - **License Inquiries**: Open an issue on GitHub
 
 ---
