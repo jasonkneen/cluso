@@ -1,23 +1,29 @@
 {
-  "name": "ai-cluso",
+  "name": "cluso",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "main": "electron/main.cjs",
+  "bin": {
+    "cluso": "./bin/cluso.cjs"
+  },
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:prod": "npm run clean && NODE_ENV=production vite build",
     "preview": "vite preview",
+    "clean": "rm -rf dist release node_modules/.vite",
+    "analyze": "node scripts/analyze-bundle-size.js",
     "electron": "electron .",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && NODE_ENV=development electron .\"",
     "electron:prebuild": "mkdir -p node_modules/@img/sharp-darwin-x64 node_modules/@img/sharp-linux-x64 node_modules/@img/sharp-win32-x64",
-    "electron:build": "npm run electron:prebuild && npm run build && electron-builder",
-    "electron:build:mac": "npm run electron:prebuild && npm run build && electron-builder --mac",
-    "electron:build:win": "npm run electron:prebuild && npm run build && electron-builder --win",
-    "electron:build:linux": "npm run electron:prebuild && npm run build && electron-builder --linux",
+    "electron:build": "npm run electron:prebuild && npm run build:prod && electron-builder",
+    "electron:build:mac": "npm run electron:prebuild && npm run build:prod && electron-builder --mac",
+    "electron:build:win": "npm run electron:prebuild && npm run build:prod && electron-builder --win",
+    "electron:build:linux": "npm run electron:prebuild && npm run build:prod && electron-builder --linux",
     "serve:dev": "npm run build && npm run serve:copy-public && npm -w cluso run dev",
     "serve:build": "npm run build && npm run serve:copy-public && npm -w cluso run build",
     "serve:copy-public": "rm -rf packages/serve/public && cp -r dist packages/serve/public",
@@ -151,11 +157,18 @@
     "buildDependenciesFromSource": false,
     "nativeRebuilder": "sequential",
     "nodeGypRebuild": false,
+    "asar": true,
+    "compression": "maximum",
+    "removePackageScripts": true,
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "!**/node_modules/*/{test,__tests__,tests,example,examples}",
-      "!**/node_modules/*/{README.md,readme.md,CHANGELOG.md}",
+      "!**/node_modules/*/{test,__tests__,tests,example,examples,docs,doc}",
+      "!**/node_modules/*/{README.md,readme.md,CHANGELOG.md,LICENSE,LICENCE,*.ts}",
+      "!**/node_modules/*/.{git,github,gitlab,svn,hg}",
+      "!**/node_modules/*/.*",
+      "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj,md}",
+      "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,__pycache__,thumbs.db,.gitignore,.gitattributes}",
       "!**/*.map",
       "!**/node_modules/@lancedb/**/*",
       "!**/node_modules/onnxruntime-node/**/*",
@@ -170,7 +183,8 @@
     "asarUnpack": [
       "node_modules/better-sqlite3/**/*",
       "node_modules/@lydell/node-pty/**/*",
-      "node_modules/@anthropic-ai/**/*"
+      "node_modules/@anthropic-ai/**/*",
+      "node_modules/@modelcontextprotocol/**/*"
     ],
     "publish": [
       {
@@ -191,11 +205,16 @@
           "arch": "arm64"
         }
       ],
+      "minimumSystemVersion": "11.0",
+      "type": "distribution",
+      "darkModeSupport": true,
       "notarize": false,
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extraFiles": [],
+      "extraResources": []
     },
     "win": {
       "target": [

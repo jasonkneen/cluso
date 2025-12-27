@@ -33,6 +33,24 @@ const extensionBridge = require('./extension-bridge.cjs')
 
 const isDev = process.env.NODE_ENV === 'development'
 
+// Set app name (for menu bar, dock, and About panel)
+app.setName('Cluso')
+
+// Set dock icon and About panel info on macOS
+if (process.platform === 'darwin') {
+  // Set dock icon
+  const iconPath = path.join(__dirname, '..', 'public', 'icon.png')
+  if (require('fs').existsSync(iconPath)) {
+    app.dock.setIcon(iconPath)
+  }
+
+  app.setAboutPanelOptions({
+    applicationName: 'Cluso',
+    applicationVersion: require('../package.json').version,
+    copyright: 'Copyright © 2025',
+  })
+}
+
 // Prefer Electron's native vibrancy (Warp-like) by default on macOS.
 // Set USE_LIQUID_GLASS=1 to force the electron-liquid-glass path for debugging.
 const USE_LIQUID_GLASS = process.env.USE_LIQUID_GLASS === '1'
@@ -2098,6 +2116,7 @@ function createWindow(options = {}) {
   const newWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    icon: path.join(__dirname, '..', 'public', 'icon.png'),
     // macOS: allow the desktop/app content to show through so vibrancy can blur it.
     transparent: process.platform === 'darwin',
     backgroundColor: process.platform === 'darwin' ? '#00000000' : '#1a1a1a',

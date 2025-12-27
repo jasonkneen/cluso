@@ -121,6 +121,8 @@ function buildPlatformEnv(workingDir) {
   const baseEnv = {
     ...process.env,
     PATH: enhancedPath,
+    // Explicitly set NODE to current process's executable for subprocess spawning
+    NODE: process.execPath,
   }
 
   if (isWindows) {

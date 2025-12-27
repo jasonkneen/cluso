@@ -9556,8 +9556,8 @@ If you're not sure what the user wants, ask for clarification.
             <Wrench size={16} />
           </button>
 
-          {/* Cluso Agent Toggle */}
-          <button
+          {/* Cluso Agent Toggle - Hidden */}
+          {/* <button
             onClick={() => setIsAgentPanelOpen(!isAgentPanelOpen)}
             data-control-id="agent-button"
             data-control-type="button"
@@ -9565,7 +9565,7 @@ If you're not sure what the user wants, ask for clarification.
             title="Cluso Agent Demos"
           >
             <Bot size={16} />
-          </button>
+          </button> */}
 
           {/* Console Toggle */}
           <button
@@ -12573,8 +12573,8 @@ If you're not sure what the user wants, ask for clarification.
         onClearAll={clearErrors}
       />
 
-      {/* Error Badge in Tab Bar - quick access to error count */}
-      {errors.length > 0 && (
+      {/* Error Badge in Tab Bar - Hidden */}
+      {/* {errors.length > 0 && (
         <button
           className="fixed top-12 right-6 z-40 px-3 py-1.5 rounded-full text-xs font-semibold transition-all hover:scale-105"
           onClick={() => setErrorPanelVisible(!errorPanelVisible)}
@@ -12586,7 +12586,7 @@ If you're not sure what the user wants, ask for clarification.
         >
           {errors.length > 0 && errors.some(e => e.solution) && '✓'} {errors.length}
         </button>
-      )}
+      )} */}
 
       </div>
       </div>{/* End content wrapper */}
