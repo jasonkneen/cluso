@@ -1,7 +1,9 @@
 {
   "name": "cluso",
-  "private": true,
   "version": "0.1.0",
+  "description": "Cluso AI coding assistant with intelligent element selection and automation",
+  "author": "Jason Kneen",
+  "license": "AGPL-3.0-or-later WITH Commons-Clause",
   "type": "module",
   "main": "electron/main.cjs",
   "bin": {
@@ -195,6 +197,7 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
       "target": [
         {
           "target": "dmg",
@@ -217,12 +220,14 @@
       "extraResources": []
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "zip"
       ]
     },
     "linux": {
+      "icon": "build/icon.png",
       "target": [
         "AppImage",
         "deb"

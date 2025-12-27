@@ -12,6 +12,19 @@ dist
 dist-ssr
 *.local
 
+# Environment variables (NEVER commit secrets!)
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# API keys and secrets
+*secret*
+*apikey*
+*.key
+*.pem
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -26,5 +39,6 @@ dist-ssr
 /release
 /website/.mgrep-local
 /.vite
-/.claudelet/2025-12-12
 /.mgrep-local/vectors
+/.opencode
+/.claudelet

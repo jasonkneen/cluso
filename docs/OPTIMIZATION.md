@@ -34,10 +34,10 @@ Build script runs `npm prune --production` to remove dev dependencies before pac
 
 ### Usage
 ```bash
-npx ai-cluso
+npx cluso
 ```
 
-The launcher (`bin/cluso.js`):
+The launcher (`bin/cluso.cjs`):
 1. Checks for local Electron installation
 2. Downloads Electron on first run if needed
 3. Launches the app with Electron
