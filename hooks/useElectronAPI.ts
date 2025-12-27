@@ -5,6 +5,9 @@
 
 import { useMemo } from 'react'
 
+// Re-export ElectronAPI type for convenience
+export type { ElectronAPI } from '../types/electron.d'
+
 /**
  * Hook to access Electron APIs with centralized null checking
  * Returns typed API accessors and an isElectron flag
@@ -28,14 +31,26 @@ export function useElectronAPI() {
     git: api?.git ?? null,
     files: api?.files ?? null,
     aiSdk: api?.aiSdk ?? null,
+    agentSdk: api?.agentSdk ?? null,
     oauth: api?.oauth ?? null,
     codex: api?.codex ?? null,
     claudeCode: api?.claudeCode ?? null,
+    selectorAgent: api?.selectorAgent ?? null,
     mcp: api?.mcp ?? null,
     voice: api?.voice ?? null,
     tabdata: api?.tabdata ?? null,
+    fastApply: api?.fastApply ?? null,
+    fileWatcher: api?.fileWatcher ?? null,
+    validator: api?.validator ?? null,
+    agentTodos: api?.agentTodos ?? null,
     lsp: api?.lsp ?? null,
-    dialog: (api as { dialog?: { openFolder: () => Promise<{ canceled: boolean; filePaths: string[] }> } })?.dialog ?? null,
+    mgrep: api?.mgrep ?? null,
+    projectRunner: api?.projectRunner ?? null,
+    window: api?.window ?? null,
+    extensionBridge: api?.extensionBridge ?? null,
+    pty: api?.pty ?? null,
+    clipboard: api?.clipboard ?? null,
+    dialog: api?.dialog ?? null,
   }
 }
 
@@ -53,14 +68,26 @@ export function getElectronAPI() {
     git: api?.git ?? null,
     files: api?.files ?? null,
     aiSdk: api?.aiSdk ?? null,
+    agentSdk: api?.agentSdk ?? null,
     oauth: api?.oauth ?? null,
     codex: api?.codex ?? null,
     claudeCode: api?.claudeCode ?? null,
+    selectorAgent: api?.selectorAgent ?? null,
     mcp: api?.mcp ?? null,
     voice: api?.voice ?? null,
     tabdata: api?.tabdata ?? null,
+    fastApply: api?.fastApply ?? null,
+    fileWatcher: api?.fileWatcher ?? null,
+    validator: api?.validator ?? null,
+    agentTodos: api?.agentTodos ?? null,
     lsp: api?.lsp ?? null,
-    dialog: (api as { dialog?: { openFolder: () => Promise<{ canceled: boolean; filePaths: string[] }> } })?.dialog ?? null,
+    mgrep: api?.mgrep ?? null,
+    projectRunner: api?.projectRunner ?? null,
+    window: api?.window ?? null,
+    extensionBridge: api?.extensionBridge ?? null,
+    pty: api?.pty ?? null,
+    clipboard: api?.clipboard ?? null,
+    dialog: api?.dialog ?? null,
   }
 }
 

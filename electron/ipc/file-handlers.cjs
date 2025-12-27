@@ -656,8 +656,8 @@ function registerFileHandlers() {
           }
         }
 
-        // Clean up temp file
-        await fs.unlink(tempFile).catch(() => {})
+        // Clean up temp file (OK if already deleted)
+        await fs.unlink(tempFile).catch(() => { /* temp file cleanup */ })
 
         return {
           success: true,
@@ -667,8 +667,8 @@ function registerFileHandlers() {
           }
         }
       } catch (execError) {
-        // Clean up temp file
-        await fs.unlink(tempFile).catch(() => {})
+        // Clean up temp file (OK if already deleted)
+        await fs.unlink(tempFile).catch(() => { /* temp file cleanup */ })
 
         // ESLint returns exit code 1 when there are errors
         if (execError.stdout) {

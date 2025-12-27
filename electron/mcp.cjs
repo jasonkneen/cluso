@@ -1247,7 +1247,9 @@ async function probeServer(serverConfig) {
     // Make sure to disconnect on error
     try {
       await disconnect(tempId)
-    } catch {}
+    } catch {
+      // Cleanup disconnect can fail silently - connection may already be closed
+    }
     return { tools: null, error: err.message }
   }
 }

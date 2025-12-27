@@ -174,11 +174,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     // OpenAI models
     { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', enabled: false },
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai', enabled: false },
-    // Codex OAuth models (ChatGPT Plus/Pro)
-    { id: 'gpt-5.1', name: 'GPT-5.1', provider: 'codex', enabled: false },
-    { id: 'gpt-5.1-mini', name: 'GPT-5.1 Mini', provider: 'codex', enabled: false },
-    { id: 'gpt-5.1-nano', name: 'GPT-5.1 Nano', provider: 'codex', enabled: false },
-    { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex', provider: 'codex', enabled: false },
+    // OpenAI reasoning models
+    { id: 'o1', name: 'o1', provider: 'openai', enabled: false },
+    { id: 'o1-mini', name: 'o1 Mini', provider: 'openai', enabled: false },
+    { id: 'o1-preview', name: 'o1 Preview', provider: 'openai', enabled: false },
     // Google Gemini models
     { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro', provider: 'google', enabled: true },
     { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'google', enabled: true },
@@ -372,7 +371,9 @@ export function SettingsDialog({
       if (result?.version) {
         setAppVersion(result.version)
       }
-    }).catch(() => {})
+    }).catch((err) => {
+      console.warn('[Settings] Failed to get app version:', err)
+    })
 
     const unsubscribe = window.electronAPI.updates.onEvent?.((event) => {
       if (!event?.type) return
@@ -428,7 +429,9 @@ export function SettingsDialog({
         if (cwdResult.success && cwdResult.data) {
           projectPath = cwdResult.data
         }
-      } catch {}
+      } catch {
+        // getCwd failure is acceptable - projectPath will be undefined
+      }
 
       const result = await window.electronAPI.mcp.discover(projectPath)
       if (result.success && result.discovered) {

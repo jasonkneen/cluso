@@ -187,7 +187,9 @@ function fallbackSpeak(text: string) {
 // Stop any playing audio
 export function stopGeminiTTS() {
   currentSources.forEach(src => {
-    try { src.stop() } catch {}
+    try { src.stop() } catch {
+      // Source may already be stopped or disposed - OK to fail silently
+    }
   })
   currentSources.clear()
 }

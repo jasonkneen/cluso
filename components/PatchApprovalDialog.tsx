@@ -130,37 +130,7 @@ export const PatchApprovalDialog: React.FC<PatchApprovalDialogProps> = ({
   const diff = patch ? generateDiff(patch.originalContent, patch.patchedContent) : null
   const language: BundledLanguage = patch ? getFileLanguage(patch.filePath) : 'plaintext'
 
-  // Handle keyboard shortcuts
-  useEffect(() => {
-    if (!isOpen || !patch) return
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // ⌘Y or Ctrl+Y = Accept
-      if ((e.metaKey || e.ctrlKey) && e.key === 'y') {
-        e.preventDefault()
-        handleApprove()
-      }
-      // ⌘N or Ctrl+N = Reject
-      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
-        e.preventDefault()
-        handleReject()
-      }
-      // ⌘E or Ctrl+E = Edit
-      if ((e.metaKey || e.ctrlKey) && e.key === 'e') {
-        e.preventDefault()
-        handleEdit()
-      }
-      // ESC = Reject (common cancel pattern)
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        handleReject()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, patch])
-
+  // Define callbacks BEFORE useEffect to avoid stale closure bugs
   const handleApprove = useCallback(() => {
     if (!patch) return
     setIsAnimating(true)
@@ -190,6 +160,37 @@ export const PatchApprovalDialog: React.FC<PatchApprovalDialogProps> = ({
       setIsAnimating(false)
     }, 300)
   }, [patch, onEdit, projectPath])
+
+  // Handle keyboard shortcuts
+  useEffect(() => {
+    if (!isOpen || !patch) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // ⌘Y or Ctrl+Y = Accept
+      if ((e.metaKey || e.ctrlKey) && e.key === 'y') {
+        e.preventDefault()
+        handleApprove()
+      }
+      // ⌘N or Ctrl+N = Reject
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        e.preventDefault()
+        handleReject()
+      }
+      // ⌘E or Ctrl+E = Edit
+      if ((e.metaKey || e.ctrlKey) && e.key === 'e') {
+        e.preventDefault()
+        handleEdit()
+      }
+      // ESC = Reject (common cancel pattern)
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        handleReject()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, patch, handleApprove, handleReject, handleEdit])
 
   if (!isOpen || !patch || !diff) {
     return null

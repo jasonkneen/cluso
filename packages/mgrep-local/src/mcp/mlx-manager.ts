@@ -224,7 +224,9 @@ export function stopMlxServer(): boolean {
     // Process might already be dead
     try {
       unlinkSync(PID_FILE)
-    } catch {}
+    } catch {
+      // PID file may already be deleted - OK to fail
+    }
     return false
   }
 }
@@ -246,7 +248,9 @@ export function isMlxServerRunning(): boolean {
     // Process doesn't exist, clean up stale PID file
     try {
       unlinkSync(PID_FILE)
-    } catch {}
+    } catch {
+      // PID file cleanup can fail silently
+    }
     return false
   }
 }

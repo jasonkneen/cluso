@@ -216,7 +216,9 @@ export const ComponentTree = ({ data, selectedId, onSelect, isDarkMode = false }
       if (el && 'scrollIntoView' in el) {
         try {
           ;(el as HTMLElement).scrollIntoView({ block: 'nearest' })
-        } catch (e) {}
+        } catch {
+          // Best-effort scroll - OK to fail silently
+        }
       }
     })
   }, [data, selectedId, findPathToId])

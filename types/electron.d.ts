@@ -1098,7 +1098,21 @@ interface ExtensionCursorData {
   timestamp?: number
 }
 
-interface ElectronAPI {
+// Dialog API for file/folder selection
+interface ElectronDialogAPI {
+  openFolder: () => Promise<{
+    success: boolean
+    canceled?: boolean
+    data?: { path: string; name: string }
+  }>
+  openFile?: (options?: { filters?: Array<{ name: string; extensions: string[] }> }) => Promise<{
+    success: boolean
+    canceled?: boolean
+    data?: { path: string; name: string }
+  }>
+}
+
+export interface ElectronAPI {
   git: ElectronGitAPI
   files: ElectronFilesAPI
   aiSdk: ElectronAISdkAPI
@@ -1122,6 +1136,7 @@ interface ElectronAPI {
   extensionBridge?: ElectronExtensionBridgeAPI
   pty?: ElectronPtyAPI
   clipboard?: ElectronClipboardAPI
+  dialog?: ElectronDialogAPI
   getWebviewPreloadPath: () => Promise<string>
   isElectron: boolean
 }
