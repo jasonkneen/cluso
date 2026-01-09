@@ -145,6 +145,8 @@ export const FileTree = ({
       })
 
       console.log('[FileTree] getTree result:', result)
+      console.log('[FileTree] getTree result.data[0]:', result.data?.[0])
+      console.log('[FileTree] getTree result.data.length:', result.data?.length)
 
       if (!result.success) {
         console.error('[FileTree] getTree failed:', result.error)
@@ -177,8 +179,10 @@ export const FileTree = ({
         throw new Error('Failed to convert tree structure')
       }
       console.log('[FileTree] Tree loaded successfully:', tree.name, 'children:', tree.children?.length)
+      console.log('[FileTree] Tree children:', tree.children)
       setFileTree(tree)
-      setExpandedPaths(new Set([path])) // Auto-expand root
+      // Auto-expand root using the actual tree path
+      setExpandedPaths(new Set([tree.path])) // Use tree.path not the input path
     } catch (error) {
       console.error('[FileTree] Failed to load file tree:', error)
     } finally {
