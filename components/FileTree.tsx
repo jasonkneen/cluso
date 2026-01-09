@@ -132,73 +132,69 @@ export const FileTree = ({
     setLoading(true)
     try {
       const electronAPI = (window as any).electronAPI
-      if (!electronAPI?.files?.getTree) {
-        console.error('[FileTree] File tree API not available')
+      if (!electronAPI?.files?.glob) {
+        console.error('[FileTree] Files API not available')
         return
       }
 
       console.log('[FileTree] Loading tree for path:', path)
 
-      // Load actual file tree from Electron
-      const result = await electronAPI.files.getTree(path, {
-        ignorePatterns: ['node_modules', '.git', 'dist', 'build', '.next', '.cache']
-      })
+      // Use glob to get all files with full paths
+      const result = await electronAPI.files.glob('**/*', path)
 
-      console.log('[FileTree] getTree result:', result)
-      console.log('[FileTree] getTree result.data[0]:', result.data?.[0])
-      console.log('[FileTree] getTree result.data.length:', result.data?.length)
-      console.log('[FileTree] Sample paths from API:', result.data?.slice(0, 5).map((n: any) => n?.path))
+      console.log('[FileTree] Glob result:', result)
 
-      if (!result.success) {
-        console.error('[FileTree] getTree failed:', result.error)
+      if (!result.success || !result.files) {
+        console.error('[FileTree] Glob failed:', result.error)
         throw new Error(result.error || 'Failed to load file tree')
       }
 
-      // Check if data exists (API returns data array, not tree object)
-      if (!result.data || !Array.isArray(result.data) || result.data.length === 0) {
-        console.error('[FileTree] No data in result:', result)
-        throw new Error('No tree data returned from API')
+      // Build tree from flat file list
+      const files = result.files as string[]
+      const tree: FileNode = {
+        name: path.split('/').pop() || path,
+        path,
+        type: 'directory',
+        children: []
       }
 
-      // Convert the tree format to our FileNode format
-      const convertNode = (node: any): FileNode | null => {
-        if (!node || !node.name || !node.path) {
-          console.warn('[FileTree] Skipping invalid node:', node)
-          return null
+      // Group files by directory
+      const nodeMap = new Map<string, FileNode>()
+      nodeMap.set(path, tree)
+
+      // Process each file
+      for (const filePath of files) {
+        const parts = filePath.replace(path + '/', '').split('/')
+        let currentPath = path
+        let currentNode = tree
+
+        for (let i = 0; i < parts.length; i++) {
+          const part = parts[i]
+          const isFile = i === parts.length - 1 && !filePath.endsWith('/')
+          currentPath = currentPath + '/' + part
+
+          let child = nodeMap.get(currentPath)
+          if (!child) {
+            child = {
+              name: part,
+              path: currentPath,
+              type: isFile ? 'file' : 'directory',
+              children: isFile ? undefined : []
+            }
+            currentNode.children = currentNode.children || []
+            currentNode.children.push(child)
+            nodeMap.set(currentPath, child)
+          }
+
+          if (!isFile) {
+            currentNode = child
+          }
         }
-        return {
-          name: node.name,
-          path: node.path,
-          type: node.type,
-          children: node.children?.map(convertNode).filter((n: FileNode | null) => n !== null) as FileNode[]
-        }
       }
 
-      // API returns flat array - build tree structure
-      // If first item has empty children but array has multiple items, treat rest as children
-      const rootNode = result.data[0]
-      if (!rootNode) {
-        throw new Error('No root node in data')
-      }
-
-      // Convert all items and use items 1+ as root's children if root children is empty
-      const allNodes = result.data.map(convertNode).filter((n: FileNode | null) => n !== null) as FileNode[]
-
-      const tree = allNodes[0]
-      if (!tree) {
-        throw new Error('Failed to convert tree structure')
-      }
-
-      // If root has no children but we have multiple nodes, use rest as children
-      if ((!tree.children || tree.children.length === 0) && allNodes.length > 1) {
-        tree.children = allNodes.slice(1)
-        console.log('[FileTree] Built tree from flat list:', allNodes.length, 'total items')
-      }
-
-      console.log('[FileTree] Tree loaded successfully:', tree.name, 'children:', tree.children?.length)
+      console.log('[FileTree] Tree built from glob:', files.length, 'files')
       setFileTree(tree)
-      // Auto-expand root using the actual tree path
-      setExpandedPaths(new Set([tree.path]))
+      setExpandedPaths(new Set([path]))
     } catch (error) {
       console.error('[FileTree] Failed to load file tree:', error)
     } finally {
