@@ -207,6 +207,7 @@ export const FileTree = ({
   }
 
   const handleSelect = (path: string) => {
+    console.log('[FileTree] File selected with path:', path)
     onSelectFile?.(path)
   }
 
