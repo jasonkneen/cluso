@@ -3663,12 +3663,27 @@ export default function App() {
 
     // Load file content
     try {
-      const result = await window.electronAPI.files.readFile(filePath)
+      let result = await window.electronAPI.files.readFile(filePath)
+
+      // If file not found, try searching for it by filename
+      if (!result.success && result.error?.includes('ENOENT') && activeTab.projectPath) {
+        const filename = filePath.split('/').pop()
+        console.log('[App] File not found at', filePath, '- searching for:', filename)
+
+        const searchResult = await window.electronAPI.files.findFiles(activeTab.projectPath, filename!)
+        if (searchResult.success && searchResult.files && searchResult.files.length > 0) {
+          const foundPath = searchResult.files[0]
+          console.log('[App] Found file at:', foundPath)
+          setEditorFilePath(foundPath)
+          result = await window.electronAPI.files.readFile(foundPath)
+        }
+      }
+
       if (!result.success) {
         throw new Error(result.error || 'Failed to read file')
       }
       const content = result.content || result.data || ''
-      console.log('[App] File loaded:', filePath, content.length, 'bytes')
+      console.log('[App] File loaded:', content.length, 'bytes')
       setEditorFileContent(content)
       setIsEditorMode(true) // Switch center pane to editor
     } catch (error) {
@@ -3676,7 +3691,7 @@ export default function App() {
       setEditorFileContent(`// Error loading file: ${error instanceof Error ? error.message : 'Unknown error'}`)
       setIsEditorMode(true)
     }
-  }, [])
+  }, [activeTab.projectPath])
 
   const flushApplyElementStyles = useCallback(() => {
     if (applyElementStylesTimerRef.current) {
