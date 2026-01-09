@@ -133,16 +133,21 @@ export const FileTree = ({
     try {
       const electronAPI = (window as any).electronAPI
       if (!electronAPI?.files?.getTree) {
-        console.error('File tree API not available')
+        console.error('[FileTree] File tree API not available')
         return
       }
+
+      console.log('[FileTree] Loading tree for path:', path)
 
       // Load actual file tree from Electron
       const result = await electronAPI.files.getTree(path, {
         ignorePatterns: ['node_modules', '.git', 'dist', 'build', '.next', '.cache']
       })
 
+      console.log('[FileTree] getTree result:', result)
+
       if (!result.success) {
+        console.error('[FileTree] getTree failed:', result.error)
         throw new Error(result.error || 'Failed to load file tree')
       }
 
@@ -155,10 +160,11 @@ export const FileTree = ({
       })
 
       const tree = convertNode(result.tree)
+      console.log('[FileTree] Tree loaded successfully:', tree.name, 'children:', tree.children?.length)
       setFileTree(tree)
       setExpandedPaths(new Set([path])) // Auto-expand root
     } catch (error) {
-      console.error('Failed to load file tree:', error)
+      console.error('[FileTree] Failed to load file tree:', error)
     } finally {
       setLoading(false)
     }

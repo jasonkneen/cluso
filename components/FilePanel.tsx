@@ -30,6 +30,11 @@ export const FilePanel: React.FC<FilePanelProps> = ({
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [treeHeight, setTreeHeight] = useState(340)
 
+  // Debug logging
+  useEffect(() => {
+    console.log('[FilePanel] Props received:', { projectPath, initialFilePath, initialLine })
+  }, [projectPath, initialFilePath, initialLine])
+
   // Load initial file if provided
   useEffect(() => {
     if (initialFilePath && projectPath) {
