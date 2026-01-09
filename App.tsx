@@ -9724,12 +9724,19 @@ If you're not sure what the user wants, ask for clarification.
               onClick={async () => {
                 const source = selectedElement.sourceLocation?.sources?.[0]
                 if (source?.file && activeTab.projectPath) {
-                  // Resolve the file path
-                  const resolved = resolveSourceFilePath(activeTab.projectPath, source.file)
-                  if (resolved.absPath) {
+                  // Search for the file by name instead of using resolved path
+                  const filename = source.file.split('/').pop() || source.file
+                  console.log('[Jump to Source] Searching for file:', filename)
+
+                  const searchResult = await window.electronAPI.files.findFiles(activeTab.projectPath, filename)
+                  if (searchResult.success && searchResult.files && searchResult.files.length > 0) {
+                    const foundPath = searchResult.files[0]
+                    console.log('[Jump to Source] Found at:', foundPath)
                     setEditorInitialLine(source.line)
-                    await handleFileTreeSelect(resolved.absPath)
-                    setIsLeftPanelOpen(true) // Open left panel to show file in tree
+                    await handleFileTreeSelect(foundPath)
+                    setIsLeftPanelOpen(true)
+                  } else {
+                    console.error('[Jump to Source] File not found:', filename)
                   }
                 }
               }}
