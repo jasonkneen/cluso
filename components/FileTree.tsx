@@ -143,14 +143,23 @@ export const FileTree = ({
       const result = await electronAPI.files.glob('**/*', path)
 
       console.log('[FileTree] Glob result:', result)
+      console.log('[FileTree] Glob result.files:', result?.files)
+      console.log('[FileTree] Glob result.data:', result?.data)
 
-      if (!result.success || !result.files) {
+      if (!result.success) {
         console.error('[FileTree] Glob failed:', result.error)
         throw new Error(result.error || 'Failed to load file tree')
       }
 
+      const files = (result.files || result.data || []) as string[]
+      if (!files || files.length === 0) {
+        console.error('[FileTree] No files returned from glob')
+        throw new Error('No files returned from glob')
+      }
+
+      console.log('[FileTree] Processing', files.length, 'files')
+
       // Build tree from flat file list
-      const files = result.files as string[]
       const tree: FileNode = {
         name: path.split('/').pop() || path,
         path,
