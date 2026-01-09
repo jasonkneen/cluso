@@ -834,6 +834,17 @@ export default function App() {
   const [editorFileContent, setEditorFileContent] = useState<string>('');
   const [editorInitialLine, setEditorInitialLine] = useState<number | undefined>(undefined);
   const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
+
+  // Keyboard shortcut: Escape to exit editor mode
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isEditorMode) {
+        setIsEditorMode(false)
+      }
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [isEditorMode])
   const [layersTreeData, setLayersTreeData] = useState<import('./components/ComponentTree').TreeNode | null>(null);
   const layersTreeDataRef = useRef<import('./components/ComponentTree').TreeNode | null>(null);
   useEffect(() => { layersTreeDataRef.current = layersTreeData; }, [layersTreeData]);
