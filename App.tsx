@@ -39,6 +39,7 @@ import type { TreeNode } from './components/ComponentTree';
 import { DEFAULT_ELEMENT_STYLES, type ElementStyles } from './types/elementStyles';
 import { FilePanel } from './components/FilePanel';
 import { TabbedLeftPanel } from './components/TabbedLeftPanel';
+import { CodeEditor } from './components/CodeEditor';
 
 import { getElectronAPI } from './hooks/useElectronAPI';
 import type { MCPServerConfig } from './types/mcp';
@@ -3655,8 +3656,9 @@ export default function App() {
       if (!result.success) {
         throw new Error(result.error || 'Failed to read file')
       }
-      console.log('[App] File loaded:', filePath, result.content.length, 'bytes')
-      setEditorFileContent(result.content)
+      const content = result.content || result.data || ''
+      console.log('[App] File loaded:', filePath, content.length, 'bytes')
+      setEditorFileContent(content)
       setIsEditorMode(true) // Switch center pane to editor
     } catch (error) {
       console.error('[App] Failed to load file:', error)
