@@ -9722,26 +9722,29 @@ If you're not sure what the user wants, ask for clarification.
           {activeTab.projectPath && selectedElement?.sourceLocation?.sources?.[0] && (
             <button
               onClick={async () => {
-                const source = selectedElement.sourceLocation?.sources?.[0]
-                if (source?.file && activeTab.projectPath) {
-                  // Search for the file using glob
+                const sources = selectedElement.sourceLocation?.sources || []
+                if (sources.length === 0 || !activeTab.projectPath) return
+
+                // Try each source until we find a file that exists
+                for (const source of sources) {
+                  if (!source?.file) continue
+
                   const filename = source.file.split('/').pop() || source.file
-                  console.log('[Jump to Source] Searching for file:', filename)
+                  console.log('[Jump to Source] Trying:', filename)
 
                   const searchResult = await window.electronAPI.files.glob(`**/${filename}`, activeTab.projectPath)
-                  console.log('[Jump to Source] Glob search result:', searchResult)
-
                   const files = searchResult.data || searchResult.files || []
+
                   if (searchResult.success && files.length > 0) {
                     const foundPath = typeof files[0] === 'string' ? files[0] : files[0]?.path
-                    console.log('[Jump to Source] Found at:', foundPath)
+                    console.log('[Jump to Source] Found at:', foundPath, 'line:', source.line)
                     setEditorInitialLine(source.line)
                     await handleFileTreeSelect(foundPath)
                     setIsLeftPanelOpen(true)
-                  } else {
-                    console.error('[Jump to Source] File not found:', filename, searchResult)
+                    return
                   }
                 }
+                console.error('[Jump to Source] No files found from sources:', sources.map(s => s?.file))
               }}
               className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'}`}
               title="Jump to Source"
