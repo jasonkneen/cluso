@@ -827,9 +827,12 @@ export default function App() {
   const [leftPanelWidth, setLeftPanelWidth] = useState(280);
   const [isLeftResizing, setIsLeftResizing] = useState(false);
 
-  // File panel state (for source jump)
-  const [filePanelInitialFile, setFilePanelInitialFile] = useState<string | undefined>(undefined);
-  const [filePanelInitialLine, setFilePanelInitialLine] = useState<number | undefined>(undefined);
+  // Code editor state (center pane)
+  const [isEditorMode, setIsEditorMode] = useState(false);
+  const [editorFilePath, setEditorFilePath] = useState<string | null>(null);
+  const [editorFileContent, setEditorFileContent] = useState<string>('');
+  const [editorInitialLine, setEditorInitialLine] = useState<number | undefined>(undefined);
+  const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
   const [layersTreeData, setLayersTreeData] = useState<import('./components/ComponentTree').TreeNode | null>(null);
   const layersTreeDataRef = useRef<import('./components/ComponentTree').TreeNode | null>(null);
   useEffect(() => { layersTreeDataRef.current = layersTreeData; }, [layersTreeData]);
@@ -3639,6 +3642,28 @@ export default function App() {
   }, [activeTabId, isMultiViewportMode]);
   const handleTreeNodeSelectRef = useRef<(node: TreeNode) => void>(() => {});
   useEffect(() => { handleTreeNodeSelectRef.current = handleTreeNodeSelect as unknown as (node: TreeNode) => void; }, [handleTreeNodeSelect]);
+
+  // Handle file selection from file tree
+  const handleFileTreeSelect = useCallback(async (filePath: string) => {
+    console.log('[App] File selected from tree:', filePath)
+    setEditorFilePath(filePath)
+    setHasUnsavedEdits(false)
+
+    // Load file content
+    try {
+      const result = await window.electronAPI.files.readFile(filePath)
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to read file')
+      }
+      console.log('[App] File loaded:', filePath, result.content.length, 'bytes')
+      setEditorFileContent(result.content)
+      setIsEditorMode(true) // Switch center pane to editor
+    } catch (error) {
+      console.error('[App] Failed to load file:', error)
+      setEditorFileContent(`// Error loading file: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      setIsEditorMode(true)
+    }
+  }, [])
 
   const flushApplyElementStyles = useCallback(() => {
     if (applyElementStylesTimerRef.current) {
@@ -9298,8 +9323,8 @@ If you're not sure what the user wants, ask for clarification.
               projectPath={activeTab.projectPath || null}
               classNames={selectedLayerClassNames}
               sourceSnippet={selectedElementSourceSnippet}
-              initialFilePath={filePanelInitialFile}
-              initialLine={filePanelInitialLine}
+              selectedFilePath={editorFilePath}
+              onFileSelect={handleFileTreeSelect}
             />
             {/* Left resize handle */}
             <div
@@ -9376,6 +9401,87 @@ If you're not sure what the user wants, ask for clarification.
               isDarkMode={isDarkMode}
               lockedProjectPath={lockedProjectPath}
             />
+          </div>
+        ) : isEditorMode ? (
+          <div
+            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+          >
+            {/* Code Editor Toolbar */}
+            <div
+              className="h-12 border-b flex items-center gap-2 px-3 flex-shrink-0 justify-between"
+              style={{ borderColor: panelBorder }}
+            >
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsEditorMode(false)}
+                  className={`text-sm px-2 py-1 rounded transition-colors ${
+                    isDarkMode
+                      ? 'hover:bg-neutral-700 text-neutral-300'
+                      : 'hover:bg-stone-200 text-stone-600'
+                  }`}
+                  title="Back to preview"
+                >
+                  ← Preview
+                </button>
+                <span className={`text-sm ${isDarkMode ? 'text-neutral-300' : 'text-stone-700'}`}>
+                  {editorFilePath?.split('/').pop() || 'Untitled'}
+                </span>
+                {hasUnsavedEdits && (
+                  <span className="text-xs text-orange-500">●</span>
+                )}
+              </div>
+              <button
+                onClick={async () => {
+                  if (!editorFilePath) return
+                  try {
+                    const result = await window.electronAPI.files.writeFile(editorFilePath, editorFileContent)
+                    if (result.success) {
+                      setHasUnsavedEdits(false)
+                    }
+                  } catch (error) {
+                    console.error('Failed to save:', error)
+                  }
+                }}
+                disabled={!hasUnsavedEdits}
+                className={`px-3 py-1 text-sm rounded transition-colors ${
+                  hasUnsavedEdits
+                    ? isDarkMode
+                      ? 'bg-blue-600 text-white hover:bg-blue-500'
+                      : 'bg-blue-500 text-white hover:bg-blue-600'
+                    : isDarkMode
+                      ? 'bg-neutral-700 text-neutral-500 cursor-not-allowed'
+                      : 'bg-stone-200 text-stone-400 cursor-not-allowed'
+                }`}
+              >
+                Save (Cmd+S)
+              </button>
+            </div>
+
+            {/* Code Editor Content */}
+            <div className="flex-1 min-h-0">
+              <CodeEditor
+                filePath={editorFilePath || undefined}
+                content={editorFileContent}
+                onChange={(value) => {
+                  setEditorFileContent(value || '')
+                  setHasUnsavedEdits(true)
+                }}
+                onSave={async (value) => {
+                  if (!editorFilePath) return
+                  try {
+                    const result = await window.electronAPI.files.writeFile(editorFilePath, value)
+                    if (result.success) {
+                      setHasUnsavedEdits(false)
+                    }
+                  } catch (error) {
+                    console.error('Failed to save:', error)
+                  }
+                }}
+                isDarkMode={isDarkMode}
+                initialLine={editorInitialLine}
+              />
+            </div>
           </div>
         ) : (
           <div
@@ -9587,15 +9693,15 @@ If you're not sure what the user wants, ask for clarification.
           {/* Code Editor Toggle - Only visible when element has source location */}
           {activeTab.projectPath && selectedElement?.sourceLocation?.sources?.[0] && (
             <button
-              onClick={() => {
+              onClick={async () => {
                 const source = selectedElement.sourceLocation?.sources?.[0]
                 if (source?.file && activeTab.projectPath) {
                   // Resolve the file path
                   const resolved = resolveSourceFilePath(activeTab.projectPath, source.file)
                   if (resolved.absPath) {
-                    setFilePanelInitialFile(resolved.absPath)
-                    setFilePanelInitialLine(source.line)
-                    setIsLeftPanelOpen(true) // Open left panel with Files tab
+                    setEditorInitialLine(source.line)
+                    await handleFileTreeSelect(resolved.absPath)
+                    setIsLeftPanelOpen(true) // Open left panel to show file in tree
                   }
                 }
               }}

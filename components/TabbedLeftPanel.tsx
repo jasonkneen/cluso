@@ -32,8 +32,8 @@ interface TabbedLeftPanelProps {
 
   // File panel props
   projectPath?: string | null
-  initialFilePath?: string
-  initialLine?: number
+  selectedFilePath?: string | null
+  onFileSelect?: (path: string) => void
 
   // Tab control
   defaultTab?: 'layers' | 'files'
@@ -44,13 +44,6 @@ type TabType = 'layers' | 'files'
 
 export const TabbedLeftPanel: React.FC<TabbedLeftPanelProps> = (props) => {
   const [activeTab, setActiveTab] = useState<TabType>(props.defaultTab || 'layers')
-
-  // Auto-switch to Files tab if initialFilePath is provided
-  useEffect(() => {
-    if (props.initialFilePath) {
-      setActiveTab('files')
-    }
-  }, [props.initialFilePath])
 
   // Notify parent of tab changes
   const handleTabChange = (tab: TabType) => {
@@ -64,8 +57,8 @@ export const TabbedLeftPanel: React.FC<TabbedLeftPanelProps> = (props) => {
     panelBg,
     panelBorder,
     projectPath,
-    initialFilePath,
-    initialLine,
+    selectedFilePath,
+    onFileSelect,
   } = props
 
   return (
@@ -124,8 +117,8 @@ export const TabbedLeftPanel: React.FC<TabbedLeftPanelProps> = (props) => {
             panelBg={panelBg}
             panelBorder={panelBorder}
             projectPath={projectPath}
-            initialFilePath={initialFilePath}
-            initialLine={initialLine}
+            selectedFilePath={selectedFilePath}
+            onSelectFile={onFileSelect}
           />
         )}
       </div>
