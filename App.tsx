@@ -38,6 +38,7 @@ import type { SelectedElementSourceSnippet } from './components/LeftSidebar';
 import type { TreeNode } from './components/ComponentTree';
 import { DEFAULT_ELEMENT_STYLES, type ElementStyles } from './types/elementStyles';
 import { FilePanel } from './components/FilePanel';
+import { TabbedLeftPanel } from './components/TabbedLeftPanel';
 
 import { getElectronAPI } from './hooks/useElectronAPI';
 import type { MCPServerConfig } from './types/mcp';
@@ -826,9 +827,7 @@ export default function App() {
   const [leftPanelWidth, setLeftPanelWidth] = useState(280);
   const [isLeftResizing, setIsLeftResizing] = useState(false);
 
-  // File panel state
-  const [isFilePanelOpen, setIsFilePanelOpen] = useState(false);
-  const [filePanelWidth, setFilePanelWidth] = useState(320);
+  // File panel state (for source jump)
   const [filePanelInitialFile, setFilePanelInitialFile] = useState<string | undefined>(undefined);
   const [filePanelInitialLine, setFilePanelInitialLine] = useState<number | undefined>(undefined);
   const [layersTreeData, setLayersTreeData] = useState<import('./components/ComponentTree').TreeNode | null>(null);
@@ -9274,10 +9273,10 @@ If you're not sure what the user wants, ask for clarification.
       {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden pt-1 pb-2 px-2 gap-1">
 
-        {/* --- Left Panel: Layers + Properties --- */}
+        {/* --- Left Panel: Tabbed (Layers + Files) --- */}
         {isLeftPanelOpen && (
           <>
-            <LeftSidebar
+            <TabbedLeftPanel
               width={leftPanelWidth}
               treeData={layersTreeData}
               selectedId={selectedTreeNodeId}
@@ -9299,6 +9298,8 @@ If you're not sure what the user wants, ask for clarification.
               projectPath={activeTab.projectPath || null}
               classNames={selectedLayerClassNames}
               sourceSnippet={selectedElementSourceSnippet}
+              initialFilePath={filePanelInitialFile}
+              initialLine={filePanelInitialLine}
             />
             {/* Left resize handle */}
             <div
@@ -9583,18 +9584,7 @@ If you're not sure what the user wants, ask for clarification.
             <Terminal size={16} />
           </button>
 
-          {/* File Explorer Toggle - Only visible when project is connected */}
-          {activeTab.projectPath && (
-            <button
-              onClick={() => setIsFilePanelOpen(!isFilePanelOpen)}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isFilePanelOpen ? 'bg-blue-100 text-blue-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500')}`}
-              title="Toggle File Explorer"
-            >
-              <FolderOpen size={16} />
-            </button>
-          )}
-
-          {/* Code Editor Toggle - Only visible when project is connected and file panel is open */}
+          {/* Code Editor Toggle - Only visible when element has source location */}
           {activeTab.projectPath && selectedElement?.sourceLocation?.sources?.[0] && (
             <button
               onClick={() => {
@@ -9605,7 +9595,7 @@ If you're not sure what the user wants, ask for clarification.
                   if (resolved.absPath) {
                     setFilePanelInitialFile(resolved.absPath)
                     setFilePanelInitialLine(source.line)
-                    setIsFilePanelOpen(true)
+                    setIsLeftPanelOpen(true) // Open left panel with Files tab
                   }
                 }
               }}
@@ -10746,24 +10736,6 @@ If you're not sure what the user wants, ask for clarification.
         {/* Resize overlay - captures mouse events during sidebar resize */}
         {isResizing && (
           <div className="fixed inset-0 z-50 cursor-ew-resize" />
-        )}
-
-        {/* --- File Panel: File Tree + Code Editor --- */}
-        {isFilePanelOpen && activeTab.projectPath && (
-          <FilePanel
-            width={filePanelWidth}
-            isDarkMode={isDarkMode}
-            panelBg={panelBg}
-            panelBorder={panelBorder}
-            projectPath={activeTab.projectPath}
-            onClose={() => {
-              setIsFilePanelOpen(false)
-              setFilePanelInitialFile(undefined)
-              setFilePanelInitialLine(undefined)
-            }}
-            initialFilePath={filePanelInitialFile}
-            initialLine={filePanelInitialLine}
-          />
         )}
 
         {/* Resize Handle */}
