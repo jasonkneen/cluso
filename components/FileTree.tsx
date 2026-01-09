@@ -151,9 +151,9 @@ export const FileTree = ({
         throw new Error(result.error || 'Failed to load file tree')
       }
 
-      // Check if tree exists
-      if (!result.tree) {
-        console.error('[FileTree] No tree in result:', result)
+      // Check if data exists (API returns data array, not tree object)
+      if (!result.data || !Array.isArray(result.data) || result.data.length === 0) {
+        console.error('[FileTree] No data in result:', result)
         throw new Error('No tree data returned from API')
       }
 
@@ -171,7 +171,8 @@ export const FileTree = ({
         }
       }
 
-      const tree = convertNode(result.tree)
+      // result.data is an array, use first element as root
+      const tree = convertNode(result.data[0])
       if (!tree) {
         throw new Error('Failed to convert tree structure')
       }
