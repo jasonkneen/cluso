@@ -151,15 +151,30 @@ export const FileTree = ({
         throw new Error(result.error || 'Failed to load file tree')
       }
 
+      // Check if tree exists
+      if (!result.tree) {
+        console.error('[FileTree] No tree in result:', result)
+        throw new Error('No tree data returned from API')
+      }
+
       // Convert the tree format to our FileNode format
-      const convertNode = (node: any): FileNode => ({
-        name: node.name,
-        path: node.path,
-        type: node.type,
-        children: node.children?.map(convertNode)
-      })
+      const convertNode = (node: any): FileNode | null => {
+        if (!node || !node.name || !node.path) {
+          console.warn('[FileTree] Skipping invalid node:', node)
+          return null
+        }
+        return {
+          name: node.name,
+          path: node.path,
+          type: node.type,
+          children: node.children?.map(convertNode).filter((n: FileNode | null) => n !== null) as FileNode[]
+        }
+      }
 
       const tree = convertNode(result.tree)
+      if (!tree) {
+        throw new Error('Failed to convert tree structure')
+      }
       console.log('[FileTree] Tree loaded successfully:', tree.name, 'children:', tree.children?.length)
       setFileTree(tree)
       setExpandedPaths(new Set([path])) // Auto-expand root
