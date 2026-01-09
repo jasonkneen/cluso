@@ -147,6 +147,7 @@ export const FileTree = ({
       console.log('[FileTree] getTree result:', result)
       console.log('[FileTree] getTree result.data[0]:', result.data?.[0])
       console.log('[FileTree] getTree result.data.length:', result.data?.length)
+      console.log('[FileTree] ALL data items:', result.data)
 
       if (!result.success) {
         console.error('[FileTree] getTree failed:', result.error)
@@ -173,16 +174,31 @@ export const FileTree = ({
         }
       }
 
-      // result.data is an array, use first element as root
-      const tree = convertNode(result.data[0])
+      // API returns flat array - build tree structure
+      // If first item has empty children but array has multiple items, treat rest as children
+      const rootNode = result.data[0]
+      if (!rootNode) {
+        throw new Error('No root node in data')
+      }
+
+      // Convert all items and use items 1+ as root's children if root children is empty
+      const allNodes = result.data.map(convertNode).filter((n: FileNode | null) => n !== null) as FileNode[]
+
+      const tree = allNodes[0]
       if (!tree) {
         throw new Error('Failed to convert tree structure')
       }
+
+      // If root has no children but we have multiple nodes, use rest as children
+      if ((!tree.children || tree.children.length === 0) && allNodes.length > 1) {
+        tree.children = allNodes.slice(1)
+        console.log('[FileTree] Built tree from flat list:', allNodes.length, 'total items')
+      }
+
       console.log('[FileTree] Tree loaded successfully:', tree.name, 'children:', tree.children?.length)
-      console.log('[FileTree] Tree children:', tree.children)
       setFileTree(tree)
       // Auto-expand root using the actual tree path
-      setExpandedPaths(new Set([tree.path])) // Use tree.path not the input path
+      setExpandedPaths(new Set([tree.path]))
     } catch (error) {
       console.error('[FileTree] Failed to load file tree:', error)
     } finally {
