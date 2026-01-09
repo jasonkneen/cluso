@@ -151,13 +151,17 @@ export const FileTree = ({
         throw new Error(result.error || 'Failed to load file tree')
       }
 
-      const files = (result.files || result.data || []) as string[]
-      if (!files || files.length === 0) {
+      const filesData = result.files || result.data || []
+      if (!filesData || filesData.length === 0) {
         console.error('[FileTree] No files returned from glob')
         throw new Error('No files returned from glob')
       }
 
-      console.log('[FileTree] Processing', files.length, 'files')
+      console.log('[FileTree] Processing', filesData.length, 'files')
+      console.log('[FileTree] First file:', filesData[0])
+
+      // Extract file paths (glob returns objects with path property)
+      const files = filesData.map((f: any) => typeof f === 'string' ? f : f.path).filter(Boolean)
 
       // Build tree from flat file list
       const tree: FileNode = {
@@ -173,7 +177,7 @@ export const FileTree = ({
 
       // Process each file
       for (const filePath of files) {
-        const parts = filePath.replace(path + '/', '').split('/')
+        const parts = (filePath as string).replace(path + '/', '').split('/')
         let currentPath = path
         let currentNode = tree
 
