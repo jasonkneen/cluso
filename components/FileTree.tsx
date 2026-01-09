@@ -147,7 +147,7 @@ export const FileTree = ({
       console.log('[FileTree] getTree result:', result)
       console.log('[FileTree] getTree result.data[0]:', result.data?.[0])
       console.log('[FileTree] getTree result.data.length:', result.data?.length)
-      console.log('[FileTree] ALL data items:', result.data)
+      console.log('[FileTree] Sample paths from API:', result.data?.slice(0, 5).map((n: any) => n?.path))
 
       if (!result.success) {
         console.error('[FileTree] getTree failed:', result.error)
