@@ -4,7 +4,7 @@ import { LeftSidebar } from './LeftSidebar'
 import { FilePanel } from './FilePanel'
 import type { TreeNode } from './ComponentTree'
 import type { ElementStyles } from '../types/elementStyles'
-import type { SelectedElementSourceSnippet } from './LeftSidebar'
+import type { SelectedElementSourceSnippet } from '../features/selection'
 
 interface TabbedLeftPanelProps {
   width: number

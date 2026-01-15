@@ -50,20 +50,33 @@ import { useClusoAgent, AVAILABLE_DEMOS, DEMO_SCRIPTS } from './hooks/useClusoAg
 import { useSteeringQuestions } from './hooks/useSteeringQuestions';
 import { SteeringQuestions } from './components/SteeringQuestions';
 import { useChatState } from './features/chat';
+import { useEditorState } from './features/editor';
 import { useViewportMode } from './features/viewport';
 import type { DevicePreset } from './features/viewport';
 import { useAppSettings } from './features/settings';
+import { useLayersPanel } from './features/layers';
+import { useConsolePanel } from './features/console';
+import { useSidebarState } from './features/sidebar';
+import { usePatchState } from './features/patches';
+import type { PendingPatch, PendingDOMApproval } from './features/patches';
+import { useNavigationState } from './features/navigation';
+import { useAutocompleteState } from './features/autocomplete';
+import { useSelectionState } from './features/selection';
+import type { SelectedElementSourceSnippet } from './features/selection';
+import { useFileBrowserState } from './features/files';
+import type { EditedFile } from './features/files';
+import { useDialogState } from './features/dialogs';
 import { generateTurnId } from './utils/turnUtils';
 import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler';
 import { PatchApprovalDialog } from './components/PatchApprovalDialog';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LeftSidebar } from './components/LeftSidebar';
-import type { SelectedElementSourceSnippet } from './components/LeftSidebar';
 import type { TreeNode } from './components/ComponentTree';
-import { DEFAULT_ELEMENT_STYLES, type ElementStyles } from './types/elementStyles';
+import { type ElementStyles } from './types/elementStyles';
 import { FilePanel } from './components/FilePanel';
 import { TabbedLeftPanel } from './components/TabbedLeftPanel';
 import { CodeEditor } from './components/CodeEditor';
+import { GroupedToolChips } from './components/GroupedToolChips';
 
 import { getElectronAPI } from './hooks/useElectronAPI';
 import type { MCPServerConfig } from './types/mcp';
@@ -181,105 +194,6 @@ import {
 // --- Constants ---
 
 const DEFAULT_URL = ''; // Empty string shows project selection (NewTabPage)
-
-// ============================================================================
-// GroupedToolChips Component - Groups consecutive same-type tool calls
-// e.g., [grep x3] instead of [grep] [grep] [grep]
-// ============================================================================
-function GroupedToolChips({
-  toolCalls,
-  isDarkMode,
-  isStreaming = false,
-}: {
-  toolCalls: ToolCallItem[]
-  isDarkMode: boolean
-  isStreaming?: boolean
-}) {
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
-
-  const groups = useMemo(() => groupConsecutiveTools(toolCalls), [toolCalls])
-
-  const toggleGroup = useCallback((groupKey: string) => {
-    setExpandedGroups(prev => {
-      const next = new Set(prev)
-      if (next.has(groupKey)) {
-        next.delete(groupKey)
-      } else {
-        next.add(groupKey)
-      }
-      return next
-    })
-  }, [])
-
-  const getChipStyle = (status: string, isGroup = false) => {
-    if (status === 'running') {
-      return isDarkMode ? 'bg-blue-500/20 text-blue-300' : 'bg-blue-100 text-blue-700'
-    }
-    if (status === 'error') {
-      return isDarkMode ? 'bg-red-500/20 text-red-300' : 'bg-red-100 text-red-700'
-    }
-    return isDarkMode ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
-  }
-
-  return (
-    <div className="mb-2 flex flex-wrap gap-1.5">
-      {groups.map((group, groupIdx) => {
-        const groupKey = `${group.name}-${groupIdx}`
-        const isExpanded = expandedGroups.has(groupKey)
-        const showGrouped = group.count > 1 && !isExpanded
-
-        if (showGrouped) {
-          // Render grouped chip: [read_file x3]
-          const groupStatus = group.hasRunning ? 'running' : group.hasError ? 'error' : 'complete'
-          return (
-            <button
-              key={groupKey}
-              onClick={() => toggleGroup(groupKey)}
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all cursor-pointer hover:opacity-80 ${getChipStyle(groupStatus, true)}`}
-              title={`Click to expand ${group.count} ${group.name} calls`}
-            >
-              {group.hasRunning && <Loader2 size={10} className="animate-spin" />}
-              {!group.hasRunning && !group.hasError && <Check size={10} />}
-              {!group.hasRunning && group.hasError && <X size={10} />}
-              <span className="font-mono">{group.name}</span>
-              <span className={`text-[9px] px-1 rounded ${isDarkMode ? 'bg-white/10' : 'bg-black/10'}`}>
-                ×{group.count}
-              </span>
-            </button>
-          )
-        }
-
-        // Render individual chips (either single tool or expanded group)
-        return (
-          <React.Fragment key={groupKey}>
-            {group.count > 1 && isExpanded && (
-              <button
-                onClick={() => toggleGroup(groupKey)}
-                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium transition-all cursor-pointer ${
-                  isDarkMode ? 'bg-neutral-700 text-neutral-400 hover:bg-neutral-600' : 'bg-stone-200 text-stone-500 hover:bg-stone-300'
-                }`}
-                title="Collapse group"
-              >
-                <ChevronDown size={8} />
-              </button>
-            )}
-            {group.tools.map((tool, idx) => (
-              <div
-                key={tool.id || `${groupKey}-${idx}`}
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all ${getChipStyle(tool.status)}`}
-              >
-                {tool.status === 'running' && <Loader2 size={10} className="animate-spin" />}
-                {(tool.status === 'done' || tool.status === 'complete' || tool.status === 'success') && <Check size={10} />}
-                {tool.status === 'error' && <X size={10} />}
-                <span className="font-mono">{tool.name}</span>
-              </div>
-            ))}
-          </React.Fragment>
-        )
-      })}
-    </div>
-  )
-}
 
 // Type for webview element (Electron)
 interface WebviewElement extends HTMLElement {
@@ -809,12 +723,19 @@ export default function App() {
       isProject: !!t.projectPath, // Mark project tabs with folder icon
     }));
 
-  // Browser State
-  const [urlInput, setUrlInput] = useState(DEFAULT_URL); // URL in address bar (editable)
-  const [canGoBack, setCanGoBack] = useState(false);
-  const [canGoForward, setCanGoForward] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [pageTitle, setPageTitle] = useState('');
+  // Browser State - centralized via useNavigationState hook
+  const {
+    urlInput,
+    setUrlInput,
+    canGoBack,
+    setCanGoBack,
+    canGoForward,
+    setCanGoForward,
+    isLoading,
+    setIsLoading,
+    pageTitle,
+    setPageTitle,
+  } = useNavigationState();
 
   // Chat state - centralized via useChatState hook
   const {
@@ -833,11 +754,25 @@ export default function App() {
   } = useChatState();
   const [previewIntent, setPreviewIntent] = useState<{ type: string; label: string; secondaryTypes?: string[]; secondaryLabels?: string[] } | null>(null);
 
-  // Selection States
-  const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
-  const selectedElementRef = useRef<SelectedElement | null>(null);
-  useEffect(() => { selectedElementRef.current = selectedElement; }, [selectedElement]);
-  const [selectedElementSourceSnippet, setSelectedElementSourceSnippet] = useState<SelectedElementSourceSnippet>(null);
+  // Selection States (extracted to useSelectionState hook)
+  const {
+    selectedElement,
+    setSelectedElement,
+    selectedElementRef,
+    selectedElementSourceSnippet,
+    setSelectedElementSourceSnippet,
+    hoveredElement,
+    setHoveredElement,
+    screenshotElement,
+    setScreenshotElement,
+    capturedScreenshot,
+    setCapturedScreenshot,
+    showScreenshotPreview,
+    setShowScreenshotPreview,
+    elementStyles,
+    setElementStyles,
+    elementStylesRef,
+  } = useSelectionState();
 
   // Steering Questions - must be before the useEffect that uses refreshQuestions
   const { questions, dismissQuestion, selectQuestion, refreshQuestions } = useSteeringQuestions();
@@ -853,58 +788,61 @@ export default function App() {
 
   // Ref to hold file modification handler (allows late binding after addEditedFile is defined)
   const fileModificationHandlerRef = useRef<(event: FileModificationEvent) => void>(() => {});
-  const [hoveredElement, setHoveredElement] = useState<{ element: SelectedElement; rect: { top: number; left: number; width: number; height: number } } | null>(null);
-  const [screenshotElement, setScreenshotElement] = useState<SelectedElement | null>(null);
-  const [capturedScreenshot, setCapturedScreenshot] = useState<string | null>(null);
-  const [showScreenshotPreview, setShowScreenshotPreview] = useState(false);
 
   const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isFloatingToolbarVisible, setIsFloatingToolbarVisible] = useState(true);
-  const [sidebarWidth, setSidebarWidth] = useState(420);
-  const [isResizing, setIsResizing] = useState(false);
 
-  // Left panel (Layers) state
-  const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(false);
-  const isLeftPanelOpenRef = useRef(false);
-  useEffect(() => { isLeftPanelOpenRef.current = isLeftPanelOpen; }, [isLeftPanelOpen]);
-  const [leftPanelWidth, setLeftPanelWidth] = useState(280);
-  const [isLeftResizing, setIsLeftResizing] = useState(false);
+  // Sidebar state (left and right panels)
+  const {
+    isSidebarOpen,
+    setIsSidebarOpen,
+    sidebarWidth,
+    setSidebarWidth,
+    isResizing,
+    setIsResizing,
+    isLeftPanelOpen,
+    setIsLeftPanelOpen,
+    isLeftPanelOpenRef,
+    leftPanelWidth,
+    setLeftPanelWidth,
+    isLeftResizing,
+    setIsLeftResizing,
+  } = useSidebarState();
 
   // Code editor state (center pane)
-  const [isEditorMode, setIsEditorMode] = useState(false);
-  const [editorFilePath, setEditorFilePath] = useState<string | null>(null);
-  const [editorFileContent, setEditorFileContent] = useState<string>('');
-  const [editorInitialLine, setEditorInitialLine] = useState<number | undefined>(undefined);
-  const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
+  const {
+    isEditorMode,
+    editorFilePath,
+    editorFileContent,
+    editorInitialLine,
+    hasUnsavedEdits,
+    setIsEditorMode,
+    setEditorFilePath,
+    setEditorFileContent,
+    setEditorInitialLine,
+    setHasUnsavedEdits,
+  } = useEditorState()
 
-  // Keyboard shortcut: Escape to exit editor mode
-  useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isEditorMode) {
-        setIsEditorMode(false)
-      }
-    }
-    window.addEventListener('keydown', handleEscape)
-    return () => window.removeEventListener('keydown', handleEscape)
-  }, [isEditorMode])
-  const [layersTreeData, setLayersTreeData] = useState<import('./components/ComponentTree').TreeNode | null>(null);
-  const layersTreeDataRef = useRef<import('./components/ComponentTree').TreeNode | null>(null);
-  useEffect(() => { layersTreeDataRef.current = layersTreeData; }, [layersTreeData]);
-  const [selectedTreeNodeId, setSelectedTreeNodeId] = useState<string | null>(null);
-  const [isLayersLoading, setIsLayersLoading] = useState(false);
-  const isLayersLoadingRef = useRef(false)
-  useEffect(() => { isLayersLoadingRef.current = isLayersLoading }, [isLayersLoading])
+  // Layers panel state (component tree)
+  const {
+    layersTreeData,
+    setLayersTreeData,
+    layersTreeDataRef,
+    selectedTreeNodeId,
+    setSelectedTreeNodeId,
+    isLayersLoading,
+    setIsLayersLoading,
+    isLayersLoadingRef,
+    selectedLayerElementNumber,
+    setSelectedLayerElementNumber,
+    selectedLayerElementNumberRef,
+    selectedLayerElementName,
+    setSelectedLayerElementName,
+    layersTreeStaleRef,
+  } = useLayersPanel()
+
   const [multiViewportData, setMultiViewportData] = useState<Array<{ id: string; windowType: string; devicePresetId?: string }>>([]);
-  const [selectedLayerElementNumber, setSelectedLayerElementNumber] = useState<number | null>(null)
-  const [selectedLayerElementName, setSelectedLayerElementName] = useState<string | null>(null)
-  const selectedLayerElementNumberRef = useRef<number | null>(null)
-  useEffect(() => { selectedLayerElementNumberRef.current = selectedLayerElementNumber }, [selectedLayerElementNumber])
-  const layersTreeStaleRef = useRef(false)
 
-  const [elementStyles, setElementStyles] = useState<ElementStyles>(DEFAULT_ELEMENT_STYLES)
-  const elementStylesRef = useRef<ElementStyles>(DEFAULT_ELEMENT_STYLES)
-  useEffect(() => { elementStylesRef.current = elementStyles }, [elementStyles])
   const applyElementStylesTimerRef = useRef<number | null>(null)
   const [selectedLayerComputedStyles, setSelectedLayerComputedStyles] = useState<Record<string, string> | null>(null)
   const [selectedLayerAttributes, setSelectedLayerAttributes] = useState<Record<string, string> | null>(null)
@@ -1100,7 +1038,26 @@ export default function App() {
   const [directoryFiles, setDirectoryFiles] = useState<Array<{name: string; path: string; isDirectory: boolean}>>([]);
   const [currentDirectory, setCurrentDirectory] = useState<string>('');
   const [directoryStack, setDirectoryStack] = useState<string[]>([]);
-  const [autocompleteIndex, setAutocompleteIndex] = useState(0);
+
+  // Autocomplete State (commands, chips, shared index)
+  const {
+    showCommandAutocomplete,
+    setShowCommandAutocomplete,
+    commandSearchQuery,
+    setCommandSearchQuery,
+    contextChips,
+    setContextChips,
+    recentContextChips,
+    setRecentContextChips,
+    showChipAutocomplete,
+    setShowChipAutocomplete,
+    chipSearchQuery,
+    setChipSearchQuery,
+    chipSearchType,
+    setChipSearchType,
+    autocompleteIndex,
+    setAutocompleteIndex,
+  } = useAutocompleteState();
 
   // Helper to format file display: "LandingPage.tsx / Button (1426-31)"
   const formatFileDisplay = useCallback((file: typeof selectedFiles[0]): string => {
@@ -1139,18 +1096,8 @@ export default function App() {
     return display;
   }, []);
 
-  // Slash Command State (/ commands)
+  // Slash Command State (/ commands) - only availableCommands remains here
   const [availableCommands, setAvailableCommands] = useState<Array<{name: string; prompt: string}>>([]);
-  const [commandSearchQuery, setCommandSearchQuery] = useState('');
-  const [showCommandAutocomplete, setShowCommandAutocomplete] = useState(false);
-
-  // Context Chips State (+ for include, - for exclude)
-  // +aisdk = include context, -gpt-4 = exclude/negative context
-  const [contextChips, setContextChips] = useState<Array<{name: string; type: 'include' | 'exclude'}>>([]);
-  const [recentContextChips, setRecentContextChips] = useState<Array<{name: string; type: 'include' | 'exclude'}>>([]);
-  const [showChipAutocomplete, setShowChipAutocomplete] = useState(false);
-  const [chipSearchQuery, setChipSearchQuery] = useState('');
-  const [chipSearchType, setChipSearchType] = useState<'include' | 'exclude'>('include');
 
   // Thinking/Reasoning Mode State
   type ThinkingLevel = 'off' | 'low' | 'med' | 'high' | 'ultrathink';
@@ -1219,8 +1166,13 @@ export default function App() {
     ? adjustBrightness(themeColors.background, isThemeDark ? 10 : -3)
     : (isDarkMode ? '#1a1a1a' : '#fafaf9');
 
-  // Settings Dialog State
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  // Dialog State - centralized via useDialogState hook
+  const {
+    isSettingsOpen,
+    setIsSettingsOpen,
+    showMgrepOnboarding,
+    setShowMgrepOnboarding,
+  } = useDialogState()
 
   // Fast Apply Status (Pro Feature)
   const [fastApplyReady, setFastApplyReady] = useState(false);
@@ -1288,13 +1240,28 @@ export default function App() {
       document.removeEventListener('mousemove', handleMouseMove);
     };
   }, [extensionSharing, activeTab?.url]);
-  // Mgrep Onboarding State
-  const [showMgrepOnboarding, setShowMgrepOnboarding] = useState(false);
 
-  // Patch Approval State
-  const [pendingPatches, setPendingPatches] = useState<SourcePatch[]>([]);
-  const [currentPatchIndex, setCurrentPatchIndex] = useState(0);
-  const [isApprovalDialogOpen, setIsApprovalDialogOpen] = useState(false);
+  // Patch Approval State - centralized via usePatchState hook
+  const {
+    pendingPatch,
+    setPendingPatch,
+    isPreviewingPatchOriginal,
+    setIsPreviewingPatchOriginal,
+    pendingDOMApproval,
+    setPendingDOMApproval,
+    cancelledApprovalsRef,
+    domApprovalPatchTimeoutsRef,
+    domApprovalPatchTimeoutTokensRef,
+    isGeneratingSourcePatch,
+    setIsGeneratingSourcePatch,
+    clearDomApprovalPatchTimeout,
+    pendingPatches,
+    setPendingPatches,
+    currentPatchIndex,
+    setCurrentPatchIndex,
+    isApprovalDialogOpen,
+    setIsApprovalDialogOpen,
+  } = usePatchState()
 
   // App Settings State - centralized via useAppSettings hook
   const { appSettings, setAppSettings, appSettingsRef } = useAppSettings()
@@ -1410,55 +1377,6 @@ export default function App() {
       return () => clearTimeout(timer)
     }
   }, [completedToolCalls])
-
-  // Pending UI Patch State - stores patches that need user confirmation
-  interface PendingPatch {
-    id: string
-    filePath: string
-    originalContent: string
-    patchedContent: string
-    description: string
-    elementSelector?: string  // CSS selector for the modified element
-    cssChanges?: Record<string, string>  // CSS property changes made
-    undoCode?: string  // JavaScript to revert DOM changes
-    applyCode?: string  // JavaScript to re-apply DOM changes
-    generatedBy?: 'fast-apply' | 'gemini' | 'fast-path'  // Which method generated the patch
-    durationMs?: number  // How long it took to generate
-  }
-  const [pendingPatch, setPendingPatch] = useState<PendingPatch | null>(null)
-  const [isPreviewingPatchOriginal, setIsPreviewingPatchOriginal] = useState(false)
-
-  // Pending DOM Approval State - stores DOM changes that need user approval before source patch
-  interface PendingDOMApproval {
-    id: string;
-    element: SelectedElement
-    cssChanges: Record<string, string>
-    textChange?: string
-    srcChange?: { oldSrc: string; newSrc: string }  // For image src replacement
-    description: string
-    undoCode: string
-    applyCode: string
-    userRequest: string
-    patchStatus: 'preparing' | 'ready' | 'error'
-    patch?: PendingPatch
-    patchError?: string
-    userApproved?: boolean  // Set to true when user clicks Accept, triggers auto-apply when patch is ready
-  }
-  const [pendingDOMApproval, setPendingDOMApproval] = useState<PendingDOMApproval | null>(null)
-  const cancelledApprovalsRef = useRef<Set<string>>(new Set())
-  // Per-approval timeout tracking to avoid false timeout logs after success/cancel.
-  const domApprovalPatchTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
-  const domApprovalPatchTimeoutTokensRef = useRef<Map<string, string>>(new Map())
-  const [isGeneratingSourcePatch, setIsGeneratingSourcePatch] = useState(false)
-
-  const clearDomApprovalPatchTimeout = useCallback((approvalId: string) => {
-    const handle = domApprovalPatchTimeoutsRef.current.get(approvalId)
-    if (handle) {
-      clearTimeout(handle)
-      domApprovalPatchTimeoutsRef.current.delete(approvalId)
-    }
-    domApprovalPatchTimeoutTokensRef.current.delete(approvalId)
-  }, [])
 
   type DomEditTelemetryEvent =
     | 'preview_applied'
@@ -1871,55 +1789,42 @@ export default function App() {
     handleCustomDevice,
   } = useViewportMode({ displayPpi: appSettings.displayPpi })
 
-  // Console Panel State
-  type ConsoleLogEntry = { type: 'log' | 'warn' | 'error' | 'info'; message: string; timestamp: Date }
-  const [consoleLogs, setConsoleLogs] = useState<Array<{type: 'log' | 'warn' | 'error' | 'info'; message: string; timestamp: Date}>>([]);
-  const [isConsolePanelOpen, setIsConsolePanelOpen] = useState(false);
-  const [consoleHeight, setConsoleHeight] = useState(192); // 192px = h-48
-  const [consoleFilters, setConsoleFilters] = useState<Set<'log' | 'warn' | 'error' | 'info'>>(new Set());
-  const [isConsoleResizing, setIsConsoleResizing] = useState(false);
-  const [consolePanelTab, setConsolePanelTab] = useState<'console' | 'terminal'>('console');
+  // Console Panel State (extracted to useConsolePanel hook)
+  const {
+    consoleLogs,
+    setConsoleLogs,
+    isConsolePanelOpen,
+    setIsConsolePanelOpen,
+    consoleHeight,
+    setConsoleHeight,
+    consoleFilters,
+    setConsoleFilters,
+    filteredLogs,
+    toggleConsoleFilter,
+    clearConsoleFilters,
+    isConsoleResizing,
+    setIsConsoleResizing,
+    consoleResizeStartY,
+    consoleResizeStartHeight,
+    handleConsoleResizeStart,
+    consolePanelTab,
+    setConsolePanelTab,
+    consoleEndRef,
+    selectedLogIndices,
+    setSelectedLogIndices,
+    lastClickedLogIndex,
+    handleLogRowClick,
+    selectedLogs,
+    consoleLogBufferRef,
+    consoleLogFlushTimerRef,
+    flushConsoleLogBuffer,
+    enqueueConsoleLog,
+    handleClearConsole,
+  } = useConsolePanel()
+
+  // Terminal refs (terminal is separate from console panel)
   const terminalContainerRef = useRef<HTMLDivElement>(null);
   const terminalInstanceRef = useRef<unknown>(null);
-  const consoleResizeStartY = useRef<number>(0);
-  const consoleResizeStartHeight = useRef<number>(192);
-  const consoleEndRef = useRef<HTMLDivElement>(null);
-  const [selectedLogIndices, setSelectedLogIndices] = useState<Set<number>>(new Set());
-  const lastClickedLogIndex = useRef<number | null>(null);
-  const consoleLogBufferRef = useRef<ConsoleLogEntry[]>([])
-  const consoleLogFlushTimerRef = useRef<number | null>(null)
-
-  const flushConsoleLogBuffer = useCallback(() => {
-    if (consoleLogFlushTimerRef.current) {
-      window.clearTimeout(consoleLogFlushTimerRef.current)
-      consoleLogFlushTimerRef.current = null
-    }
-    if (consoleLogBufferRef.current.length === 0) return
-    const buffered = consoleLogBufferRef.current
-    consoleLogBufferRef.current = []
-
-    setConsoleLogs(prev => {
-      const next = [...prev, ...buffered]
-      // Keep at most 200 entries to bound render cost
-      return next.length > 200 ? next.slice(-200) : next
-    })
-  }, [])
-
-  const enqueueConsoleLog = useCallback((entry: ConsoleLogEntry) => {
-    consoleLogBufferRef.current.push(entry)
-    if (consoleLogFlushTimerRef.current) return
-    // Batch multiple console-message events into a single React update
-    consoleLogFlushTimerRef.current = window.setTimeout(flushConsoleLogBuffer, 100)
-  }, [flushConsoleLogBuffer])
-
-  useEffect(() => {
-    return () => {
-      if (consoleLogFlushTimerRef.current) {
-        window.clearTimeout(consoleLogFlushTimerRef.current)
-        consoleLogFlushTimerRef.current = null
-      }
-    }
-  }, [])
 
   // Debug Mode - shows all activity in console panel
   const [debugMode, setDebugMode] = useState(false);
@@ -2147,14 +2052,7 @@ export default function App() {
     };
   }, [isResizing]);
 
-  // Console panel resize handlers
-  const handleConsoleResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    consoleResizeStartY.current = e.clientY;
-    consoleResizeStartHeight.current = consoleHeight;
-    setIsConsoleResizing(true);
-  }, [consoleHeight]);
-
+  // Console panel resize effect (handles mouse move/up events)
   useEffect(() => {
     if (!isConsoleResizing) return;
 
@@ -6331,12 +6229,7 @@ export default function App() {
     return callback;
   }, [setupWebviewHandlers]);
 
-  // Auto-scroll console panel to bottom when new logs arrive
-  useEffect(() => {
-    if (consoleEndRef.current && isConsolePanelOpen) {
-      consoleEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [consoleLogs, isConsolePanelOpen]);
+  // Auto-scroll for console is handled in useConsolePanel hook
 
   // Initialize ghostty terminal when terminal tab is selected
   useEffect(() => {
@@ -6451,41 +6344,6 @@ export default function App() {
     }
   }, [consoleHeight, consolePanelTab])
 
-  // Handle console log row click with shift-click range selection
-  const handleLogRowClick = useCallback((index: number, event: React.MouseEvent) => {
-    setSelectedLogIndices(prev => {
-      const newSet = new Set(prev);
-
-      if (event.shiftKey && lastClickedLogIndex.current !== null) {
-        // Shift-click: select range from last clicked to current
-        const start = Math.min(lastClickedLogIndex.current, index);
-        const end = Math.max(lastClickedLogIndex.current, index);
-        for (let i = start; i <= end; i++) {
-          newSet.add(i);
-        }
-      } else {
-        // Regular click: toggle single item
-        if (newSet.has(index)) {
-          newSet.delete(index);
-        } else {
-          newSet.add(index);
-        }
-        lastClickedLogIndex.current = index;
-      }
-
-      return newSet;
-    });
-  }, []);
-
-  // Get selected logs content for chat chip
-  const selectedLogs = useMemo(() => {
-    if (selectedLogIndices.size === 0) return null;
-    return Array.from(selectedLogIndices)
-      .sort((a, b) => a - b)
-      .map(i => consoleLogs[i])
-      .filter(Boolean);
-  }, [selectedLogIndices, consoleLogs]);
-
   // Ref for updateCodingContext to avoid triggering effect when function identity changes
   const updateCodingContextRef = useRef(updateCodingContext)
   updateCodingContextRef.current = updateCodingContext
@@ -6503,31 +6361,6 @@ export default function App() {
       recentMessages: messages.slice(-10) as any[],
     });
   }, [selectedElement, selectedFiles, selectedLogs, activeTab?.projectPath, messages]);
-
-  // Clear selected logs when console is cleared
-  const handleClearConsole = useCallback(() => {
-    setConsoleLogs([]);
-    setSelectedLogIndices(new Set());
-    lastClickedLogIndex.current = null;
-  }, []);
-
-  // Toggle console filter
-  const toggleConsoleFilter = useCallback((type: 'log' | 'warn' | 'error' | 'info') => {
-    setConsoleFilters(prev => {
-      const next = new Set(prev);
-      if (next.has(type)) {
-        next.delete(type);
-      } else {
-        next.add(type);
-      }
-      return next;
-    });
-  }, []);
-
-  // Clear all console filters (show all)
-  const clearConsoleFilters = useCallback(() => {
-    setConsoleFilters(new Set());
-  }, []);
 
   // Instant web search for console errors
   const performInstantSearch = useCallback(async (query: string) => {
@@ -6615,11 +6448,8 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isConsolePanelOpen, selectedLogIndices, consoleLogs, setInput]);
 
-  // Filtered console logs
-  const filteredConsoleLogs = useMemo(() => {
-    if (consoleFilters.size === 0) return consoleLogs;
-    return consoleLogs.filter(log => consoleFilters.has(log.type));
-  }, [consoleLogs, consoleFilters]);
+  // filteredLogs is now provided by useConsolePanel hook
+  const filteredConsoleLogs = filteredLogs;
 
   // Click-outside handler for thinking popover
   useEffect(() => {
