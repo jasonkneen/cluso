@@ -6,6 +6,8 @@
 
 export { useViewportMode, ZOOM_OPTIONS, VIEWPORT_WIDTHS, DEVICE_PRESETS } from './useViewportMode'
 export type { UseViewportModeReturn, UseViewportModeOptions } from './useViewportMode'
+export { useMultiViewportData } from './useMultiViewportData'
+export type { UseMultiViewportDataReturn } from './useMultiViewportData'
 export type {
   ViewportSize,
   ZoomLevel,
@@ -13,4 +15,6 @@ export type {
   ViewportControls,
   MultiViewportState,
   DevicePreviewState,
+  MultiViewportDataItem,
+  MultiViewportData,
 } from './types'

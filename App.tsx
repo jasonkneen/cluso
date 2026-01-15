@@ -51,8 +51,9 @@ import { useSteeringQuestions } from './hooks/useSteeringQuestions';
 import { SteeringQuestions } from './components/SteeringQuestions';
 import { useChatState } from './features/chat';
 import { useEditorState } from './features/editor';
-import { useViewportMode } from './features/viewport';
+import { useViewportMode, useMultiViewportData } from './features/viewport';
 import type { DevicePreset } from './features/viewport';
+import { useWebviewState } from './features/webview';
 import { useAppSettings } from './features/settings';
 import { useLayerDetailsState, useLayersPanel } from './features/layers';
 import { useConsolePanel } from './features/console';
@@ -66,8 +67,34 @@ import type { SelectedElementSourceSnippet } from './features/selection';
 import { useFileBrowserState } from './features/files';
 import type { EditedFile } from './features/files';
 import { useDialogState } from './features/dialogs';
+import { useProjectState } from './features/project';
+import type { SetupProject } from './features/project';
+import { useExtensionState } from './features/extension';
+import type { ExtensionCursor } from './features/extension';
 import { useMediaState } from './features/media';
 import { useGitPanelState } from './features/git';
+import { useThemeState } from './features/theme';
+import { useTabState } from './features/tabs';
+import { useInspectorState } from './features/inspector';
+import { useSearchState } from './features/search';
+import { useAttachmentState } from './features/attachments';
+import { useModelState } from './features/model';
+import type { ThinkingLevel } from './features/model';
+import { useTodoOverlayState } from './features/todos';
+import { usePreviewState } from './features/preview';
+import { useScrollState } from './features/scroll';
+import { useAgentPanelState } from './features/agent';
+import type { PreviewIntent } from './features/preview';
+import { useDebugState } from './features/debug';
+import { useAISelectionState } from './features/ai-selection';
+import type { AISelectedElement, DisplayedSourceCode } from './features/ai-selection';
+import { useFileBrowserPanelState } from './features/file-browser';
+import type { FileBrowserPanel, FileBrowserItem } from './features/file-browser';
+import { useCommandsState } from './features/commands';
+import { useStatusState } from './features/status';
+import { usePendingChangeState } from './features/changes';
+import { useErrorPanelState } from './features/error-panel';
+import { useClarifyingState } from './features/clarifying';
 import { generateTurnId } from './utils/turnUtils';
 import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler';
 import { PatchApprovalDialog } from './components/PatchApprovalDialog';
@@ -218,25 +245,45 @@ interface WebviewElement extends HTMLElement {
 }
 
 export default function App() {
-  // Window state - for multi-window project locking
-  const [windowId, setWindowId] = useState<number | null>(null);
-  const [lockedProjectPath, setLockedProjectPath] = useState<string | null>(null);
-  const [lockedProjectName, setLockedProjectName] = useState<string | null>(null);
+  // Project State - window locking, setup flow, directory navigation
+  const {
+    windowId,
+    setWindowId,
+    lockedProjectPath,
+    setLockedProjectPath,
+    lockedProjectName,
+    setLockedProjectName,
+    setupProject,
+    setSetupProject,
+    directoryStack,
+    setDirectoryStack,
+  } = useProjectState();
 
-  // Tab State - manages multiple browser tabs
-  // First tab starts with the default URL so browser loads immediately
-  const [tabs, setTabs] = useState<TabState[]>(() => [{
-    ...createNewTab('tab-1', 'browser'),
-    url: DEFAULT_URL,
-    title: 'New Tab'
-  }]);
-  const [activeTabId, setActiveTabId] = useState('tab-1');
+  // Tab State - extracted to useTabState hook
+  const tabState = useTabState();
+  const {
+    tabs,
+    setTabs,
+    activeTabId,
+    setActiveTabId,
+    activeTab,
+    handleNewTab,
+    handleSelectTab,
+    handleReorderTabs,
+    updateCurrentTab,
+    updateTab,
+    tabsRef,
+    activeTabIdRef,
+    tabDataLoadedRef,
+  } = tabState;
 
-  // Get current active tab
-  const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+  // Error panel state - centralized via useErrorPanelState hook
+  const {
+    isVisible: errorPanelVisible,
+    setIsVisible: setErrorPanelVisible,
+  } = useErrorPanelState();
 
   // Error prefetch - monitors console for errors and provides solutions
-  const [errorPanelVisible, setErrorPanelVisible] = useState(false);
   const { errors, isSearching, clearErrors, removeError, searchForSolution } = useErrorPrefetch({
     onErrorDetected: (error) => {
       console.log('[App] Error detected:', error.category, '-', error.message.substring(0, 100));
@@ -252,13 +299,7 @@ export default function App() {
     debounceMs: 1000,
   });
 
-  // Tab management functions
-  const handleNewTab = useCallback((type: 'browser' | 'kanban' | 'todos' | 'notes' = 'browser') => {
-    const newTab = createNewTab(undefined, type);
-    setTabs(prev => [...prev, newTab]);
-    setActiveTabId(newTab.id);
-  }, []);
-
+  // Tab close handler - needs extra dependencies beyond useTabState hook
   const handleCloseTab = useCallback((tabId: string) => {
     // Find the tab to check if it's a project tab
     const tabToClose = tabs.find(t => t.id === tabId);
@@ -296,19 +337,7 @@ export default function App() {
         console.error('[App] Failed to stop file watcher:', err);
       });
     }
-  }, [activeTabId, tabs]);
-
-  const handleSelectTab = useCallback((tabId: string) => {
-    setActiveTabId(tabId);
-  }, []);
-
-  const handleReorderTabs = useCallback((reorderedTabs: Tab[]) => {
-    // Map the reordered Tab[] back to TabState[] preserving all properties
-    setTabs(prev => {
-      const tabMap = new Map(prev.map(t => [t.id, t]));
-      return reorderedTabs.map(t => tabMap.get(t.id)!).filter(Boolean);
-    });
-  }, []);
+  }, [activeTabId, tabs, setTabs, setActiveTabId]);
 
   // Sync URL input when switching tabs
   useEffect(() => {
@@ -379,31 +408,10 @@ export default function App() {
     loadTabData();
   }, []);
 
-  // Update current tab state helper
-  const updateCurrentTab = useCallback((updates: Partial<TabState>) => {
-    setTabs(prev => prev.map(tab =>
-      tab.id === activeTabId ? { ...tab, ...updates } : tab
-    ));
-  }, [activeTabId]);
-
-  // Update any tab by ID (for webview event handlers)
-  const updateTab = useCallback((tabId: string, updates: Partial<TabState>) => {
-    setTabs(prev => prev.map(tab =>
-      tab.id === tabId ? { ...tab, ...updates } : tab
-    ));
-  }, []);
-
   // Tab-specific data update handlers with persistence
   const saveKanbanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const saveTodosTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const saveNotesTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Use refs to avoid stale closures in debounced callbacks
-  const tabsRef = useRef(tabs);
-  const activeTabIdRef = useRef(activeTabId);
-  const tabDataLoadedRef = useRef(false); // Prevent double-loading in StrictMode
-  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
-  useEffect(() => { activeTabIdRef.current = activeTabId; }, [activeTabId]);
 
   // Initialize window info on mount (for multi-window project locking)
   useEffect(() => {
@@ -770,7 +778,16 @@ export default function App() {
     completedToolCalls,
     setCompletedToolCalls,
   } = useChatState();
-  const [previewIntent, setPreviewIntent] = useState<{ type: string; label: string; secondaryTypes?: string[]; secondaryLabels?: string[] } | null>(null);
+
+  // Preview/Popup state - extracted to usePreviewState hook
+  const {
+    previewIntent,
+    setPreviewIntent,
+    popupInput,
+    setPopupInput,
+    showElementChat,
+    setShowElementChat,
+  } = usePreviewState();
 
   // Selection States (extracted to useSelectionState hook)
   const {
@@ -875,7 +892,7 @@ export default function App() {
     layersTreeStaleRef,
   } = useLayersPanel()
 
-  const [multiViewportData, setMultiViewportData] = useState<Array<{ id: string; windowType: string; devicePresetId?: string }>>([]);
+  const { multiViewportData, setMultiViewportData } = useMultiViewportData();
 
   const applyElementStylesTimerRef = useRef<number | null>(null)
   const {
@@ -1007,56 +1024,69 @@ export default function App() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  // Scroll state - extracted to useScrollState hook
+  const { isAutoScrollEnabled, setIsAutoScrollEnabled, showScrollToBottom, setShowScrollToBottom } = useScrollState();
   const isUserScrollingRef = useRef(false);
 
-  // Inspector & Context State
-  const [isInspectorActive, setIsInspectorActive] = useState(false);
-  const [isScreenshotActive, setIsScreenshotActive] = useState(false);
-  const [isMoveActive, setIsMoveActive] = useState(false);
+  // Inspector & Context State - extracted to useInspectorState hook
+  const inspectorState = useInspectorState();
+  const {
+    isInspectorActive,
+    setIsInspectorActive,
+    isScreenshotActive,
+    setIsScreenshotActive,
+    isMoveActive,
+    setIsMoveActive,
+    moveTargetPosition,
+    setMoveTargetPosition,
+    isInspectorActiveRef,
+    isScreenshotActiveRef,
+    isMoveActiveRef,
+    preInspectorSettingsRef,
+  } = inspectorState;
 
-  // Move mode state - tracks target position for element repositioning
-  const [moveTargetPosition, setMoveTargetPosition] = useState<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>(null);
-
-  // Refs to track current state values for closures (webview event handlers)
-  const isInspectorActiveRef = useRef(false);
-  const isScreenshotActiveRef = useRef(false);
-  const isMoveActiveRef = useRef(false);
-
-  // Store previous model/thinking settings when inspector is activated
-  const preInspectorSettingsRef = useRef<{
-    model: typeof MODELS[0];
-    thinkingLevel: 'off' | 'low' | 'med' | 'high' | 'ultrathink';
-  } | null>(null);
-
-  const [logs, setLogs] = useState<string[]>([]);
-  const [attachLogs, setAttachLogs] = useState(false);
-  const [attachedImages, setAttachedImages] = useState<string[]>([]);
-  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  // Attachment State - extracted to useAttachmentState hook
+  const attachmentState = useAttachmentState();
+  const {
+    logs,
+    setLogs,
+    attachLogs,
+    setAttachLogs,
+    attachedImages,
+    setAttachedImages,
+    isDraggingOver,
+    setIsDraggingOver,
+    selectedFiles,
+    setSelectedFiles,
+  } = attachmentState;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Model State - default to Claude Haiku 4.5
-  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
-  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  // Model State - extracted to useModelState hook
+  const modelState = useModelState();
+  const {
+    selectedModel,
+    setSelectedModel,
+    isModelMenuOpen,
+    setIsModelMenuOpen,
+    thinkingLevel,
+    setThinkingLevel,
+    showThinkingPopover,
+    setShowThinkingPopover,
+  } = modelState;
 
-  // Popup Input State
-  const [popupInput, setPopupInput] = useState('');
-  const [showElementChat, setShowElementChat] = useState(false);
-
-  // Add Todo State (for mini chat popup)
-  const [isAddingTodo, setIsAddingTodo] = useState(false);
-  const [todoPriority, setTodoPriority] = useState<'low' | 'medium' | 'high'>('medium');
-  const [todoDueDate, setTodoDueDate] = useState<string>('');
-
-  // Todo Overlay State
-  const [showTodoOverlay, setShowTodoOverlay] = useState(false);
+  // Todo Overlay State - extracted to useTodoOverlayState hook
+  const todoOverlayState = useTodoOverlayState();
+  const {
+    isAddingTodo,
+    setIsAddingTodo,
+    todoPriority,
+    setTodoPriority,
+    todoDueDate,
+    setTodoDueDate,
+    showTodoOverlay,
+    setShowTodoOverlay,
+  } = todoOverlayState;
 
   // Auto-show floating chat when element is selected
   useEffect(() => {
@@ -1064,17 +1094,6 @@ export default function App() {
       setShowElementChat(true);
     }
   }, [selectedElement, isSidebarOpen]);
-
-  // File Selection State (@ commands)
-  const [selectedFiles, setSelectedFiles] = useState<Array<{
-    path: string;
-    content: string;
-    displayName?: string;  // Clean filename for display (no query params)
-    elementType?: string;  // e.g., "Button", "Section", "Component"
-    lineStart?: number;
-    lineEnd?: number;
-  }>>([]);
-  const [directoryStack, setDirectoryStack] = useState<string[]>([]);
 
   // Autocomplete State (commands, chips, shared index)
   const {
@@ -1133,13 +1152,8 @@ export default function App() {
     return display;
   }, []);
 
-  // Slash Command State (/ commands) - only availableCommands remains here
-  const [availableCommands, setAvailableCommands] = useState<Array<{name: string; prompt: string}>>([]);
-
-  // Thinking/Reasoning Mode State
-  type ThinkingLevel = 'off' | 'low' | 'med' | 'high' | 'ultrathink';
-  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('off');
-  const [showThinkingPopover, setShowThinkingPopover] = useState(false);
+  // Slash Command State (/ commands) - extracted to useCommandsState hook
+  const { availableCommands, setAvailableCommands } = useCommandsState();
 
   // Git State
   const git = useGit();
@@ -1164,33 +1178,26 @@ export default function App() {
   // Tool Execution Tracking
   const toolTracker = useToolTracker();
 
-  // Cluso Agent - initialized below after appSettings
-  const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false);
+  // Cluso Agent - extracted to useAgentPanelState hook
+  const { isAgentPanelOpen, setIsAgentPanelOpen } = useAgentPanelState();
 
-  // Project Setup Flow State
-  const [setupProject, setSetupProject] = useState<{ path: string; name: string; port?: number } | null>(null);
-
-  // Web Search Results State (for console log error searching)
-  interface SearchResult {
-    title: string;
-    url: string;
-    snippet: string;
-  }
-  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isFileSearching, setIsFileSearching] = useState(false);
-  const [showSearchPopover, setShowSearchPopover] = useState(false);
-  const [attachedSearchResults, setAttachedSearchResults] = useState<SearchResult[] | null>(null); // Chip state
+  // Web Search Results State - extracted to useSearchState hook
+  const searchState = useSearchState();
+  const {
+    searchResults,
+    setSearchResults,
+    searchQuery,
+    setSearchQuery,
+    isFileSearching,
+    setIsFileSearching,
+    showSearchPopover,
+    setShowSearchPopover,
+    attachedSearchResults,
+    setAttachedSearchResults,
+  } = searchState;
 
   // Dark Mode State
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('darkMode');
-      if (saved !== null) return saved === 'true';
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
-    }
-    return false;
-  });
+  const { isDarkMode, setIsDarkMode } = useThemeState();
 
   // Theme context - get current theme colors
   const { currentTheme } = useTheme();
@@ -1222,37 +1229,25 @@ export default function App() {
     setShowMgrepOnboarding,
   } = useDialogState()
 
-  // Fast Apply Status (Pro Feature)
-  const [fastApplyReady, setFastApplyReady] = useState(false);
+  // Status Indicators State
+  const {
+    fastApplyReady,
+    setFastApplyReady,
+    fileWatcherActive,
+    setFileWatcherActive,
+    indexingStatus,
+    setIndexingStatus,
+  } = useStatusState();
 
-  // File Watcher Status
-  const [fileWatcherActive, setFileWatcherActive] = useState(false);
-
-  // Indexing Status
-  const [indexingStatus, setIndexingStatus] = useState<'idle' | 'indexing' | 'indexed'>('idle');
-
-  // Extension Bridge Status (Chrome extension connected)
-  const [extensionConnected, setExtensionConnected] = useState(false);
-
-  // Extension cursor sharing state
-  const [extensionSharing, setExtensionSharing] = useState(false);
-  const [extensionCursor, setExtensionCursor] = useState<{
-    elementAnchor?: {
-      selector: string;
-      relativeX: number;
-      relativeY: number;
-      elementText?: string;
-    };
-    viewportPercentX?: number;
-    viewportPercentY?: number;
-    pageX: number; pageY: number;
-    clientX: number; clientY: number;
-    scrollX: number; scrollY: number;
-    viewportWidth: number; viewportHeight: number;
-    documentWidth: number; documentHeight: number;
-    pageUrl: string;
-    timestamp?: number;
-  } | null>(null);
+  // Extension Bridge State - Chrome extension connection and cursor sharing
+  const {
+    extensionConnected,
+    setExtensionConnected,
+    extensionSharing,
+    setExtensionSharing,
+    extensionCursor,
+    setExtensionCursor,
+  } = useExtensionState();
 
   // Send Cluso's cursor to extension when sharing is active
   useEffect(() => {
@@ -1725,35 +1720,13 @@ export default function App() {
     }))
   }, [mcpTools])
 
-  // Clarifying Questions State
-  const [pendingClarifyingQuestion, setPendingClarifyingQuestion] = useState<ClarifyingQuestionData | null>(null)
-  const clarifyingQuestionResolverRef = useRef<((response: string | string[]) => void) | null>(null)
-
-  // Handler for clarifying questions from AI
-  const handleAskClarifyingQuestion = useCallback((question: ClarifyingQuestionData): Promise<string | string[]> => {
-    return new Promise((resolve) => {
-      clarifyingQuestionResolverRef.current = resolve
-      setPendingClarifyingQuestion(question)
-    })
-  }, [])
-
-  // Handle clarifying question submission
-  const handleClarifyingQuestionSubmit = useCallback((questionId: string, response: string | string[]) => {
-    if (clarifyingQuestionResolverRef.current) {
-      clarifyingQuestionResolverRef.current(response)
-      clarifyingQuestionResolverRef.current = null
-    }
-    setPendingClarifyingQuestion(null)
-  }, [])
-
-  // Handle clarifying question skip
-  const handleClarifyingQuestionSkip = useCallback((questionId: string) => {
-    if (clarifyingQuestionResolverRef.current) {
-      clarifyingQuestionResolverRef.current('skipped')
-      clarifyingQuestionResolverRef.current = null
-    }
-    setPendingClarifyingQuestion(null)
-  }, [])
+  // Clarifying Questions State - centralized via useClarifyingState hook
+  const {
+    pendingQuestion: pendingClarifyingQuestion,
+    handleAskClarifyingQuestion,
+    handleClarifyingQuestionSubmit,
+    handleClarifyingQuestionSkip,
+  } = useClarifyingState()
 
   // Initialize Coding Agent hook with MCP tools
   const {
@@ -1774,16 +1747,13 @@ export default function App() {
     onAskClarifyingQuestion: handleAskClarifyingQuestion,
   });
 
-  // Pending Code Change State (for preview/approve/reject)
-  const [pendingChange, setPendingChange] = useState<{
-    code: string;
-    undoCode: string;
-    description: string;
-    additions: number;
-    deletions: number;
-    source?: 'dom' | 'code';
-  } | null>(null);
-  const [isPreviewingOriginal, setIsPreviewingOriginal] = useState(false);
+  // Pending Code Change State - centralized via usePendingChangeState hook
+  const {
+    pendingChange,
+    setPendingChange,
+    isPreviewingOriginal,
+    setIsPreviewingOriginal,
+  } = usePendingChangeState();
 
   // Viewport State - centralized via useViewportMode hook
   const {
@@ -1855,35 +1825,27 @@ export default function App() {
   const terminalContainerRef = useRef<HTMLDivElement>(null);
   const terminalInstanceRef = useRef<unknown>(null);
 
-  // Debug Mode - shows all activity in console panel
-  const [debugMode, setDebugMode] = useState(false);
+  // Check if in Electron (moved early for hook dependencies)
+  const isElectron = typeof window !== 'undefined' && window.electronAPI?.isElectron;
 
-  // Debug logger that shows in both console.log and the console panel when debug mode is on
-  const debugLog = useCallback((prefix: string, message: string, data?: unknown) => {
-    const fullMessage = data !== undefined
-      ? `[${prefix}] ${message}: ${typeof data === 'object' ? JSON.stringify(data, null, 2) : data}`
-      : `[${prefix}] ${message}`;
-    console.log(fullMessage);
-    if (debugMode) {
-      enqueueConsoleLog({ type: 'info', message: fullMessage, timestamp: new Date() })
-    }
-  }, [debugMode, enqueueConsoleLog]);
+  // Debug State - debug mode, PTY port, and debug logger (extracted to hook)
+  const {
+    debugMode,
+    setDebugMode,
+    ptyPort,
+    setPtyPort,
+    debugLog,
+  } = useDebugState({ enqueueConsoleLog, isElectron });
 
-  // AI Element Selection State (pending confirmation)
-  const [aiSelectedElement, setAiSelectedElement] = useState<{
-    selector: string;
-    reasoning: string;
-    count?: number;
-    elements?: SelectedElement[];
-  } | null>(null);
-
-  // Source code snippet display state
-  const [displayedSourceCode, setDisplayedSourceCode] = useState<{
-    code: string;
-    fileName: string;
-    startLine: number;
-    endLine: number;
-  } | null>(null);
+  // AI Selection State - AI-selected element and displayed source code (extracted to hook)
+  const {
+    aiSelectedElement,
+    setAiSelectedElement,
+    displayedSourceCode,
+    setDisplayedSourceCode,
+    clearAISelection,
+    clearDisplayedSourceCode,
+  } = useAISelectionState();
 
   // LSP UI - hover tooltips and autocomplete for code
   const lspUI = useLSPUI(displayedSourceCode?.fileName);
@@ -1911,32 +1873,21 @@ export default function App() {
     lspUI.showHover(e.clientX, e.clientY, line, character);
   }, [displayedSourceCode, lspUI]);
 
-  // File Browser Overlay State
-  interface FileBrowserItem {
-    name: string;
-    isDirectory: boolean;
-    path: string;
-  }
-  interface FileBrowserPanel {
-    type: 'directory' | 'file' | 'image';
-    path: string;
-    title: string;
-    items?: FileBrowserItem[];  // for directories
-    content?: string;           // for files
-  }
-  const [fileBrowserStack, setFileBrowserStack] = useState<FileBrowserPanel[]>([]);
-  const [fileBrowserVisible, setFileBrowserVisible] = useState(false);
-  const [fileBrowserBasePath, setFileBrowserBasePath] = useState<string>('');
-
-  // Refs for file browser state (to avoid stale closures in Gemini session callbacks)
-  const fileBrowserStackRef = useRef<FileBrowserPanel[]>([]);
-  const fileBrowserVisibleRef = useRef(false);
-
-  // Keep refs in sync with state
-  useEffect(() => {
-    fileBrowserStackRef.current = fileBrowserStack;
-    fileBrowserVisibleRef.current = fileBrowserVisible;
-  }, [fileBrowserStack, fileBrowserVisible]);
+  // File Browser Panel State - stack navigation, visibility, and base path (extracted to hook)
+  const {
+    fileBrowserStack,
+    setFileBrowserStack,
+    fileBrowserVisible,
+    setFileBrowserVisible,
+    fileBrowserBasePath,
+    setFileBrowserBasePath,
+    fileBrowserStackRef,
+    fileBrowserVisibleRef,
+    pushPanel,
+    popPanel,
+    closeBrowser,
+    openBrowser,
+  } = useFileBrowserPanelState();
 
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -1949,34 +1900,10 @@ export default function App() {
   const activeWebview = webviewRefs.current.get(activeTabId);
   const isWebviewReady = activeTab.isWebviewReady;
 
-  // Check if in Electron
-  const isElectron = typeof window !== 'undefined' && window.electronAPI?.isElectron;
-
   // Debug: log electron status on mount
   useEffect(() => {
     console.log('isElectron:', isElectron);
     console.log('electronAPI:', window.electronAPI);
-  }, [isElectron]);
-
-  // Get PTY server port dynamically
-  const [ptyPort, setPtyPort] = useState<number | null>(null);
-  useEffect(() => {
-    const fetchPtyPort = async () => {
-      if (!isElectron || !window.electronAPI?.pty) return;
-      try {
-        const result = await window.electronAPI.pty.getPort();
-        if (result.success && result.port) {
-          setPtyPort(result.port);
-          console.log('[PTY] Server port:', result.port);
-        }
-      } catch (err) {
-        console.error('[PTY] Failed to get port:', err);
-      }
-    };
-    // Fetch immediately and retry after a delay in case server is still starting
-    fetchPtyPort();
-    const timer = setTimeout(fetchPtyPort, 1000);
-    return () => clearTimeout(timer);
   }, [isElectron]);
 
   // Persist dark mode preference
@@ -2015,19 +1942,6 @@ export default function App() {
       unsubUnloaded?.();
     };
   }, [appSettings.clusoCloudEditsEnabled]);
-
-  // Keep refs in sync with state for webview event handler closures
-  useEffect(() => {
-    isInspectorActiveRef.current = isInspectorActive;
-  }, [isInspectorActive]);
-
-  useEffect(() => {
-    isScreenshotActiveRef.current = isScreenshotActive;
-  }, [isScreenshotActive]);
-
-  useEffect(() => {
-    isMoveActiveRef.current = isMoveActive;
-  }, [isMoveActive]);
 
   // Inspector should not auto-switch models.
   // We only disable thinking for responsiveness while active.
@@ -8800,18 +8714,8 @@ If you're not sure what the user wants, ask for clarification.
     return { top: `${top}px`, left: `${left}px` };
   };
 
-  // Webview preload path state
-  const [webviewPreloadPath, setWebviewPreloadPath] = useState<string>('');
-
-  // Fetch webview preload path on mount
-  useEffect(() => {
-    if (isElectron && window.electronAPI?.getWebviewPreloadPath) {
-      window.electronAPI.getWebviewPreloadPath().then(path => {
-        console.log('Webview preload path:', path);
-        setWebviewPreloadPath(path);
-      });
-    }
-  }, [isElectron]);
+  // Webview preload path state (auto-fetches on mount when in Electron)
+  const { webviewPreloadPath } = useWebviewState(isElectron);
 
   // Handle showing source code for selected element
   const handleShowSourceCode = useCallback(async () => {

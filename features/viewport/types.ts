@@ -60,3 +60,18 @@ export interface DevicePreviewState {
   isCustomDevice: boolean
   zoomLevel: ZoomLevel
 }
+
+/**
+ * Multi-viewport data item
+ * Represents a single viewport in multi-viewport mode
+ */
+export interface MultiViewportDataItem {
+  id: string
+  windowType: string
+  devicePresetId?: string
+}
+
+/**
+ * Multi-viewport data array type
+ */
+export type MultiViewportData = MultiViewportDataItem[]

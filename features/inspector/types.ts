@@ -19,6 +19,7 @@ export interface MoveTargetPosition {
  * Pre-inspector settings to restore after deactivation
  */
 export interface PreInspectorSettings {
+  model: unknown // Model definition, type varies
   thinkingLevel: 'off' | 'low' | 'med' | 'high' | 'ultrathink'
 }
 
