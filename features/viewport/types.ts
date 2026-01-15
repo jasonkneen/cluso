@@ -21,7 +21,6 @@ export type ZoomLevel = 'fit' | 'actual' | '50' | '75' | '100' | '125' | '150'
  * Device preset definition
  */
 export interface DevicePreset {
-  id: string
   name: string
   width: number
   height: number

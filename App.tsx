@@ -50,6 +50,9 @@ import { useClusoAgent, AVAILABLE_DEMOS, DEMO_SCRIPTS } from './hooks/useClusoAg
 import { useSteeringQuestions } from './hooks/useSteeringQuestions';
 import { SteeringQuestions } from './components/SteeringQuestions';
 import { useChatState } from './features/chat';
+import { useViewportMode } from './features/viewport';
+import type { DevicePreset } from './features/viewport';
+import { useAppSettings } from './features/settings';
 import { generateTurnId } from './utils/turnUtils';
 import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler';
 import { PatchApprovalDialog } from './components/PatchApprovalDialog';
@@ -813,8 +816,21 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [pageTitle, setPageTitle] = useState('');
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
+  // Chat state - centralized via useChatState hook
+  const {
+    messages,
+    setMessages,
+    input,
+    setInput,
+    streamingMessage,
+    setStreamingMessage,
+    isStreaming,
+    setIsStreaming,
+    connectionState,
+    setConnectionState,
+    completedToolCalls,
+    setCompletedToolCalls,
+  } = useChatState();
   const [previewIntent, setPreviewIntent] = useState<{ type: string; label: string; secondaryTypes?: string[]; secondaryLabels?: string[] } | null>(null);
 
   // Selection States
@@ -1280,68 +1296,13 @@ export default function App() {
   const [currentPatchIndex, setCurrentPatchIndex] = useState(0);
   const [isApprovalDialogOpen, setIsApprovalDialogOpen] = useState(false);
 
-  // App Settings State - with localStorage persistence
-  const [appSettings, setAppSettings] = useState<AppSettings>(() => {
-    try {
-      const stored = localStorage.getItem('cluso-settings');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Deep merge to handle new settings added over time
-        // Merge models: keep stored models but add any new ones from defaults
-        const storedModelIds = new Set((parsed.models || []).map((m: { id: string }) => m.id));
-        const newModels = DEFAULT_SETTINGS.models.filter(m => !storedModelIds.has(m.id));
-        const mergedModels = [...(parsed.models || []), ...newModels];
-
-        // Merge providers: keep stored providers but add any new ones from defaults
-        const storedProviderIds = new Set((parsed.providers || []).map((p: { id: string }) => p.id));
-        const newProviders = DEFAULT_SETTINGS.providers.filter(p => !storedProviderIds.has(p.id));
-        const mergedProviders = [...(parsed.providers || []), ...newProviders];
-
-        // Migrate old connection format to new MCP transport format
-        const migratedConnections = (parsed.connections || []).map((conn: Record<string, unknown>) => {
-          // If connection has 'url' but no 'transport', migrate to new format
-          if (conn.type === 'mcp' && conn.url && !conn.transport) {
-            return {
-              ...conn,
-              transport: { type: 'sse', url: conn.url },
-            };
-          }
-          return conn;
-        });
-
-        return {
-          ...DEFAULT_SETTINGS,
-          ...parsed,
-          models: mergedModels,
-          providers: mergedProviders,
-          connections: migratedConnections,
-        };
-      }
-    } catch (e) {
-      console.error('Failed to load settings from localStorage:', e);
-    }
-    return DEFAULT_SETTINGS;
-  });
+  // App Settings State - centralized via useAppSettings hook
+  const { appSettings, setAppSettings, appSettingsRef } = useAppSettings()
 
   // Cluso Agent - AI control of UI elements (must be after appSettings)
   const clusoAgent = useClusoAgent({
     googleApiKey: appSettings.providers.find(p => p.id === 'google')?.apiKey,
-  });
-
-  // Persist settings to localStorage when they change
-  useEffect(() => {
-    try {
-      localStorage.setItem('cluso-settings', JSON.stringify(appSettings));
-    } catch (e) {
-      console.error('Failed to save settings to localStorage:', e);
-    }
-  }, [appSettings]);
-
-  // Keep a ref for callbacks that intentionally have empty deps.
-  const appSettingsRef = useRef(appSettings)
-  useEffect(() => {
-    appSettingsRef.current = appSettings
-  }, [appSettings])
+  })
 
   // Apply Electron window appearance settings
   useEffect(() => {
@@ -1440,28 +1401,7 @@ export default function App() {
   const selectedModelRef = useRef(selectedModel);
   selectedModelRef.current = selectedModel;
 
-  // Streaming message state
-  const [streamingMessage, setStreamingMessage] = useState<{
-    id: string
-    content: string
-    reasoning: string
-    toolCalls: Array<{ id: string; name: string; args: unknown; status: 'pending' | 'running' | 'complete' | 'error'; result?: unknown }>
-  } | null>(null)
-  const [isStreaming, setIsStreaming] = useState(false)
-
-  // Connection state: 'idle' = connected but not actively generating, 'streaming' = actively processing
-  // This allows proper button states while maintaining persistent connection
-  const [connectionState, setConnectionState] = useState<'disconnected' | 'idle' | 'streaming'>('disconnected')
-
-  // Track completed tool calls that persist after streaming ends (for showing final success/error states)
-  const [completedToolCalls, setCompletedToolCalls] = useState<Array<{
-    id: string
-    name: string
-    status: 'success' | 'error'
-    timestamp: Date
-  }>>([])
-
-  // Auto-clear completed tool calls after a delay
+  // Auto-clear completed tool calls after a delay (state managed by useChatState hook)
   useEffect(() => {
     if (completedToolCalls.length > 0) {
       const timer = setTimeout(() => {
@@ -1898,106 +1838,38 @@ export default function App() {
   const [editedFiles, setEditedFiles] = useState<EditedFile[]>([]);
   const [isEditedFilesDrawerOpen, setIsEditedFilesDrawerOpen] = useState(false);
 
-  // Viewport State (responsive preview)
-  type ViewportSize = 'mobile' | 'tablet' | 'desktop';
-  const [viewportSize, setViewportSize] = useState<ViewportSize>('desktop');
-
-  // Device presets for responsive testing
-  interface DevicePreset {
-    name: string
-    width: number
-    height: number
-    type: ViewportSize
-  }
-
-  const devicePresets: DevicePreset[] = [
-    // Mobile devices
-    { name: 'iPhone SE', width: 375, height: 667, type: 'mobile' },
-    { name: 'iPhone 14', width: 390, height: 844, type: 'mobile' },
-    { name: 'iPhone 14 Pro Max', width: 430, height: 932, type: 'mobile' },
-    { name: 'iPhone 15 Pro', width: 393, height: 852, type: 'mobile' },
-    { name: 'Samsung Galaxy S21', width: 360, height: 800, type: 'mobile' },
-    { name: 'Pixel 7', width: 412, height: 915, type: 'mobile' },
-    // Tablet devices
-    { name: 'iPad Mini', width: 768, height: 1024, type: 'tablet' },
-    { name: 'iPad Air', width: 820, height: 1180, type: 'tablet' },
-    { name: 'iPad Pro 11"', width: 834, height: 1194, type: 'tablet' },
-    { name: 'iPad Pro 12.9"', width: 1024, height: 1366, type: 'tablet' },
-    { name: 'Surface Pro 7', width: 912, height: 1368, type: 'tablet' },
-    { name: 'Galaxy Tab S7', width: 800, height: 1280, type: 'tablet' },
-  ]
-
-  const [selectedDevice, setSelectedDevice] = useState<DevicePreset | null>(null)
-  const [customWidth, setCustomWidth] = useState<number>(375)
-  const [customHeight, setCustomHeight] = useState<number>(667)
-  const [isCustomDevice, setIsCustomDevice] = useState(false)
-  const [isDeviceSelectorOpen, setIsDeviceSelectorOpen] = useState(false)
-
-  // Multi-viewport mode (shows multiple device viewports simultaneously)
-  const [isMultiViewportMode, setIsMultiViewportMode] = useState(false)
-  const [viewportCount, setViewportCount] = useState(0)
-  const viewportControlsRef = useRef<{
-    viewportCount: number
-    addDevice: (type: 'mobile' | 'tablet' | 'desktop') => void
-    addInternalWindow: (type: 'kanban' | 'todo' | 'notes') => void
-    addTerminal: () => void
-    autoLayout: (direction?: LayoutDirection) => void
-    fitView: () => void
-    getViewports: () => Viewport[]
-    focusViewport: (id: string) => void
-  } | null>(null)
-
-  // Zoom options for device preview
-  type ZoomLevel = 'fit' | 'actual' | '50' | '75' | '100' | '125' | '150'
-  const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('fit')
-  const [isZoomSelectorOpen, setIsZoomSelectorOpen] = useState(false)
-
-  const zoomOptions: { value: ZoomLevel; label: string }[] = [
-    { value: 'fit', label: 'Fit' },
-    { value: 'actual', label: 'Actual' },
-    { value: '50', label: '50%' },
-    { value: '75', label: '75%' },
-    { value: '100', label: '100%' },
-    { value: '125', label: '125%' },
-    { value: '150', label: '150%' },
-  ]
-
-  // Approximate "actual size" scaling based on local display PPI.
-  // CSS pixels are defined as 96 PPI, so 96 / displayPpi maps CSS px -> physical inches.
-  const displayPpi = appSettings.displayPpi
-  const actualScale = useMemo(() => {
-    const ppi = typeof displayPpi === 'number' && Number.isFinite(displayPpi) && displayPpi > 0
-      ? displayPpi
-      : undefined
-    if (!ppi) return 1
-    return 96 / ppi
-  }, [displayPpi])
-
-  // Get current viewport dimensions
-  const currentWidth = isCustomDevice ? customWidth : (selectedDevice?.width ?? (viewportSize === 'tablet' ? 768 : 375))
-  const currentHeight = isCustomDevice ? customHeight : (selectedDevice?.height ?? (viewportSize === 'tablet' ? 1024 : 667))
-
-  const viewportWidths: Record<ViewportSize, number | null> = {
-    mobile: 375,
-    tablet: 768,
-    desktop: null // null means full width
-  };
-
-  // Handle device selection
-  const handleDeviceSelect = (device: DevicePreset) => {
-    setSelectedDevice(device)
-    setIsCustomDevice(false)
-    setViewportSize(device.type)
-    setIsDeviceSelectorOpen(false)
-  }
-
-  // Handle custom device
-  const handleCustomDevice = () => {
-    setIsCustomDevice(true)
-    setSelectedDevice(null)
-    setViewportSize('mobile')
-    setIsDeviceSelectorOpen(false)
-  }
+  // Viewport State - centralized via useViewportMode hook
+  const {
+    viewportSize,
+    setViewportSize,
+    selectedDevice,
+    setSelectedDevice,
+    customWidth,
+    setCustomWidth,
+    customHeight,
+    setCustomHeight,
+    isCustomDevice,
+    setIsCustomDevice,
+    isDeviceSelectorOpen,
+    setIsDeviceSelectorOpen,
+    isMultiViewportMode,
+    setIsMultiViewportMode,
+    viewportCount,
+    setViewportCount,
+    viewportControlsRef,
+    zoomLevel,
+    setZoomLevel,
+    isZoomSelectorOpen,
+    setIsZoomSelectorOpen,
+    actualScale,
+    currentWidth,
+    currentHeight,
+    devicePresets,
+    zoomOptions,
+    viewportWidths,
+    handleDeviceSelect,
+    handleCustomDevice,
+  } = useViewportMode({ displayPpi: appSettings.displayPpi })
 
   // Console Panel State
   type ConsoleLogEntry = { type: 'log' | 'warn' | 'error' | 'info'; message: string; timestamp: Date }

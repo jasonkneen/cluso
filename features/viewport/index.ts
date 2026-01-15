@@ -4,7 +4,7 @@
  * Exports viewport mode state management and types.
  */
 
-export { useViewportMode, ZOOM_OPTIONS, VIEWPORT_WIDTHS } from './useViewportMode'
+export { useViewportMode, ZOOM_OPTIONS, VIEWPORT_WIDTHS, DEVICE_PRESETS } from './useViewportMode'
 export type { UseViewportModeReturn, UseViewportModeOptions } from './useViewportMode'
 export type {
   ViewportSize,

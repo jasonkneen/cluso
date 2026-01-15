@@ -37,6 +37,12 @@ export interface UseViewportModeReturn {
   isCustomDevice: boolean
   setIsCustomDevice: React.Dispatch<React.SetStateAction<boolean>>
 
+  // UI selector states
+  isDeviceSelectorOpen: boolean
+  setIsDeviceSelectorOpen: React.Dispatch<React.SetStateAction<boolean>>
+  isZoomSelectorOpen: boolean
+  setIsZoomSelectorOpen: React.Dispatch<React.SetStateAction<boolean>>
+
   // Zoom
   zoomLevel: ZoomLevel
   setZoomLevel: React.Dispatch<React.SetStateAction<ZoomLevel>>
@@ -46,8 +52,14 @@ export interface UseViewportModeReturn {
   currentWidth: number
   currentHeight: number
 
+  // Constants
+  devicePresets: DevicePreset[]
+  zoomOptions: { value: ZoomLevel; label: string }[]
+  viewportWidths: Record<ViewportSize, number | null>
+
   // Actions
   handleDeviceSelect: (device: DevicePreset) => void
+  handleCustomDevice: () => void
   handleCustomSize: (width: number, height: number) => void
 }
 
@@ -67,6 +79,23 @@ export const VIEWPORT_WIDTHS: Record<ViewportSize, number | null> = {
   desktop: null, // null means full width
 }
 
+export const DEVICE_PRESETS: DevicePreset[] = [
+  // Mobile devices
+  { name: 'iPhone SE', width: 375, height: 667, type: 'mobile' },
+  { name: 'iPhone 14', width: 390, height: 844, type: 'mobile' },
+  { name: 'iPhone 14 Pro Max', width: 430, height: 932, type: 'mobile' },
+  { name: 'iPhone 15 Pro', width: 393, height: 852, type: 'mobile' },
+  { name: 'Samsung Galaxy S21', width: 360, height: 800, type: 'mobile' },
+  { name: 'Pixel 7', width: 412, height: 915, type: 'mobile' },
+  // Tablet devices
+  { name: 'iPad Mini', width: 768, height: 1024, type: 'tablet' },
+  { name: 'iPad Air', width: 820, height: 1180, type: 'tablet' },
+  { name: 'iPad Pro 11"', width: 834, height: 1194, type: 'tablet' },
+  { name: 'iPad Pro 12.9"', width: 1024, height: 1366, type: 'tablet' },
+  { name: 'Surface Pro 7', width: 912, height: 1368, type: 'tablet' },
+  { name: 'Galaxy Tab S7', width: 800, height: 1280, type: 'tablet' },
+]
+
 /**
  * Hook for managing viewport mode state
  */
@@ -84,6 +113,10 @@ export function useViewportMode(options: UseViewportModeOptions = {}): UseViewpo
   const [customWidth, setCustomWidth] = useState<number>(375)
   const [customHeight, setCustomHeight] = useState<number>(667)
   const [isCustomDevice, setIsCustomDevice] = useState(false)
+
+  // UI selector states
+  const [isDeviceSelectorOpen, setIsDeviceSelectorOpen] = useState(false)
+  const [isZoomSelectorOpen, setIsZoomSelectorOpen] = useState(false)
 
   // Zoom state
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('fit')
@@ -109,6 +142,16 @@ export function useViewportMode(options: UseViewportModeOptions = {}): UseViewpo
   const handleDeviceSelect = (device: DevicePreset) => {
     setSelectedDevice(device)
     setIsCustomDevice(false)
+    setViewportSize(device.type)
+    setIsDeviceSelectorOpen(false)
+  }
+
+  // Action: Enable custom device mode
+  const handleCustomDevice = () => {
+    setIsCustomDevice(true)
+    setSelectedDevice(null)
+    setViewportSize('mobile')
+    setIsDeviceSelectorOpen(false)
   }
 
   // Action: Set custom dimensions
@@ -137,6 +180,11 @@ export function useViewportMode(options: UseViewportModeOptions = {}): UseViewpo
     setCustomHeight,
     isCustomDevice,
     setIsCustomDevice,
+    // UI selector states
+    isDeviceSelectorOpen,
+    setIsDeviceSelectorOpen,
+    isZoomSelectorOpen,
+    setIsZoomSelectorOpen,
     // Zoom
     zoomLevel,
     setZoomLevel,
@@ -144,8 +192,13 @@ export function useViewportMode(options: UseViewportModeOptions = {}): UseViewpo
     // Computed
     currentWidth,
     currentHeight,
+    // Constants
+    devicePresets: DEVICE_PRESETS,
+    zoomOptions: ZOOM_OPTIONS,
+    viewportWidths: VIEWPORT_WIDTHS,
     // Actions
     handleDeviceSelect,
+    handleCustomDevice,
     handleCustomSize,
   }
 }

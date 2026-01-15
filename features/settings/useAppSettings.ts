@@ -20,10 +20,10 @@ export interface AvailableModel {
 }
 
 export interface UseAppSettingsReturn {
-  // Settings state
-  settings: AppSettings
-  setSettings: React.Dispatch<React.SetStateAction<AppSettings>>
-  settingsRef: React.MutableRefObject<AppSettings>
+  // Settings state (named to match App.tsx conventions)
+  appSettings: AppSettings
+  setAppSettings: React.Dispatch<React.SetStateAction<AppSettings>>
+  appSettingsRef: React.MutableRefObject<AppSettings>
 
   // Computed values
   availableModels: AvailableModel[]
@@ -36,29 +36,47 @@ export interface UseAppSettingsReturn {
 }
 
 /**
- * Load settings from localStorage with defaults
+ * Load settings from localStorage with defaults and migrations
  */
 function loadSettings(): AppSettings {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (stored) {
-      const parsed = JSON.parse(stored) as Partial<AppSettings>
-      // Merge with defaults to ensure all fields exist
+      const parsed = JSON.parse(stored)
+
+      // Deep merge to handle new settings added over time
+      // Merge models: keep stored models but add any new ones from defaults
+      const storedModelIds = new Set((parsed.models || []).map((m: { id: string }) => m.id))
+      const newModels = DEFAULT_SETTINGS.models.filter(m => !storedModelIds.has(m.id))
+      const mergedModels = [...(parsed.models || []), ...newModels]
+
+      // Merge providers: keep stored providers but add any new ones from defaults
+      const storedProviderIds = new Set((parsed.providers || []).map((p: { id: string }) => p.id))
+      const newProviders = DEFAULT_SETTINGS.providers.filter(p => !storedProviderIds.has(p.id))
+      const mergedProviders = [...(parsed.providers || []), ...newProviders]
+
+      // Migrate old connection format to new MCP transport format
+      const migratedConnections = (parsed.connections || []).map((conn: Record<string, unknown>) => {
+        // If connection has 'url' but no 'transport', migrate to new format
+        if (conn.type === 'mcp' && conn.url && !conn.transport) {
+          return {
+            ...conn,
+            transport: { type: 'sse', url: conn.url },
+          }
+        }
+        return conn
+      })
+
       return {
         ...DEFAULT_SETTINGS,
         ...parsed,
-        // Ensure arrays are merged correctly
-        providers: parsed.providers?.length
-          ? parsed.providers
-          : DEFAULT_SETTINGS.providers,
-        models: parsed.models?.length
-          ? parsed.models
-          : DEFAULT_SETTINGS.models,
-        connections: parsed.connections || DEFAULT_SETTINGS.connections,
+        models: mergedModels,
+        providers: mergedProviders,
+        connections: migratedConnections,
       }
     }
   } catch (e) {
-    console.warn('[Settings] Failed to load from localStorage:', e)
+    console.error('[Settings] Failed to load from localStorage:', e)
   }
   return DEFAULT_SETTINGS
 }
@@ -81,30 +99,30 @@ function saveSettings(settings: AppSettings): void {
  */
 export function useAppSettings(): UseAppSettingsReturn {
   // Initialize from localStorage
-  const [settings, setSettings] = useState<AppSettings>(loadSettings)
+  const [appSettings, setAppSettings] = useState<AppSettings>(loadSettings)
 
-  // Keep a ref for sync access
-  const settingsRef = useRef(settings)
+  // Keep a ref for sync access (for callbacks with intentionally empty deps)
+  const appSettingsRef = useRef(appSettings)
   useEffect(() => {
-    settingsRef.current = settings
-  }, [settings])
+    appSettingsRef.current = appSettings
+  }, [appSettings])
 
   // Persist to localStorage when settings change
   useEffect(() => {
-    saveSettings(settings)
-  }, [settings])
+    saveSettings(appSettings)
+  }, [appSettings])
 
   // Compute available models based on provider configuration
   const availableModels = useMemo(() => {
-    return settings.models.map(settingsModel => {
-      const provider = settings.providers.find(p => p.id === settingsModel.provider)
+    return appSettings.models.map(settingsModel => {
+      const provider = appSettings.providers.find(p => p.id === settingsModel.provider)
       const isClaudeCode = settingsModel.provider === 'claude-code'
       const isCodex = settingsModel.provider === 'codex'
 
       const isAvailable = isClaudeCode
-        ? !!settings.claudeCodeAuthenticated
+        ? !!appSettings.claudeCodeAuthenticated
         : isCodex
-          ? !!settings.codexAuthenticated
+          ? !!appSettings.codexAuthenticated
           : provider?.enabled && !!provider?.apiKey
 
       return {
@@ -116,15 +134,15 @@ export function useAppSettings(): UseAppSettingsReturn {
       }
     })
   }, [
-    settings.models,
-    settings.providers,
-    settings.claudeCodeAuthenticated,
-    settings.codexAuthenticated,
+    appSettings.models,
+    appSettings.providers,
+    appSettings.claudeCodeAuthenticated,
+    appSettings.codexAuthenticated,
   ])
 
   // Get configured (enabled with API key) providers
   const configuredProviders = useMemo(() => {
-    return settings.providers
+    return appSettings.providers
       .filter(p => p.enabled && p.apiKey)
       .map(p => ({
         id: p.id,
@@ -132,11 +150,11 @@ export function useAppSettings(): UseAppSettingsReturn {
         name: p.name,
         enabled: p.enabled,
       }))
-  }, [settings.providers])
+  }, [appSettings.providers])
 
   // Action: Update a specific provider
   const updateProvider = useCallback((providerId: string, updates: Partial<Provider>) => {
-    setSettings(prev => ({
+    setAppSettings(prev => ({
       ...prev,
       providers: prev.providers.map(p =>
         p.id === providerId ? { ...p, ...updates } : p
@@ -146,7 +164,7 @@ export function useAppSettings(): UseAppSettingsReturn {
 
   // Action: Update a specific model
   const updateModel = useCallback((modelId: string, updates: Partial<SettingsModel>) => {
-    setSettings(prev => ({
+    setAppSettings(prev => ({
       ...prev,
       models: prev.models.map(m =>
         m.id === modelId ? { ...m, ...updates } : m
@@ -156,13 +174,13 @@ export function useAppSettings(): UseAppSettingsReturn {
 
   // Action: Reset to defaults
   const resetSettings = useCallback(() => {
-    setSettings(DEFAULT_SETTINGS)
+    setAppSettings(DEFAULT_SETTINGS)
   }, [])
 
   return {
-    settings,
-    setSettings,
-    settingsRef,
+    appSettings,
+    setAppSettings,
+    appSettingsRef,
     availableModels,
     configuredProviders,
     updateProvider,
