@@ -17,7 +17,7 @@ interface ToolbarProps {
 export function Toolbar({ mode, isMicActive, onModeChange, onMicToggle }: ToolbarProps) {
   return (
     <div className="flex items-center justify-center gap-1 py-3 px-4 bg-black/50 border-b border-white/10">
-      <div className="flex items-center gap-1 p-1 rounded-xl bg-white/5">
+      <div className="flex items-center gap-1 p-1 rounded-full bg-white/5">
         {/* Screen capture */}
         <button
           onClick={() => onModeChange('screen')}

@@ -5475,17 +5475,29 @@ export default function App() {
         const data = args[0] as { element: SelectedElement; x: number; y: number; rect: unknown; source?: string };
         console.log('[Inspector Select] Full element data:', data.element);
         console.log('[Inspector Select] sourceLocation:', data.element.sourceLocation);
+
+        // IMPORTANT: Preserve sourceLocation if re-selecting same element with null sourceLocation
+        const prevElement = selectedElementRef.current;
+        const isSameElement = prevElement?.xpath && data.element.xpath && prevElement.xpath === data.element.xpath;
+        const shouldPreserveSource = isSameElement && !data.element.sourceLocation && prevElement?.sourceLocation;
+        if (shouldPreserveSource) {
+          console.log('[Inspector Select] Preserving sourceLocation from previous selection');
+        }
+
         setSelectedElement({
           ...data.element,
           x: data.x,
           y: data.y,
-          rect: data.rect as SelectedElement['rect']
+          rect: data.rect as SelectedElement['rect'],
+          // Keep the old sourceLocation if new one is null but it's the same element
+          sourceLocation: shouldPreserveSource ? prevElement.sourceLocation : data.element.sourceLocation
         });
         setHoveredElement(null); // Clear hover on selection
 
         // Copy element info to clipboard (use Electron API since webview steals focus)
         const el = data.element;
-        const sourceInfo = el.sourceLocation?.summary || 'no source';
+        const preservedSource = shouldPreserveSource ? prevElement.sourceLocation : data.element.sourceLocation;
+        const sourceInfo = preservedSource?.summary || 'no source';
         const clipboardText = `${el.outerHTML || `<${el.tagName}>`}\n\nSource: ${sourceInfo}`;
         try {
           if (window.electronAPI?.clipboard?.writeText) {
@@ -6019,94 +6031,294 @@ export default function App() {
           intent: 'ui_modify'
         }]);
       } else if (channel === 'inline-edit-accept') {
-        // Handle inline text edit acceptance
+        // Handle inline text edit acceptance - INSTANT SAVE (no approval flow)
         const data = args[0] as { oldText: string; newText: string; element: SelectedElement };
+
+        // Log all available source location data
+        const msgSource = data.element?.sourceLocation;
+        const refSource = selectedElementRef.current?.sourceLocation;
         console.log('[Inline Edit] Accepted:', {
           old: data.oldText?.substring(0, 30),
           new: data.newText?.substring(0, 30),
-          hasSourceLocation: !!data.element?.sourceLocation,
-          sourceFile: data.element?.sourceLocation?.sources?.[0]?.file
+          msgHasSource: !!msgSource,
+          msgSourceFile: msgSource?.sources?.[0]?.file,
+          refHasSource: !!refSource,
+          refSourceFile: refSource?.sources?.[0]?.file,
+          refSummary: refSource?.summary
         });
 
-        // Use element from message (now includes source location from when editing started)
-        // Fall back to ref if message doesn't have source location (backwards compat)
-        const elementWithSource = data.element?.sourceLocation?.sources?.[0]
+        // Use element from message if it has sourceLocation, otherwise use selectedElementRef
+        // The selectedElementRef should always have sourceLocation if an element was selected
+        const elementWithSource = msgSource?.sources?.[0]
           ? data.element
-          : selectedElementRef.current;
+          : (refSource ? selectedElementRef.current : null);
+
         const currentTab = tabsRef.current.find(t => t.id === tabId);
         const projectPath = currentTab?.projectPath;
 
-        // Trigger source patch with the text change
-        if (elementWithSource?.sourceLocation?.sources?.[0] && projectPath) {
-          const textChangePayload = { oldText: data.oldText, newText: data.newText };
+        // INSTANT SAVE: Direct find/replace in source file
+        if (elementWithSource?.sourceLocation && projectPath && data.oldText && data.newText) {
+          (async () => {
+            try {
+              // Extract file path from sourceLocation
+              const sourceLocation = elementWithSource.sourceLocation!;
+              console.log('[Inline Edit] sourceLocation keys:', Object.keys(sourceLocation));
+              console.log('[Inline Edit] likelyDefinitionFile:', sourceLocation.likelyDefinitionFile);
+              console.log('[Inline Edit] summary:', sourceLocation.summary);
+              const sources = sourceLocation.sources || [];
+              let filePath = '';
+              let targetLine = 0;
 
-          const approvalId = `inline-${Date.now()}`;
-			setPendingDOMApproval({
-				id: approvalId,
-				element: elementWithSource,
-				cssChanges: {},
-				textChange: data.newText,
-				description: `Change text: "${data.oldText?.substring(0, 20)}..." → "${data.newText?.substring(0, 20)}..."`,
-				undoCode: `(function() {
-					function getElementByXPath(xpath) {
-						try {
-							if (!xpath || typeof xpath !== 'string') return null;
-							return document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-						} catch (e) {
-							return null;
-						}
-					}
-					const xpath = ${JSON.stringify((elementWithSource as any)?.xpath || '')};
-					const elementNumber = ${JSON.stringify((elementWithSource as any)?.elementNumber ?? null)};
-					let el = getElementByXPath(xpath);
-					if (!el && elementNumber && window.__layersElements && typeof window.__layersElements.get === 'function') {
-						el = window.__layersElements.get(elementNumber);
-					}
-					if (!el) return 'Element not found';
-					el.textContent = ${JSON.stringify(data.oldText)};
-					return 'Reverted';
-				})()`,
-				applyCode: `(function() {
-					function getElementByXPath(xpath) {
-						try {
-							if (!xpath || typeof xpath !== 'string') return null;
-							return document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-						} catch (e) {
-							return null;
-						}
-					}
-					const xpath = ${JSON.stringify((elementWithSource as any)?.xpath || '')};
-					const elementNumber = ${JSON.stringify((elementWithSource as any)?.elementNumber ?? null)};
-					let el = getElementByXPath(xpath);
-					if (!el && elementNumber && window.__layersElements && typeof window.__layersElements.get === 'function') {
-						el = window.__layersElements.get(elementNumber);
-					}
-					if (!el) return 'Element not found';
-					el.textContent = ${JSON.stringify(data.newText)};
-					return 'Applied';
-				})()`,
-				userRequest: 'Inline text edit',
-				patchStatus: 'preparing',
-				userApproved: true, // Auto-approve: user already clicked tick to accept
-			});
+              // Strategy 1: Use likelyDefinitionFile FIRST (where text is actually defined)
+              if (sourceLocation.likelyDefinitionFile) {
+                const defFile = sourceLocation.likelyDefinitionFile;
+                console.log('[Inline Edit] Using likelyDefinitionFile:', defFile);
+                const globResult = await window.electronAPI?.files?.glob(`**/${defFile}`, projectPath);
+                console.log('[Inline Edit] Glob result:', globResult);
+                if (globResult?.success && globResult.data && globResult.data.length > 0) {
+                  filePath = globResult.data[0].path;
+                  console.log('[Inline Edit] Found definition file:', filePath);
+                }
+              }
 
-          prepareDomPatch(
-            approvalId,
-            elementWithSource,
-            {},
-            `Change text to "${data.newText?.substring(0, 30)}..."`,
-            '',
-            '',
-            'Inline text edit',
-            projectPath,
-            textChangePayload
-          );
+              // Strategy 1b: Parse component name from summary if no likelyDefinitionFile
+              if (!filePath && sourceLocation.summary) {
+                const match = sourceLocation.summary.match(/^(\w+)\s*\(used in/);
+                if (match) {
+                  const componentName = match[1];
+                  console.log('[Inline Edit] Extracted component name from summary:', componentName);
+                  const globResult = await window.electronAPI?.files?.glob(`**/${componentName}.tsx`, projectPath);
+                  if (globResult?.success && globResult.data && globResult.data.length > 0) {
+                    filePath = globResult.data[0].path;
+                    console.log('[Inline Edit] Found component file:', filePath);
+                  }
+                }
+              }
+
+              // Strategy 2: Find a source with a full path (contains /) - but only if no definition file
+              if (!filePath) {
+                for (const src of sources) {
+                  if (src.file && src.file.includes('/') && src.line > 0) {
+                    filePath = src.file;
+                    targetLine = src.line;
+                    console.log('[Inline Edit] Found full path in sources:', filePath);
+                    break;
+                  }
+                }
+              }
+
+              // Strategy 3: Search for first source file name
+              if (!filePath && sources[0]?.file) {
+                const fileName = sources[0].file;
+                console.log('[Inline Edit] Searching for source file:', fileName);
+                const globResult = await window.electronAPI?.files?.glob(`**/${fileName}`, projectPath);
+                if (globResult?.success && globResult.data && globResult.data.length > 0) {
+                  filePath = globResult.data[0].path;
+                  targetLine = sources[0]?.line || 0;
+                  console.log('[Inline Edit] Found via glob:', filePath);
+                }
+              }
+
+              // Make path absolute if relative
+              if (filePath && !filePath.startsWith('/')) {
+                filePath = `${projectPath}/${filePath}`;
+              }
+
+              if (!filePath) {
+                console.error('[Inline Edit] Could not determine file path');
+                return;
+              }
+
+              console.log('[Inline Edit] ====== INSTANT SAVE ======');
+              console.log('[Inline Edit] File:', filePath);
+              console.log('[Inline Edit] Target line:', targetLine);
+
+              // Read source file
+              const readResult = await fileService.readFileFull(filePath);
+              if (!readResult.success || !readResult.data) {
+                console.error('[Inline Edit] Failed to read file:', readResult.error);
+                return;
+              }
+
+              const originalContent = readResult.data;
+              const oldText = data.oldText;
+              const newText = data.newText;
+
+              console.log('[Inline Edit] Old text (' + oldText.length + ' chars):', JSON.stringify(oldText.substring(0, 80)));
+              console.log('[Inline Edit] New text (' + newText.length + ' chars):', JSON.stringify(newText.substring(0, 80)));
+              console.log('[Inline Edit] File length:', originalContent.length, 'chars,', originalContent.split('\n').length, 'lines');
+
+              // Count occurrences
+              let count = 0;
+              let idx = 0;
+              while ((idx = originalContent.indexOf(oldText, idx)) !== -1) {
+                count++;
+                idx += oldText.length;
+              }
+              console.log('[Inline Edit] Found', count, 'occurrences in file');
+
+              let patchedContent = originalContent;
+
+              if (count === 1) {
+                // Exact match, single occurrence - safe to replace
+                patchedContent = originalContent.replace(oldText, newText);
+              } else if (count > 1 && targetLine > 0) {
+                // Multiple occurrences - replace only near target line
+                const lines = originalContent.split('\n');
+                let charOffset = 0;
+                for (let i = 0; i < Math.min(targetLine - 1, lines.length); i++) {
+                  charOffset += lines[i].length + 1; // +1 for newline
+                }
+                // Find occurrence nearest to target line
+                const searchStart = Math.max(0, charOffset - 500);
+                const searchEnd = Math.min(originalContent.length, charOffset + 500);
+                const nearIdx = originalContent.indexOf(oldText, searchStart);
+                if (nearIdx !== -1 && nearIdx < searchEnd) {
+                  patchedContent = originalContent.slice(0, nearIdx) + newText + originalContent.slice(nearIdx + oldText.length);
+                  console.log('[Inline Edit] Replaced occurrence near line', targetLine);
+                }
+              } else if (count === 0) {
+                // Text not found - DOM textContent differs from source (br/span tags, etc.)
+                // Find the changed part between old and new text
+                let commonPrefixLen = 0;
+                while (commonPrefixLen < oldText.length && commonPrefixLen < newText.length &&
+                       oldText[commonPrefixLen] === newText[commonPrefixLen]) {
+                  commonPrefixLen++;
+                }
+                let commonSuffixLen = 0;
+                while (commonSuffixLen < oldText.length - commonPrefixLen &&
+                       commonSuffixLen < newText.length - commonPrefixLen &&
+                       oldText[oldText.length - 1 - commonSuffixLen] === newText[newText.length - 1 - commonSuffixLen]) {
+                  commonSuffixLen++;
+                }
+                const changedOld = oldText.slice(commonPrefixLen, oldText.length - commonSuffixLen);
+                const changedNew = newText.slice(commonPrefixLen, newText.length - commonSuffixLen);
+
+                console.log('[Inline Edit] Changed part:', JSON.stringify(changedOld), '→', JSON.stringify(changedNew));
+                console.log('[Inline Edit] targetLine for search:', targetLine);
+
+                // Strategy: Use targetLine to search in nearby source lines (avoids DOM/source mismatch)
+                if (targetLine > 0 && changedOld.length >= 2) {
+                  console.log('[Inline Edit] Searching lines', Math.max(0, targetLine - 6), 'to', Math.min(originalContent.split('\n').length, targetLine + 5));
+                  const lines = originalContent.split('\n');
+                  // Search 10 lines around target
+                  const startLine = Math.max(0, targetLine - 6);
+                  const endLine = Math.min(lines.length, targetLine + 5);
+
+                  for (let lineNum = startLine; lineNum < endLine; lineNum++) {
+                    const line = lines[lineNum];
+                    // Check if this line contains the changed text (may be wrapped in JSX tags)
+                    if (line.includes(changedOld)) {
+                      // Found it! Replace in this line only
+                      lines[lineNum] = line.replace(changedOld, changedNew);
+                      patchedContent = lines.join('\n');
+                      console.log('[Inline Edit] ✅ Replaced in line', lineNum + 1);
+                      break;
+                    }
+                  }
+
+                  // If still not found, try partial word match (in case DOM stripped quotes/entities)
+                  if (patchedContent === originalContent && changedOld.length >= 4) {
+                    const partialOld = changedOld.replace(/^["']|["']$/g, '').trim();
+                    if (partialOld.length >= 3) {
+                      for (let lineNum = startLine; lineNum < endLine; lineNum++) {
+                        const line = lines[lineNum];
+                        if (line.includes(partialOld)) {
+                          lines[lineNum] = line.replace(partialOld, changedNew.replace(/^["']|["']$/g, '').trim());
+                          patchedContent = lines.join('\n');
+                          console.log('[Inline Edit] ✅ Replaced partial match in line', lineNum + 1);
+                          break;
+                        }
+                      }
+                    }
+                  }
+                } else if (changedOld && changedOld.length >= 2) {
+                  console.log('[Inline Edit] No targetLine, trying global search for changedOld');
+                  // Fallback: Search entire file for changedOld and count occurrences
+                  const escapedChanged = changedOld.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                  const changedCount = (originalContent.match(new RegExp(escapedChanged, 'g')) || []).length;
+                  console.log('[Inline Edit] Found', changedCount, 'occurrences of changedOld globally');
+                  if (changedCount === 1) {
+                    patchedContent = originalContent.replace(changedOld, changedNew);
+                    console.log('[Inline Edit] ✅ Replaced single global occurrence');
+                  }
+                }
+              }
+
+              if (patchedContent === originalContent) {
+                console.error('[Inline Edit] Could not find text to replace. Old text:', JSON.stringify(oldText.substring(0, 100)));
+                console.error('[Inline Edit] targetLine was:', targetLine);
+                return;
+              }
+
+              // Write immediately
+              const writeResult = await fileService.writeFile(filePath, patchedContent);
+              if (writeResult.success) {
+                console.log('[Inline Edit] ✅ INSTANT SAVED:', filePath);
+                addEditedFile({
+                  path: filePath,
+                  additions: 1,
+                  deletions: 1,
+                });
+              } else {
+                console.error('[Inline Edit] Write failed:', writeResult.error);
+              }
+            } catch (e) {
+              console.error('[Inline Edit] Error:', e);
+            }
+          })();
+        } else if (projectPath && data.oldText && data.newText) {
+          // FALLBACK: Search for text in source files when sourceLocation is not available
+          console.log('[Inline Edit] No sourceLocation - attempting text search fallback');
+          (async () => {
+            try {
+              const oldText = data.oldText!;
+              // Search for the text in source files
+              const searchResult = await window.electronAPI?.files?.searchInFiles(
+                oldText.substring(0, 50), // Use first 50 chars for search
+                projectPath,
+                { filePattern: '*.{tsx,jsx,ts,js}', maxResults: 10 }
+              );
+
+              if (searchResult?.success && searchResult.data && searchResult.data.length > 0) {
+                // Filter to find best match (prefer src/ files)
+                type Match = { file: string; line: number; content: string };
+                const matches = searchResult.data
+                  .filter((r: Match) => !r.file.includes('node_modules'))
+                  .filter((r: Match) => r.file.includes('src/') || r.file.includes('app/') || r.file.includes('components/'));
+
+                const bestMatch = matches[0] || searchResult.data.find((r: Match) => !r.file.includes('node_modules'));
+
+                if (bestMatch) {
+                  const filePath = bestMatch.file.startsWith('/') ? bestMatch.file : `${projectPath}/${bestMatch.file}`;
+                  console.log('[Inline Edit] Found text in:', filePath);
+
+                  const readResult = await fileService.readFile(filePath);
+                  if (!readResult.success || !readResult.content) {
+                    console.error('[Inline Edit] Could not read file');
+                    return;
+                  }
+
+                  const originalContent = readResult.content;
+                  // Simple find/replace
+                  if (originalContent.includes(oldText)) {
+                    const patchedContent = originalContent.replace(oldText, data.newText!);
+                    const writeResult = await fileService.writeFile(filePath, patchedContent);
+                    if (writeResult.success) {
+                      console.log('[Inline Edit] ✅ FALLBACK SAVED:', filePath);
+                      addEditedFile({ path: filePath, additions: 1, deletions: 1 });
+                    }
+                  }
+                }
+              } else {
+                console.log('[Inline Edit] Text not found in project files');
+              }
+            } catch (e) {
+              console.error('[Inline Edit] Fallback search failed:', e);
+            }
+          })();
         } else {
-          console.log('[Inline Edit] Cannot create source patch - missing source location or project path', {
-            hasSourceLocation: !!elementWithSource?.sourceLocation?.sources?.[0],
-            projectPath,
-            element: elementWithSource?.tagName
-          });
+          console.log('[Inline Edit] Cannot save - missing project path or text');
         }
 
         setMessages(prev => [...prev, {
@@ -7308,6 +7520,21 @@ ${selectedElement.text ? `- Text Content: "${selectedElement.text}"` : ''}
 ${selectedElement.attributes ? `- Attributes: ${JSON.stringify(selectedElement.attributes)}` : ''}
 ${selectedElement.computedStyle ? `- Computed Style: display=${selectedElement.computedStyle.display}, position=${selectedElement.computedStyle.position}, color=${selectedElement.computedStyle.color}, bg=${selectedElement.computedStyle.backgroundColor}` : ''}
 ${selectedElement.rect ? `- Current Position: ${Math.round(selectedElement.rect.width)}x${Math.round(selectedElement.rect.height)} at (${Math.round(selectedElement.rect.left)}, ${Math.round(selectedElement.rect.top)})` : ''}
+${selectedElement.sourceLocation ? (() => {
+  // Extract the actual file path from summary if sources[0].file is just a component name
+  const src = selectedElement.sourceLocation.sources?.[0];
+  let filePath = src?.file || '';
+  let lineNum = src?.line || 0;
+  // If file is just a name (no /), try to extract path from summary: "ComponentName (used in /path/file.tsx:123)"
+  if (!filePath.includes('/') && selectedElement.sourceLocation.summary) {
+    const match = selectedElement.sourceLocation.summary.match(/\(used in ([^:]+):(\d+)\)/);
+    if (match) {
+      filePath = match[1];
+      lineNum = parseInt(match[2], 10);
+    }
+  }
+  return `- Source Location: ${filePath}${lineNum ? `:${lineNum}` : ''} (${selectedElement.sourceLocation.summary || 'no summary'})`;
+})() : ''}
 ${hasTargetPosition ? `
 <repositioning_request>
 The user wants to MOVE this element to a new position.
@@ -7725,13 +7952,15 @@ If you're not sure what the user wants, ask for clarification.
         hasSelectedElement: !!selectedElement,
         hasGoogleProvider: !!googleProvider?.apiKey,
         hasSourceLocation: !!selectedElement?.sourceLocation?.sources?.[0],
+        instantUIDisabled: appSettings.instantUIDisabled,
       });
 
       // If ui_modify intent but no element selected, let it fall through to normal chat
       // (don't block - user might want to describe the element)
 
       // INSTANT UI PATH: Element selected with source location = fast path
-      if (intent.type === 'ui_modify' && selectedElement && selectedElement.sourceLocation?.sources?.[0]) {
+      // Skip if instantUIDisabled is true - user wants to use source patches only
+      if (intent.type === 'ui_modify' && selectedElement && selectedElement.sourceLocation?.sources?.[0] && !appSettings.instantUIDisabled) {
         console.log('[Instant UI] Triggering instant UI update with source patch...');
         console.log('[Instant UI] Selected element:', {
           tagName: selectedElement.tagName,
@@ -8413,13 +8642,18 @@ If you're not sure what the user wants, ask for clarification.
               for (const tr of step.toolResults) {
                 const toolId = tr.toolCallId;
                 const toolName = tr.toolName?.replace(/^mcp_[^_]+_/, '') || 'tool';
-                // Match by ID first, then by name (fallback for tools without IDs)
-                const existing = toolId
-                  ? accumulatedToolCalls.find(t => t.id === toolId)
-                  : accumulatedToolCalls.find(t => t.name === toolName && t.status === 'running');
+                // Normalize name for matching (lowercase, remove underscores)
+                const normalizedName = toolName.toLowerCase().replace(/_/g, '');
+                // Match by ID first, then fall back to normalized name
+                const existing = (toolId && accumulatedToolCalls.find(t => t.id === toolId))
+                  || accumulatedToolCalls.find(t => t.name.toLowerCase().replace(/_/g, '') === normalizedName && t.status === 'running')
+                  || accumulatedToolCalls.find(t => t.status === 'running'); // Last resort: any running tool
                 if (existing) {
                   existing.status = (tr.result as any)?.error ? 'error' : 'done';
                   existing.result = tr.result;
+                  console.log('[AI SDK] Marked tool as done:', existing.name, existing.status);
+                } else {
+                  console.warn('[AI SDK] Could not find tool to mark as done:', toolName, toolId);
                 }
               }
             }
@@ -8458,9 +8692,17 @@ If you're not sure what the user wants, ask for clarification.
         setAgentProcessing(false);
         setConnectionState('idle'); // Move to idle state (connected but not streaming)
 
-        // Capture final tool states before clearing streaming message
-        if (streamingMessage?.toolCalls && streamingMessage.toolCalls.length > 0) {
-          const finalToolStates = streamingMessage.toolCalls.map(tc => ({
+        // Force-complete any tools still marked as 'running' (matching may have failed)
+        for (const tc of accumulatedToolCalls) {
+          if (tc.status === 'running') {
+            console.warn('[AI SDK] Force-completing stuck tool:', tc.name);
+            tc.status = 'done';
+          }
+        }
+
+        // Capture final tool states from accumulatedToolCalls (not stale streamingMessage closure)
+        if (accumulatedToolCalls.length > 0) {
+          const finalToolStates = accumulatedToolCalls.map(tc => ({
             id: tc.id,
             name: tc.name,
             status: (tc.status === 'error' ? 'error' : 'success') as 'success' | 'error',
@@ -8705,8 +8947,24 @@ If you're not sure what the user wants, ask for clarification.
     } finally {
       // Always clean up streaming state, even on error
       setIsStreaming(false);
-      setStreamingMessage(null);
       setAgentProcessing(false);
+
+      // Force-finalize any tool calls that are still showing as 'running'
+      // This ensures chips show completion state even if callbacks didn't fire properly
+      setStreamingMessage(prev => {
+        if (prev && prev.toolCalls && prev.toolCalls.length > 0) {
+          // Capture final tool states before clearing
+          const finalTools = prev.toolCalls.map(tc => ({
+            id: tc.id,
+            name: tc.name,
+            status: (tc.status === 'error' ? 'error' : 'success') as 'success' | 'error',
+            timestamp: new Date(),
+          }));
+          // Set completed tool calls for display after streaming ends
+          setCompletedToolCalls(current => current.length > 0 ? current : finalTools);
+        }
+        return null;
+      });
       // Note: Don't call cancelAI() here - it causes race conditions with tool approvals
       // The generating state is already managed by the stream completion callbacks
     }

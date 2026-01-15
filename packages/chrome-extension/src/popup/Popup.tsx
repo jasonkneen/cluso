@@ -77,7 +77,7 @@ export function Popup() {
   }, [])
 
   return (
-    <div className="flex flex-col h-full bg-[#0f0f0f]">
+    <div className="flex flex-col w-full h-full bg-black/70 backdrop-blur-xl rounded-md overflow-hidden border border-white/10">
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 border-b border-white/10">
         <div className="flex items-center gap-2">

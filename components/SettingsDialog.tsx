@@ -133,6 +133,8 @@ export interface AppSettings {
   connections: Connection[]
   clusoCloudEditsEnabled?: boolean
   fastPathAutoApplyEnabled?: boolean
+  // Instant UI / DOM editing disabled
+  instantUIDisabled?: boolean
   // Claude Code OAuth state
   claudeCodeAuthenticated?: boolean
   claudeCodeExpiresAt?: number | null
@@ -157,6 +159,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   windowBlur: 12,
   clusoCloudEditsEnabled: false,
   fastPathAutoApplyEnabled: false,
+  instantUIDisabled: false,
   providers: [
     { id: 'google', name: 'Google AI (Gemini)', apiKey: '', enabled: true },
     { id: 'openai', name: 'OpenAI', apiKey: '', enabled: false },
@@ -2899,6 +2902,42 @@ serve"
       case 'pro':
         return (
           <div className="space-y-6">
+            {/* Instant UI Master Kill Switch */}
+            <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-neutral-800/60 border-neutral-700' : 'bg-stone-50 border-stone-200'}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${isDarkMode ? 'bg-red-500/20' : 'bg-red-100'}`}>
+                    <XCircle size={18} className={isDarkMode ? 'text-red-300' : 'text-red-700'} />
+                  </div>
+                  <div>
+                    <h3 className={`font-semibold ${isDarkMode ? 'text-white' : 'text-stone-900'}`}>Disable Instant UI / DOM Editing</h3>
+                    <p className={`text-sm ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>
+                      Completely disables all instant DOM preview and editing features. Changes will only be applied through source code patches.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => updateSettings({ instantUIDisabled: !settings.instantUIDisabled })}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium border transition ${
+                    settings.instantUIDisabled
+                      ? isDarkMode
+                        ? 'bg-red-600 text-white border-red-500'
+                        : 'bg-red-600 text-white border-red-600'
+                      : isDarkMode
+                        ? 'bg-neutral-800 text-neutral-200 border-neutral-600 hover:bg-neutral-700'
+                        : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
+                  }`}
+                >
+                  {settings.instantUIDisabled ? 'Disabled' : 'Disable'}
+                </button>
+              </div>
+              <div className={`mt-3 p-3 rounded-lg ${isDarkMode ? 'bg-neutral-900/60' : 'bg-white'} border ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
+                <p className={`text-xs ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>
+                  When enabled, clicking an element will not apply any live DOM changes. Use this if you prefer reviewing and applying all changes through the source code patch workflow.
+                </p>
+              </div>
+            </div>
+
             <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-neutral-800/60 border-neutral-700' : 'bg-stone-50 border-stone-200'}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">

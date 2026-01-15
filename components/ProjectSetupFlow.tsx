@@ -2,16 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { CheckCircle2, Circle, Loader2, XCircle, Globe, ChevronRight, AlertCircle, Sparkles } from 'lucide-react'
 import { getAdapter } from '../src/adapters'
 
-declare global {
-  interface Window {
-    electronAPI?: {
-      projectRunner?: {
-        getStatus: (projectPath: string) => Promise<{ success: boolean; status?: { running: boolean; command?: string | null } }>
-        start: (payload: { projectPath: string; command: string }) => Promise<{ success: boolean }>
-      }
-    }
-  }
-}
+// Types for window.electronAPI are defined in types/electron.d.ts
 
 interface SetupStep {
   id: string

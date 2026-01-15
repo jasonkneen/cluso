@@ -18,7 +18,7 @@ export function ElementPreview({ element, onClear }: ElementPreviewProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Element header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-blue-500/10 border-b border-blue-500/20">
+      <div className="flex items-center justify-between px-4 py-2 bg-transparent border-b border-white/10">
         <div className="flex items-center gap-2">
           <span className="text-blue-400 font-mono text-sm">
             &lt;{element.tagName}&gt;
@@ -49,7 +49,7 @@ export function ElementPreview({ element, onClear }: ElementPreviewProps) {
         {element.text && (
           <div>
             <h4 className="text-xs font-medium text-white/40 mb-1">Text</h4>
-            <p className="text-sm text-white/80 bg-white/5 rounded px-2 py-1 font-mono text-xs">
+            <p className="text-sm text-white/80 bg-white/[0.03] rounded px-2 py-1 font-mono text-xs">
               {element.text}
             </p>
           </div>
@@ -59,7 +59,7 @@ export function ElementPreview({ element, onClear }: ElementPreviewProps) {
         {element.className && (
           <div>
             <h4 className="text-xs font-medium text-white/40 mb-1">Class</h4>
-            <p className="text-sm text-white/80 bg-white/5 rounded px-2 py-1 font-mono text-xs break-all">
+            <p className="text-sm text-white/80 bg-white/[0.03] rounded px-2 py-1 font-mono text-xs break-all">
               {typeof element.className === 'string' ? element.className : ''}
             </p>
           </div>
@@ -75,7 +75,7 @@ export function ElementPreview({ element, onClear }: ElementPreviewProps) {
               {componentStack.map((comp, index) => (
                 <div
                   key={index}
-                  className="flex items-center gap-2 text-xs bg-white/5 rounded px-2 py-1.5"
+                  className="flex items-center gap-2 text-xs bg-white/[0.03] rounded px-2 py-1.5"
                 >
                   <span className="text-purple-400 font-medium">
                     {comp.componentName}
@@ -114,7 +114,7 @@ export function ElementPreview({ element, onClear }: ElementPreviewProps) {
         {element.xpath && (
           <div>
             <h4 className="text-xs font-medium text-white/40 mb-1">XPath</h4>
-            <p className="text-xs text-white/60 bg-white/5 rounded px-2 py-1 font-mono break-all">
+            <p className="text-xs text-white/60 bg-white/[0.03] rounded px-2 py-1 font-mono break-all">
               {element.xpath}
             </p>
           </div>

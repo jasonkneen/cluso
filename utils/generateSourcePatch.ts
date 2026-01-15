@@ -2079,9 +2079,31 @@ export async function generateSourcePatch(
     return null
   }
 
-  const source = element.sourceLocation.sources[0]
+  // Try to find the best source: one with a full path (contains /) and valid line number
+  let source = element.sourceLocation.sources[0]
+  for (const s of element.sourceLocation.sources) {
+    if (s.file && s.file.includes('/') && s.line > 0) {
+      source = s
+      console.log('[Source Patch] Selected better source with full path:', s.file, 'line:', s.line)
+      break
+    }
+  }
+
   let filePath = source.file
-  console.log('[Source Patch] STEP 2: Resolving file path...', filePath, 'line:', source.line)
+  let targetLine = source.line
+
+  // If source.file is just a filename without path and line is 0,
+  // try to extract path from summary (format: "ComponentName (used in /path/file.tsx:line)")
+  if (!filePath.includes('/') && (targetLine === 0 || !targetLine)) {
+    const summaryMatch = element.sourceLocation.summary?.match(/\(used in ([^:]+):(\d+)\)/)
+    if (summaryMatch) {
+      filePath = summaryMatch[1]
+      targetLine = parseInt(summaryMatch[2], 10)
+      console.log('[Source Patch] Extracted path from summary:', filePath, 'line:', targetLine)
+    }
+  }
+
+  console.log('[Source Patch] STEP 2: Resolving file path...', filePath, 'line:', targetLine)
 
   // Resolve path (now async to support file searching)
   console.log('[Source Patch] STEP 2a: Calling resolveFilePath...')
@@ -2173,7 +2195,7 @@ export async function generateSourcePatch(
   if (hasEffectiveSrcChange && !hasCssChanges && !hasTextChange) {
     const patchedContent = tryFastPathSrcChange(
       originalContent,
-      source.line,
+      targetLine,
       effectiveSrcChange!.newSrc,
       effectiveSrcChange?.oldSrc
     )
@@ -2183,7 +2205,7 @@ export async function generateSourcePatch(
         filePath,
         originalContent,
         patchedContent,
-        lineNumber: source.line,
+        lineNumber: targetLine,
         generatedBy: 'fast-path',
       }
     }
@@ -2192,14 +2214,14 @@ export async function generateSourcePatch(
 
   // Fast path for className changes requested by the user
   if (!hasEffectiveSrcChange && !hasCssChanges && !hasTextChange && userRequest) {
-    const patchedContent = tryFastPathClassNameChange(originalContent, source.line, element, userRequest)
+    const patchedContent = tryFastPathClassNameChange(originalContent, targetLine, element, userRequest)
     if (patchedContent && patchedContent !== originalContent) {
       console.log('[Source Patch] FAST PATH SUCCESS - updated className directly')
       return {
         filePath,
         originalContent,
         patchedContent,
-        lineNumber: source.line,
+        lineNumber: targetLine,
         generatedBy: 'fast-path',
       }
     }
@@ -2211,7 +2233,7 @@ export async function generateSourcePatch(
     // This makes the scoped fast-path succeed even when oldText appears multiple times in the file.
     const effectiveTargetLine = deriveEffectiveTargetLine({
       lines: originalContent.split('\n'),
-      sourceLine: source.line,
+      sourceLine: targetLine,
       element,
       textChange,
     })
@@ -2239,7 +2261,7 @@ export async function generateSourcePatch(
     // This also helps attribute-only matching (e.g., SVG <path d="..."> with no class/id).
     const effectiveTargetLine = deriveEffectiveTargetLine({
       lines: originalContent.split('\n'),
-      sourceLine: source.line,
+      sourceLine: targetLine,
       element,
       textChange: textChange || undefined,
     })
@@ -2259,14 +2281,14 @@ export async function generateSourcePatch(
 
   // Fast path for Tailwind class toggling (dark:, hover:, etc.)
   if (userRequest && /(?:toggle|add|remove)\s+(?:dark:|hover:|focus:|active:|md:|lg:|xl:|sm:)?\S+/i.test(userRequest)) {
-    const patchedContent = tryFastPathTailwindToggle(originalContent, source.line, element, userRequest)
+    const patchedContent = tryFastPathTailwindToggle(originalContent, targetLine, element, userRequest)
     if (patchedContent && patchedContent !== originalContent) {
       console.log('[Source Patch] FAST PATH SUCCESS - Tailwind class toggled')
       return {
         filePath,
         originalContent,
         patchedContent,
-        lineNumber: source.line,
+        lineNumber: targetLine,
         generatedBy: 'fast-path',
       }
     }
@@ -2277,14 +2299,14 @@ export async function generateSourcePatch(
   if (boolPropMatch) {
     const propName = boolPropMatch[1]
     const shouldBePresent = !/remove/i.test(userRequest!)
-    const patchedContent = tryFastPathBooleanPropChange(originalContent, source.line, element, propName, shouldBePresent)
+    const patchedContent = tryFastPathBooleanPropChange(originalContent, targetLine, element, propName, shouldBePresent)
     if (patchedContent && patchedContent !== originalContent) {
       console.log('[Source Patch] FAST PATH SUCCESS - boolean prop changed')
       return {
         filePath,
         originalContent,
         patchedContent,
-        lineNumber: source.line,
+        lineNumber: targetLine,
         generatedBy: 'fast-path',
       }
     }
@@ -2295,14 +2317,14 @@ export async function generateSourcePatch(
   if (attrMatch) {
     const attrName = attrMatch[1]
     const newValue = attrMatch[2].trim()
-    const patchedContent = tryFastPathAttributeChange(originalContent, source.line, element, attrName, newValue)
+    const patchedContent = tryFastPathAttributeChange(originalContent, targetLine, element, attrName, newValue)
     if (patchedContent && patchedContent !== originalContent) {
       console.log('[Source Patch] FAST PATH SUCCESS - attribute changed')
       return {
         filePath,
         originalContent,
         patchedContent,
-        lineNumber: source.line,
+        lineNumber: targetLine,
         generatedBy: 'fast-path',
       }
     }
@@ -2316,7 +2338,7 @@ export async function generateSourcePatch(
   if (astEditInfo) {
     console.log(`[Source Patch] Trying AST patch for edit type: ${astEditInfo.type}`)
     const astResult = tryAstPatch(originalContent, astEditInfo.type, astEditInfo.change, {
-      sourceLine: source.line,
+      sourceLine: targetLine,
       element,
     })
 
@@ -2326,7 +2348,7 @@ export async function generateSourcePatch(
         filePath,
         originalContent,
         patchedContent: astResult.code,
-        lineNumber: source.line,
+        lineNumber: targetLine,
         generatedBy: 'fast-path', // Counts as fast-path for metrics
         durationMs: astResult.durationMs,
       }
@@ -2338,7 +2360,7 @@ export async function generateSourcePatch(
 
   // Extract code snippet around target line
   const lines = originalContent.split('\n')
-  let targetLine = source.line
+  // targetLine was already set from targetLine or extracted from summary above
 
   if (targetLine > lines.length) {
     console.log('[Source Patch] Source map line', targetLine, 'exceeds file length', lines.length)
@@ -2405,7 +2427,7 @@ export async function generateSourcePatch(
               filePath,
               originalContent,
               patchedContent: fullPatchedContent,
-              lineNumber: source.line,
+              lineNumber: targetLine,
               generatedBy: 'fast-apply',
             }
           }
@@ -2444,7 +2466,7 @@ export async function generateSourcePatch(
         filePath,
         originalLength: originalContent.length,
         patchedLength: fullPatchedContent.length,
-        lineNumber: source.line,
+        lineNumber: targetLine,
         durationMs: fastApplyResult.durationMs,
       })
       console.log('='.repeat(60))
@@ -2452,7 +2474,7 @@ export async function generateSourcePatch(
         filePath,
         originalContent,
         patchedContent: fullPatchedContent,
-        lineNumber: source.line,
+        lineNumber: targetLine,
         generatedBy: 'fast-apply',
         durationMs: fastApplyResult.durationMs,
       }
@@ -2518,7 +2540,7 @@ export async function generateSourcePatch(
     filePath,
     originalLength: originalContent.length,
     patchedLength: fullPatchedContent.length,
-    lineNumber: source.line,
+    lineNumber: targetLine,
     changed: originalContent !== fullPatchedContent,
   })
   console.log('='.repeat(60))
@@ -2527,7 +2549,7 @@ export async function generateSourcePatch(
     filePath,
     originalContent,
     patchedContent: fullPatchedContent,
-    lineNumber: source.line,
+    lineNumber: targetLine,
     generatedBy: 'gemini',
   }
 }

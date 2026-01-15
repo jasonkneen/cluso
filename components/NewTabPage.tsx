@@ -124,24 +124,7 @@ interface NewTabPageProps {
   lockedProjectPath?: string | null  // If set, this window is locked to this project
 }
 
-// Declare electronAPI type
-declare global {
-  interface Window {
-    electronAPI?: {
-      dialog: {
-        openFolder: () => Promise<{ success: boolean; canceled?: boolean; data?: { path: string; name: string } }>
-      }
-      window: {
-        openProject: (path: string, name: string) => Promise<{ success: boolean; action: string; windowId: number; alreadyOpen: boolean }>
-        isProjectOpen: (path: string) => Promise<{ isOpen: boolean; windowId: number | null }>
-        focus: (windowId: number) => Promise<{ success: boolean }>
-      }
-      projectRunner?: {
-        getStatus: (projectPath: string) => Promise<{ success: boolean; status?: { running: boolean } }>
-      }
-    }
-  }
-}
+// Types for window.electronAPI are defined in types/electron.d.ts
 
 export function NewTabPage({
   onOpenProject,

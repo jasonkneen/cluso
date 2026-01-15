@@ -10,14 +10,7 @@ import type {
   SubscriptionUnsubscribe,
 } from './types'
 
-declare global {
-  interface Window {
-    electronAPI?: {
-      isElectron: boolean
-      [key: string]: unknown
-    }
-  }
-}
+// Types for window.electronAPI are defined in types/electron.d.ts
 
 /**
  * Create an Electron API adapter

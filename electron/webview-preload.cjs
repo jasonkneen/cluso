@@ -2341,9 +2341,10 @@ function getSourceLocation(el) {
           console.log('[Preload] Retrieved source location:', sourceLocation.summary)
           resolve(sourceLocation)
         } else {
+          console.log('[Preload] No source location found (timeout reached)')
           resolve(null)
         }
-      }, 300) // Increased timeout for async operations
+      }, 500) // Timeout for async operations
     } catch (err) {
       console.error('[Preload] Failed to get source location:', err)
       resolve(null)
@@ -2464,6 +2465,7 @@ function createEditToolbar(element) {
     const newText = element.textContent
     const xpath = getXPath(element)
     // Include source location captured when editing started
+    console.log('[Inline Edit] Accept clicked, sourceLocation:', editingSourceLocation?.summary || 'NONE')
     ipcRenderer.sendToHost('inline-edit-accept', {
       oldText: originalTextContent,
       newText: newText,

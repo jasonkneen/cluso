@@ -172,20 +172,21 @@ ${INSPECTOR_OVERLAY_STYLES}
   transform: translateX(-50%) translateY(10px);
   width: 380px;
   max-height: 0;
-  overflow: hidden;
-  background: rgba(15, 15, 15, 0.95);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-radius: 16px;
+  overflow: visible;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   margin-bottom: 8px;
   opacity: 0;
   transition: max-height 0.3s ease, opacity 0.2s ease, transform 0.3s ease;
 }
 
 #cluso-chat-panel.open {
-  max-height: 400px;
+  max-height: 500px;
+  overflow-y: auto;
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
@@ -232,10 +233,10 @@ ${INSPECTOR_OVERLAY_STYLES}
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
+  padding: 5px 10px;
   background: rgba(59, 130, 246, 0.15);
   border: 1px solid rgba(59, 130, 246, 0.3);
-  border-radius: 6px;
+  border-radius: 9999px;
   font-size: 11px;
   color: #60a5fa;
 }
