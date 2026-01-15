@@ -48,6 +48,12 @@ export const TerminalNode = memo(function TerminalNode({
   const initializedRef = useRef(false)
   const fitTimerRef = useRef<number | null>(null)
 
+  // Refs for initialization values to avoid re-running mount effect
+  const isDarkModeRef = useRef(isDarkMode)
+  isDarkModeRef.current = isDarkMode
+  const wsUrlRef = useRef(wsUrl)
+  wsUrlRef.current = wsUrl
+
   // Ensure Ghostty/xterm DOM uses CSS percentages (not pixel sizing)
   const fixTerminalSizing = useCallback(() => {
     const container = containerRef.current
@@ -65,6 +71,10 @@ export const TerminalNode = memo(function TerminalNode({
       }
     })
   }, [])
+
+  // Ref for fixTerminalSizing to avoid re-running mount effect
+  const fixTerminalSizingRef = useRef(fixTerminalSizing)
+  fixTerminalSizingRef.current = fixTerminalSizing
 
   // Initialize terminal - runs once on mount
   useEffect(() => {
@@ -87,15 +97,17 @@ export const TerminalNode = memo(function TerminalNode({
         // Mark as initialized BEFORE creating terminal to prevent race conditions
         initializedRef.current = true
 
+        // Use refs for current values at init time
+        const darkMode = isDarkModeRef.current
         const term = new ghostty.Terminal({
           cols: 80,
           rows: 24,
           fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, monospace',
           fontSize: 13,
           theme: {
-            background: isDarkMode ? '#1e1e1e' : '#fafaf9',
-            foreground: isDarkMode ? '#d4d4d4' : '#292524',
-            cursor: isDarkMode ? '#d4d4d4' : '#292524',
+            background: darkMode ? '#1e1e1e' : '#fafaf9',
+            foreground: darkMode ? '#d4d4d4' : '#292524',
+            cursor: darkMode ? '#d4d4d4' : '#292524',
           },
         })
 
@@ -109,15 +121,16 @@ export const TerminalNode = memo(function TerminalNode({
         fitAddonRef.current = fitAddon
 
         // Force Ghostty DOM to 100% sizing (fit sets pixel values)
-        fixTerminalSizing()
+        fixTerminalSizingRef.current()
 
         // Connect to WebSocket PTY
-        if (wsUrl && mounted) {
+        const currentWsUrl = wsUrlRef.current
+        if (currentWsUrl && mounted) {
           // @ts-expect-error - terminal type
           const cols = term.cols || 80
           // @ts-expect-error - terminal type
           const rows = term.rows || 24
-          const url = `${wsUrl}?cols=${cols}&rows=${rows}`
+          const url = `${currentWsUrl}?cols=${cols}&rows=${rows}`
 
           ws = new WebSocket(url)
           wsRef.current = ws
@@ -193,7 +206,7 @@ export const TerminalNode = memo(function TerminalNode({
       // Reset initialized flag on unmount so a new instance can initialize
       initializedRef.current = false
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   // Fit terminal when size changes
   useEffect(() => {

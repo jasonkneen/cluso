@@ -1,6 +1,6 @@
 
 
-import React from "react"
+import React, { memo } from "react"
 import { cn } from "@/lib/utils"
 import { format } from "date-fns"
 import { Calendar, FileIcon, Star, BellIcon } from "lucide-react"
@@ -23,14 +23,14 @@ interface TodoItemProps {
   isDraggingOverlay?: boolean
 }
 
-const TodoItem: React.FC<TodoItemProps> = ({
+const TodoItem = memo(function TodoItem({
   todo,
   onClick,
   onStatusChange,
   viewMode,
   onStarToggle,
   isDraggingOverlay = false
-}) => {
+}: TodoItemProps) {
   const completedSubTasks = todo.subTasks?.filter((st) => st.completed).length || 0
   const totalSubTasks = todo.subTasks?.length || 0
 
@@ -250,6 +250,13 @@ const TodoItem: React.FC<TodoItemProps> = ({
       </Card>
     </div>
   )
-}
+}, (prev, next) =>
+  prev.todo.id === next.todo.id &&
+  prev.todo.status === next.todo.status &&
+  prev.todo.starred === next.todo.starred &&
+  prev.todo.title === next.todo.title &&
+  prev.viewMode === next.viewMode &&
+  prev.isDraggingOverlay === next.isDraggingOverlay
+)
 
 export default TodoItem

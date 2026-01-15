@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, memo } from 'react'
 import { ChevronDown, ChevronRight, Frame, FileText, Box, Type, MousePointer, Link2, FormInput, Image, List } from 'lucide-react'
 
 // Utility function for class names
@@ -74,7 +74,7 @@ interface TreeItemProps {
   onToggleExpand: (id: string) => void
 }
 
-const TreeItem = ({ node, level, onSelect, selectedId, isDarkMode, getIsExpanded, onToggleExpand }: TreeItemProps) => {
+const TreeItem = memo(function TreeItem({ node, level, onSelect, selectedId, isDarkMode, getIsExpanded, onToggleExpand }: TreeItemProps) {
   const hasChildren = node.children && node.children.length > 0
   const isSelected = selectedId === node.id
   const isExpanded = getIsExpanded(node.id, level)
@@ -157,7 +157,13 @@ const TreeItem = ({ node, level, onSelect, selectedId, isDarkMode, getIsExpanded
       )}
     </>
   )
-}
+}, (prev, next) =>
+  prev.node.id === next.node.id &&
+  prev.node.name === next.node.name &&
+  prev.level === next.level &&
+  prev.selectedId === next.selectedId &&
+  prev.isDarkMode === next.isDarkMode
+)
 
 export const ComponentTree = ({ data, selectedId, onSelect, isDarkMode = false }: ComponentTreeProps) => {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())

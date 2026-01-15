@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, memo } from 'react'
 import { ChevronDown, ChevronRight, File, Folder, FolderOpen } from 'lucide-react'
 
 // Utility for class names
@@ -30,7 +30,7 @@ interface TreeItemProps {
   onToggleExpand: (path: string) => void
 }
 
-const TreeItem = ({
+const TreeItem = memo(function TreeItem({
   node,
   level,
   onSelect,
@@ -38,7 +38,7 @@ const TreeItem = ({
   isDarkMode,
   expandedPaths,
   onToggleExpand
-}: TreeItemProps) => {
+}: TreeItemProps) {
   const isDirectory = node.type === 'directory'
   const hasChildren = node.children && node.children.length > 0
   const isSelected = selectedPath === node.path
@@ -110,7 +110,14 @@ const TreeItem = ({
       )}
     </>
   )
-}
+}, (prev, next) =>
+  prev.node.path === next.node.path &&
+  prev.node.type === next.node.type &&
+  prev.level === next.level &&
+  prev.selectedPath === next.selectedPath &&
+  prev.isDarkMode === next.isDarkMode &&
+  prev.expandedPaths === next.expandedPaths
+)
 
 export const FileTree = ({
   rootPath,

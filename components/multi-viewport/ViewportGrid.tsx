@@ -128,6 +128,12 @@ export function ViewportGrid({
   const isInitialMount = useRef(true)
   const saveTimerRef = useRef<number | null>(null)
 
+  // Refs for callback props to avoid triggering effects when function identity changes
+  const onViewportCountChangeRef = useRef(onViewportCountChange)
+  onViewportCountChangeRef.current = onViewportCountChange
+  const onViewportsChangeRef = useRef(onViewportsChange)
+  onViewportsChangeRef.current = onViewportsChange
+
   // Canvas zoom
   const [scale, setScale] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
@@ -547,9 +553,9 @@ export function ViewportGrid({
 
   // Notify parent when viewport count changes (separate effect to avoid loops)
   useEffect(() => {
-    onViewportCountChange?.(viewports.length)
-    onViewportsChange?.(viewports)
-  }, [viewports.length]) // eslint-disable-line react-hooks/exhaustive-deps
+    onViewportCountChangeRef.current?.(viewports.length)
+    onViewportsChangeRef.current?.(viewports)
+  }, [viewports.length, viewports])
 
   return (
     <div

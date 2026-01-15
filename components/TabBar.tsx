@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, memo } from 'react'
 import { Plus, X, Sun, Moon, Settings, Globe, LayoutGrid, CheckSquare, FileText, Columns3, Zap, FolderOpen, Eye, Plug2 } from 'lucide-react'
 import { useTheme } from '../hooks/useTheme'
 
@@ -46,6 +46,115 @@ function getTabIcon(type: TabType) {
     default: return Globe
   }
 }
+
+interface TabItemProps {
+  tab: Tab
+  isActive: boolean
+  isDragging: boolean
+  isDragOver: boolean
+  isDarkMode: boolean
+  tabCount: number
+  onSelect: (tabId: string) => void
+  onClose: (tabId: string) => void
+  onDragStart: (e: React.DragEvent, tabId: string) => void
+  onDragEnd: (e: React.DragEvent) => void
+  onDragOver: (e: React.DragEvent, tabId: string) => void
+  onDragLeave: () => void
+  onDrop: (e: React.DragEvent, tabId: string) => void
+  draggable: boolean
+}
+
+const TabItem = memo(function TabItem({
+  tab,
+  isActive,
+  isDragging,
+  isDragOver,
+  isDarkMode,
+  tabCount,
+  onSelect,
+  onClose,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  draggable
+}: TabItemProps) {
+  const TabIcon = getTabIcon(tab.type || 'browser')
+
+  return (
+    <div
+      draggable={draggable}
+      onDragStart={(e) => onDragStart(e, tab.id)}
+      onDragEnd={onDragEnd}
+      onDragOver={(e) => onDragOver(e, tab.id)}
+      onDragLeave={onDragLeave}
+      onDrop={(e) => onDrop(e, tab.id)}
+      onClick={() => onSelect(tab.id)}
+      className={`
+        group relative flex items-center gap-2 h-8 px-3 rounded-lg cursor-pointer
+        transition-all duration-150 min-w-[120px] max-w-[200px]
+        ${isActive
+          ? isDarkMode
+            ? 'bg-neutral-700/80 text-white'
+            : 'bg-white text-stone-900 shadow-sm'
+          : isDarkMode
+            ? 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
+            : 'text-stone-500 hover:bg-stone-200/60 hover:text-stone-700'
+        }
+        ${isDragging ? 'opacity-50' : ''}
+        ${isDragOver ? (isDarkMode ? 'ring-2 ring-violet-500' : 'ring-2 ring-violet-400') : ''}
+      `}
+      style={{ position: 'relative', top: '3px' }}
+    >
+      {/* Tab Type Icon or Favicon - Project tabs get folder icon */}
+      {tab.isProject ? (
+        <FolderOpen size={14} className="flex-shrink-0 text-amber-500" />
+      ) : tab.type === 'browser' && tab.favicon ? (
+        <img src={tab.favicon} alt="" className="w-4 h-4 flex-shrink-0" />
+      ) : (
+        <TabIcon size={14} className="flex-shrink-0" />
+      )}
+
+      {/* Title */}
+      <span className="text-xs font-medium truncate flex-1">
+        {tab.title}
+      </span>
+
+      {/* Close button */}
+      {tabCount > 1 && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onClose(tab.id)
+          }}
+          className={`
+            w-4 h-4 rounded flex items-center justify-center flex-shrink-0
+            opacity-0 group-hover:opacity-100 transition-opacity
+            ${isDarkMode
+              ? 'hover:bg-neutral-600 text-neutral-400 hover:text-white'
+              : 'hover:bg-stone-300 text-stone-400 hover:text-stone-700'
+            }
+          `}
+        >
+          <X size={12} />
+        </button>
+      )}
+    </div>
+  )
+}, (prev, next) =>
+  prev.tab.id === next.tab.id &&
+  prev.tab.title === next.tab.title &&
+  prev.tab.type === next.tab.type &&
+  prev.tab.favicon === next.tab.favicon &&
+  prev.tab.isProject === next.tab.isProject &&
+  prev.isActive === next.isActive &&
+  prev.isDragging === next.isDragging &&
+  prev.isDragOver === next.isDragOver &&
+  prev.isDarkMode === next.isDarkMode &&
+  prev.tabCount === next.tabCount &&
+  prev.draggable === next.draggable
+)
 
 export function TabBar({
   tabs,
@@ -180,72 +289,25 @@ export function TabBar({
         className="flex-1 flex items-center gap-0.5 h-full overflow-x-auto overflow-y-visible px-1"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
-        {tabs.map((tab) => {
-          const TabIcon = getTabIcon(tab.type || 'browser')
-          const isDragging = draggedTabId === tab.id
-          const isDragOver = dragOverTabId === tab.id
-          return (
-            <div
-              key={tab.id}
-              draggable={!!onReorderTabs}
-              onDragStart={(e) => handleDragStart(e, tab.id)}
-              onDragEnd={handleDragEnd}
-              onDragOver={(e) => handleDragOver(e, tab.id)}
-              onDragLeave={handleDragLeave}
-              onDrop={(e) => handleDrop(e, tab.id)}
-              onClick={() => onTabSelect(tab.id)}
-              className={`
-                group relative flex items-center gap-2 h-8 px-3 rounded-lg cursor-pointer
-                transition-all duration-150 min-w-[120px] max-w-[200px]
-                ${tab.id === activeTabId
-                  ? isDarkMode
-                    ? 'bg-neutral-700/80 text-white'
-                    : 'bg-white text-stone-900 shadow-sm'
-                  : isDarkMode
-                    ? 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
-                    : 'text-stone-500 hover:bg-stone-200/60 hover:text-stone-700'
-                }
-                ${isDragging ? 'opacity-50' : ''}
-                ${isDragOver ? (isDarkMode ? 'ring-2 ring-violet-500' : 'ring-2 ring-violet-400') : ''}
-              `}
-              style={{ position: 'relative', top: '3px' }}
-            >
-              {/* Tab Type Icon or Favicon - Project tabs get folder icon */}
-              {tab.isProject ? (
-                <FolderOpen size={14} className="flex-shrink-0 text-amber-500" />
-              ) : tab.type === 'browser' && tab.favicon ? (
-                <img src={tab.favicon} alt="" className="w-4 h-4 flex-shrink-0" />
-              ) : (
-                <TabIcon size={14} className="flex-shrink-0" />
-              )}
-
-              {/* Title */}
-              <span className="text-xs font-medium truncate flex-1">
-                {tab.title}
-              </span>
-
-              {/* Close button */}
-              {tabs.length > 1 && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onTabClose(tab.id)
-                  }}
-                  className={`
-                    w-4 h-4 rounded flex items-center justify-center flex-shrink-0
-                    opacity-0 group-hover:opacity-100 transition-opacity
-                    ${isDarkMode
-                      ? 'hover:bg-neutral-600 text-neutral-400 hover:text-white'
-                      : 'hover:bg-stone-300 text-stone-400 hover:text-stone-700'
-                    }
-                  `}
-                >
-                  <X size={12} />
-                </button>
-              )}
-            </div>
-          )
-        })}
+        {tabs.map((tab) => (
+          <TabItem
+            key={tab.id}
+            tab={tab}
+            isActive={tab.id === activeTabId}
+            isDragging={draggedTabId === tab.id}
+            isDragOver={dragOverTabId === tab.id}
+            isDarkMode={isDarkMode}
+            tabCount={tabs.length}
+            onSelect={onTabSelect}
+            onClose={onTabClose}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            draggable={!!onReorderTabs}
+          />
+        ))}
 
         {/* New Tab Button */}
         <button

@@ -1,5 +1,5 @@
 
-import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useLiveGemini } from './hooks/useLiveGemini';
 import { useGit } from './hooks/useGit';
 import { useTheme } from './hooks/useTheme';
@@ -7,11 +7,28 @@ import { INJECTION_SCRIPT } from './utils/iframe-injection';
 import { SelectedElement, Message as ChatMessage, ToolUsage } from './types';
 import { TabState, createNewTab } from './types/tab';
 import { TabBar, Tab, TabType } from './components/TabBar';
-import { KanbanTab, TodosTab, NotesTab } from './components/tabs';
 import { NewTabPage, addToRecentProjects, getRecentProject } from './components/NewTabPage';
 import { KanbanColumn, TodoItem } from './types/tab';
 import { ProjectSetupFlow } from './components/ProjectSetupFlow';
-import { SettingsDialog, AppSettings, DEFAULT_SETTINGS, getFontSizeValue } from './components/SettingsDialog';
+import type { AppSettings } from './components/SettingsDialog';
+import { DEFAULT_SETTINGS, getFontSizeValue } from './components/SettingsDialog';
+
+// Lazy-loaded heavy components for code splitting
+const KanbanTab = lazy(() => import('./components/tabs/KanbanTab').then(m => ({ default: m.KanbanTab })));
+const TodosTab = lazy(() => import('./components/tabs/TodosTab').then(m => ({ default: m.TodosTab })));
+const NotesTab = lazy(() => import('./components/tabs/NotesTab').then(m => ({ default: m.NotesTab })));
+const SettingsDialog = lazy(() => import('./components/SettingsDialog').then(m => ({ default: m.SettingsDialog })));
+const ViewportGrid = lazy(() => import('./components/multi-viewport/ViewportGrid').then(m => ({ default: m.ViewportGrid })));
+
+// Loading spinner fallback for Suspense boundaries
+function LoadingSpinner() {
+  return (
+    <div className="flex items-center justify-center w-full h-full min-h-[200px]">
+      <div className="animate-spin rounded-full h-8 w-8 border-2 border-neutral-300 border-t-neutral-600" />
+    </div>
+  );
+}
+
 import { MgrepOnboardingDemo } from './components/MgrepOnboarding';
 import { CodeBlock, CodeBlockCopyButton } from '@/components/ai-elements/code-block';
 import { Tool, ToolContent, ToolHeader, ToolOutput } from '@/components/ai-elements/tool';
@@ -33,6 +50,7 @@ import { SteeringQuestions } from './components/SteeringQuestions';
 import { generateTurnId } from './utils/turnUtils';
 import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler';
 import { PatchApprovalDialog } from './components/PatchApprovalDialog';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { LeftSidebar } from './components/LeftSidebar';
 import type { SelectedElementSourceSnippet } from './components/LeftSidebar';
 import type { TreeNode } from './components/ComponentTree';
@@ -128,7 +146,7 @@ import { generateSourcePatch, SourcePatch } from './utils/generateSourcePatch';
 import { useErrorPrefetch } from './hooks/useErrorPrefetch';
 import { ErrorSolutionPanel } from './components/ErrorSolutionPanel';
 import { fileService } from './services/FileService';
-import { ViewportGrid } from './components/multi-viewport';
+// ViewportGrid lazy-loaded below with other heavy components
 import { TodoListOverlay } from './components/TodoListOverlay';
 
 // --- Utility Imports ---
@@ -6578,10 +6596,13 @@ export default function App() {
       .filter(Boolean);
   }, [selectedLogIndices, consoleLogs]);
 
+  // Ref for updateCodingContext to avoid triggering effect when function identity changes
+  const updateCodingContextRef = useRef(updateCodingContext)
+  updateCodingContextRef.current = updateCodingContext
+
   // Sync coding agent context when selections change
-  // Remove updateCodingContext from dependencies to prevent infinite loops
   useEffect(() => {
-    updateCodingContext({
+    updateCodingContextRef.current({
       selectedElement: selectedElement || null,
       selectedFiles: selectedFiles,
       selectedLogs: selectedLogs?.map(log => ({
@@ -6591,7 +6612,6 @@ export default function App() {
       projectPath: activeTab?.projectPath || null,
       recentMessages: messages.slice(-10) as any[],
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedElement, selectedFiles, selectedLogs, activeTab?.projectPath, messages]);
 
   // Clear selected logs when console is cleared
@@ -6946,6 +6966,10 @@ export default function App() {
   // Track which projects have active watchers (persistent across tab switches)
   const activeWatchersRef = useRef<Set<string>>(new Set())
 
+  // Ref for addEditedFile to avoid triggering effect when function identity changes
+  const addEditedFileRef = useRef(addEditedFile)
+  addEditedFileRef.current = addEditedFile
+
   // File watcher - global listener (runs once, never cleaned up)
   useEffect(() => {
     if (!isElectron || !window.electronAPI?.fileWatcher) {
@@ -6962,7 +6986,7 @@ export default function App() {
       console.log('[FileWatcher] File changed:', event.type, event.relativePath);
 
       // Add to edited files drawer
-      addEditedFile({
+      addEditedFileRef.current({
         path: event.path,
         additions: event.type === 'add' ? 1 : event.type === 'change' ? 1 : 0,
         deletions: event.type === 'unlink' ? 1 : event.type === 'change' ? 1 : 0,
@@ -6976,7 +7000,6 @@ export default function App() {
       console.log('[FileWatcher] App unmounting')
       removeListener();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isElectron])
 
   // Start watcher for current project if not already watching
@@ -9586,38 +9609,40 @@ If you're not sure what the user wants, ask for clarification.
 
         {/* --- Left Panel: Tabbed (Layers + Files) --- */}
         {isLeftPanelOpen && (
-          <>
-            <TabbedLeftPanel
-              width={leftPanelWidth}
-              treeData={layersTreeData}
-              selectedId={selectedTreeNodeId}
-              onSelect={handleTreeNodeSelect}
-              onRefresh={handleRefreshLayers}
-              isDarkMode={isDarkMode}
-              panelBg={panelBg}
-              panelBorder={panelBorder}
-              headerBg={headerBg}
-              isLoading={isLayersLoading}
-              selectedElementName={selectedLayerElementName}
-              selectedElementNumber={selectedLayerElementNumber}
-              styles={elementStyles}
-              onStyleChange={handleElementStyleChange}
-              computedStyles={selectedLayerComputedStyles}
-              attributes={selectedLayerAttributes}
-              dataset={selectedLayerDataset}
-              fontFamilies={selectedLayerFontFamilies}
-              projectPath={activeTab.projectPath || null}
-              classNames={selectedLayerClassNames}
-              sourceSnippet={selectedElementSourceSnippet}
-              selectedFilePath={editorFilePath}
-              onFileSelect={handleFileTreeSelect}
-            />
-            {/* Left resize handle */}
-            <div
-              className={`w-1 cursor-ew-resize z-10 transition-colors flex-shrink-0 ${isLeftResizing ? (isDarkMode ? 'bg-neutral-500' : 'bg-stone-400') : (isDarkMode ? 'hover:bg-neutral-600' : 'hover:bg-stone-300')}`}
-              onMouseDown={handleLeftResizeStart}
-            />
-          </>
+          <ErrorBoundary fallback={<div className="p-4 text-red-500">Left panel failed to load</div>}>
+            <>
+              <TabbedLeftPanel
+                width={leftPanelWidth}
+                treeData={layersTreeData}
+                selectedId={selectedTreeNodeId}
+                onSelect={handleTreeNodeSelect}
+                onRefresh={handleRefreshLayers}
+                isDarkMode={isDarkMode}
+                panelBg={panelBg}
+                panelBorder={panelBorder}
+                headerBg={headerBg}
+                isLoading={isLayersLoading}
+                selectedElementName={selectedLayerElementName}
+                selectedElementNumber={selectedLayerElementNumber}
+                styles={elementStyles}
+                onStyleChange={handleElementStyleChange}
+                computedStyles={selectedLayerComputedStyles}
+                attributes={selectedLayerAttributes}
+                dataset={selectedLayerDataset}
+                fontFamilies={selectedLayerFontFamilies}
+                projectPath={activeTab.projectPath || null}
+                classNames={selectedLayerClassNames}
+                sourceSnippet={selectedElementSourceSnippet}
+                selectedFilePath={editorFilePath}
+                onFileSelect={handleFileTreeSelect}
+              />
+              {/* Left resize handle */}
+              <div
+                className={`w-1 cursor-ew-resize z-10 transition-colors flex-shrink-0 ${isLeftResizing ? (isDarkMode ? 'bg-neutral-500' : 'bg-stone-400') : (isDarkMode ? 'hover:bg-neutral-600' : 'hover:bg-stone-300')}`}
+                onMouseDown={handleLeftResizeStart}
+              />
+            </>
+          </ErrorBoundary>
         )}
 
         {/* Left resize overlay */}
@@ -9641,41 +9666,53 @@ If you're not sure what the user wants, ask for clarification.
             />
           </div>
         ) : activeTab.type === 'kanban' ? (
-          <div
-            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
-            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
-          >
-            <KanbanTab
-              columns={activeTab.kanbanData?.columns || []}
-              boardTitle={activeTab.kanbanData?.boardTitle || activeTab.title || 'Kanban'}
-              isDarkMode={isDarkMode}
-              onUpdateColumns={handleUpdateKanbanColumns}
-              onUpdateTitle={handleUpdateKanbanTitle}
-            />
-          </div>
+          <ErrorBoundary fallback={<div className="flex-1 p-4 text-red-500">Kanban board failed to load</div>}>
+            <Suspense fallback={<LoadingSpinner />}>
+              <div
+                className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+                style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+              >
+                <KanbanTab
+                  columns={activeTab.kanbanData?.columns || []}
+                  boardTitle={activeTab.kanbanData?.boardTitle || activeTab.title || 'Kanban'}
+                  isDarkMode={isDarkMode}
+                  onUpdateColumns={handleUpdateKanbanColumns}
+                  onUpdateTitle={handleUpdateKanbanTitle}
+                />
+              </div>
+            </Suspense>
+          </ErrorBoundary>
         ) : activeTab.type === 'todos' ? (
-          <div
-            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
-            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
-          >
-            <TodosTab
-              items={activeTab.todosData?.items || []}
-              isDarkMode={isDarkMode}
-              onUpdateItems={handleUpdateTodoItems}
-              projectPath={activeTab.projectPath}
-            />
-          </div>
+          <ErrorBoundary fallback={<div className="flex-1 p-4 text-red-500">Todos failed to load</div>}>
+            <Suspense fallback={<LoadingSpinner />}>
+              <div
+                className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+                style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+              >
+                <TodosTab
+                  items={activeTab.todosData?.items || []}
+                  isDarkMode={isDarkMode}
+                  onUpdateItems={handleUpdateTodoItems}
+                  projectPath={activeTab.projectPath}
+                />
+              </div>
+            </Suspense>
+          </ErrorBoundary>
         ) : activeTab.type === 'notes' ? (
-          <div
-            className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
-            style={{ backgroundColor: panelBg, borderColor: panelBorder }}
-          >
-            <NotesTab
-              content={activeTab.notesData?.content || ''}
-              isDarkMode={isDarkMode}
-              onUpdateContent={handleUpdateNotesContent}
-            />
-          </div>
+          <ErrorBoundary fallback={<div className="flex-1 p-4 text-red-500">Notes failed to load</div>}>
+            <Suspense fallback={<LoadingSpinner />}>
+              <div
+                className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
+                style={{ backgroundColor: panelBg, borderColor: panelBorder }}
+              >
+                <NotesTab
+                  content={activeTab.notesData?.content || ''}
+                  isDarkMode={isDarkMode}
+                  onUpdateContent={handleUpdateNotesContent}
+                />
+              </div>
+            </Suspense>
+          </ErrorBoundary>
         ) : isNewTabPage ? (
           <div
             className="flex-1 flex flex-col relative h-full rounded-xl overflow-hidden shadow-sm border"
@@ -10192,83 +10229,93 @@ If you're not sure what the user wants, ask for clarification.
                 zIndex: isMultiViewportMode ? 10 : -1,
               }}
             >
-              <ViewportGrid
-                url={activeTab.url || ''}
-                isDarkMode={isDarkMode}
-                isElectron={isElectron}
-                webviewPreloadPath={webviewPreloadPath}
-                isInspectorActive={isInspectorActive}
-                isScreenshotActive={isScreenshotActive}
-                isMoveActive={isMoveActive}
-                terminalWsUrl={ptyPort ? `ws://127.0.0.1:${ptyPort}` : undefined}
-                onInspectorHover={(element, rect, _viewportId) => {
-                  setHoveredElement({
-                    element: element as SelectedElement,
-                    rect: rect as { top: number; left: number; width: number; height: number }
-                  })
-                }}
-                onInspectorSelect={(element, rect, _viewportId) => {
-                  const data = { element: element as SelectedElement, rect: rect as SelectedElement['rect'], x: 0, y: 0 }
-                  setSelectedElement({
-                    ...data.element,
-                    x: data.x,
-                    y: data.y,
-                    rect: data.rect
-                  })
-                  setHoveredElement(null)
-                }}
-                onScreenshotSelect={(element, rect, _viewportId) => {
-                  setScreenshotElement(element as SelectedElement)
-                  setIsScreenshotActive(false)
-                  // Note: Screenshot capture for multi-viewport would need webview reference
-                  // For now, just set the element
-                }}
-                onConsoleLog={(level, message, _viewportId) => {
-                  const logType = (level.toLowerCase() === 'warning' ? 'warn' : level.toLowerCase()) as 'log' | 'warn' | 'error' | 'info'
-                  setConsoleLogs(prev => [...prev.slice(-99), {
-                    type: logType,
-                    message: message,
-                    timestamp: new Date()
-                  }])
-                }}
-                onClose={() => setIsMultiViewportMode(false)}
-                controlsRef={viewportControlsRef}
-                onViewportCountChange={setViewportCount}
-                renderKanban={() => (
-                  <KanbanTab
-                    columns={activeTab.kanbanData?.columns || [
-                      { id: 'backlog', title: 'Backlog', cards: [] },
-                      { id: 'in-progress', title: 'In Progress', cards: [] },
-                      { id: 'done', title: 'Done', cards: [] },
-                    ]}
-                    boardTitle={activeTab.kanbanData?.boardTitle || 'Project Board'}
+              <ErrorBoundary fallback={<div className="p-4 text-red-500">Viewport canvas failed to load</div>}>
+                <Suspense fallback={<LoadingSpinner />}>
+                  <ViewportGrid
+                    url={activeTab.url || ''}
                     isDarkMode={isDarkMode}
-                    onUpdateColumns={handleUpdateKanbanColumns}
-                    onUpdateTitle={handleUpdateKanbanTitle}
+                    isElectron={isElectron}
+                    webviewPreloadPath={webviewPreloadPath}
+                    isInspectorActive={isInspectorActive}
+                    isScreenshotActive={isScreenshotActive}
+                    isMoveActive={isMoveActive}
+                    terminalWsUrl={ptyPort ? `ws://127.0.0.1:${ptyPort}` : undefined}
+                    onInspectorHover={(element, rect, _viewportId) => {
+                      setHoveredElement({
+                        element: element as SelectedElement,
+                        rect: rect as { top: number; left: number; width: number; height: number }
+                      })
+                    }}
+                    onInspectorSelect={(element, rect, _viewportId) => {
+                      const data = { element: element as SelectedElement, rect: rect as SelectedElement['rect'], x: 0, y: 0 }
+                      setSelectedElement({
+                        ...data.element,
+                        x: data.x,
+                        y: data.y,
+                        rect: data.rect
+                      })
+                      setHoveredElement(null)
+                    }}
+                    onScreenshotSelect={(element, rect, _viewportId) => {
+                      setScreenshotElement(element as SelectedElement)
+                      setIsScreenshotActive(false)
+                      // Note: Screenshot capture for multi-viewport would need webview reference
+                      // For now, just set the element
+                    }}
+                    onConsoleLog={(level, message, _viewportId) => {
+                      const logType = (level.toLowerCase() === 'warning' ? 'warn' : level.toLowerCase()) as 'log' | 'warn' | 'error' | 'info'
+                      setConsoleLogs(prev => [...prev.slice(-99), {
+                        type: logType,
+                        message: message,
+                        timestamp: new Date()
+                      }])
+                    }}
+                    onClose={() => setIsMultiViewportMode(false)}
+                    controlsRef={viewportControlsRef}
+                    onViewportCountChange={setViewportCount}
+                    renderKanban={() => (
+                      <Suspense fallback={<LoadingSpinner />}>
+                        <KanbanTab
+                          columns={activeTab.kanbanData?.columns || [
+                            { id: 'backlog', title: 'Backlog', cards: [] },
+                            { id: 'in-progress', title: 'In Progress', cards: [] },
+                            { id: 'done', title: 'Done', cards: [] },
+                          ]}
+                          boardTitle={activeTab.kanbanData?.boardTitle || 'Project Board'}
+                          isDarkMode={isDarkMode}
+                          onUpdateColumns={handleUpdateKanbanColumns}
+                          onUpdateTitle={handleUpdateKanbanTitle}
+                        />
+                      </Suspense>
+                    )}
+                    renderTodo={() => (
+                      <Suspense fallback={<LoadingSpinner />}>
+                        <TodosTab
+                          items={activeTab.todosData?.items || []}
+                          isDarkMode={isDarkMode}
+                          onUpdateItems={handleUpdateTodoItems}
+                          projectPath={activeTab.projectPath}
+                        />
+                      </Suspense>
+                    )}
+                    renderNotes={() => (
+                      <Suspense fallback={<LoadingSpinner />}>
+                        <NotesTab
+                          content={activeTab.notesData?.content || ''}
+                          isDarkMode={isDarkMode}
+                          onUpdateContent={handleUpdateNotesContent}
+                        />
+                      </Suspense>
+                    )}
+                    nodeStyle={appSettings.nodeStyle || 'standard'}
+                    elkAlgorithm={appSettings.elkAlgorithm || 'layered'}
+                    elkDirection={appSettings.elkDirection || 'RIGHT'}
+                    elkSpacing={appSettings.elkSpacing || 120}
+                    elkNodeSpacing={appSettings.elkNodeSpacing || 60}
+                    onViewportsChange={(viewports) => setMultiViewportData(viewports.map(v => ({ id: v.id, windowType: v.windowType, devicePresetId: v.devicePresetId })))}
                   />
-                )}
-                renderTodo={() => (
-                  <TodosTab
-                    items={activeTab.todosData?.items || []}
-                    isDarkMode={isDarkMode}
-                    onUpdateItems={handleUpdateTodoItems}
-                    projectPath={activeTab.projectPath}
-                  />
-                )}
-                renderNotes={() => (
-                  <NotesTab
-                    content={activeTab.notesData?.content || ''}
-                    isDarkMode={isDarkMode}
-                    onUpdateContent={handleUpdateNotesContent}
-                  />
-                )}
-                nodeStyle={appSettings.nodeStyle || 'standard'}
-                elkAlgorithm={appSettings.elkAlgorithm || 'layered'}
-                elkDirection={appSettings.elkDirection || 'RIGHT'}
-                elkSpacing={appSettings.elkSpacing || 120}
-                elkNodeSpacing={appSettings.elkNodeSpacing || 60}
-                onViewportsChange={(viewports) => setMultiViewportData(viewports.map(v => ({ id: v.id, windowType: v.windowType, devicePresetId: v.devicePresetId })))}
-              />
+                </Suspense>
+              </ErrorBoundary>
             </div>
 
             {/* Single Viewport Mode */}
@@ -11153,6 +11200,7 @@ If you're not sure what the user wants, ask for clarification.
 
         {/* --- Right Pane: Chat --- */}
       {isSidebarOpen && (
+      <ErrorBoundary fallback={<div className="p-4 text-red-500">Chat panel failed to load</div>}>
       <div
         className="flex flex-col rounded-xl shadow-sm flex-shrink-0 border"
         style={{ width: sidebarWidth, minWidth: 430, backgroundColor: panelBg, borderColor: panelBorder }}
@@ -12567,6 +12615,7 @@ If you're not sure what the user wants, ask for clarification.
               </div>
           </div>
       </div>
+      </ErrorBoundary>
       )}
 
 
@@ -12949,15 +12998,19 @@ If you're not sure what the user wants, ask for clarification.
       )}
 
       {/* Settings Dialog */}
-      <SettingsDialog
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        isDarkMode={isDarkMode}
-        onToggleDarkMode={toggleDarkMode}
-        settings={appSettings}
-        onSettingsChange={setAppSettings}
-        projectPath={activeTab?.projectPath}
-      />
+      <ErrorBoundary fallback={<div className="fixed inset-0 flex items-center justify-center bg-black/50"><div className="p-4 bg-white rounded text-red-500">Settings failed to load</div></div>}>
+        <Suspense fallback={null}>
+          <SettingsDialog
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            isDarkMode={isDarkMode}
+            onToggleDarkMode={toggleDarkMode}
+            settings={appSettings}
+            onSettingsChange={setAppSettings}
+            projectPath={activeTab?.projectPath}
+          />
+        </Suspense>
+      </ErrorBoundary>
 
       {/* Mgrep Onboarding Demo */}
       {showMgrepOnboarding && (
