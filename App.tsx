@@ -30,6 +30,8 @@ function LoadingSpinner() {
 }
 
 import { MgrepOnboardingDemo } from './components/MgrepOnboarding';
+import type { Viewport } from './components/multi-viewport/types';
+import type { LayoutDirection } from './components/multi-viewport/canvas/elkLayout';
 import { CodeBlock, CodeBlockCopyButton } from '@/components/ai-elements/code-block';
 import { Tool, ToolContent, ToolHeader, ToolOutput } from '@/components/ai-elements/tool';
 import { MessageResponse } from '@/components/ai-elements/message';
@@ -47,6 +49,7 @@ import { useToolTracker } from './hooks/useToolTracker';
 import { useClusoAgent, AVAILABLE_DEMOS, DEMO_SCRIPTS } from './hooks/useClusoAgent';
 import { useSteeringQuestions } from './hooks/useSteeringQuestions';
 import { SteeringQuestions } from './components/SteeringQuestions';
+import { useChatState } from './features/chat';
 import { generateTurnId } from './utils/turnUtils';
 import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler';
 import { PatchApprovalDialog } from './components/PatchApprovalDialog';
@@ -61,6 +64,8 @@ import { CodeEditor } from './components/CodeEditor';
 
 import { getElectronAPI } from './hooks/useElectronAPI';
 import type { MCPServerConfig } from './types/mcp';
+import type { MCPServerConnection } from './components/SettingsDialog';
+import type { ExtensionChatRequest } from './types/electron.d';
 import { GoogleGenAI } from '@google/genai'; // Keep for voice streaming
 import { playApprovalSound, playRejectionSound, playUndoSound } from './utils/audio';
 import {
@@ -288,6 +293,9 @@ interface WebviewElement extends HTMLElement {
   executeJavaScript: (code: string) => Promise<unknown>;
   addEventListener: (event: string, callback: (event: unknown) => void) => void;
   removeEventListener: (event: string, callback: (event: unknown) => void) => void;
+  contentWindow: Window | null;
+  capturePage: (rect?: { x: number; y: number; width: number; height: number }) => Promise<{ toDataURL: () => string }>;
+  getWebContentsId: () => number;
 }
 
 export default function App() {
@@ -553,7 +561,8 @@ export default function App() {
               content: `${request.message}\n\n${pageContext}${elementContext}`
             }],
             modelId: selectedModelRef.current.id, // Use selected model, not hardcoded Gemini
-            systemPrompt: 'You are Cluso, a helpful AI assistant for web development. The user is inspecting elements on a web page and may ask questions about them or request changes. Keep responses concise.',
+            providers: {}, // Providers are loaded from settings in the main process
+            system: 'You are Cluso, a helpful AI assistant for web development. The user is inspecting elements on a web page and may ask questions about them or request changes. Keep responses concise.',
           });
 
           if (result.success && result.text) {
@@ -1598,7 +1607,7 @@ export default function App() {
     markDomTelemetry(approval.id, 'auto_cancel')
     cancelledApprovalsRef.current.add(approval.id)
     if (approval.undoCode && webview) {
-      ;(webview as Electron.WebviewTag).executeJavaScript(approval.undoCode)
+      ;(webview as unknown as Electron.WebviewTag).executeJavaScript(approval.undoCode)
     }
     finalizeDomTelemetry(approval.id, 'cancelled')
   }, [markDomTelemetry, finalizeDomTelemetry, clearDomApprovalPatchTimeout])
@@ -1769,10 +1778,17 @@ export default function App() {
 
   // Initialize MCP hook for Model Context Protocol server connections
   // Extract MCP server configs from settings connections
-  const mcpServerConfigs = useMemo(() => {
+  const mcpServerConfigs = useMemo((): MCPServerConfig[] => {
     return (appSettings.connections || [])
-      .filter((conn): conn is MCPServerConfig => conn.type === 'mcp' && 'transport' in conn)
+      .filter((conn): conn is MCPServerConnection => conn.type === 'mcp' && 'transport' in conn)
       .filter(conn => conn.enabled)
+      .map(({ id, name, transport, enabled, timeout }): MCPServerConfig => ({
+        id,
+        name,
+        transport,
+        enabled,
+        timeout,
+      }))
   }, [appSettings.connections])
 
   const {
@@ -1925,8 +1941,10 @@ export default function App() {
     addDevice: (type: 'mobile' | 'tablet' | 'desktop') => void
     addInternalWindow: (type: 'kanban' | 'todo' | 'notes') => void
     addTerminal: () => void
-    autoLayout: (direction?: 'RIGHT' | 'DOWN' | 'LEFT' | 'UP') => void
+    autoLayout: (direction?: LayoutDirection) => void
     fitView: () => void
+    getViewports: () => Viewport[]
+    focusViewport: (id: string) => void
   } | null>(null)
 
   // Zoom options for device preview
@@ -2343,7 +2361,7 @@ export default function App() {
     if (!undoSucceeded && webview) {
       console.log('[Exec] Undo failed - reloading page as fallback');
       try {
-        (webview as Electron.WebviewTag).reload();
+        (webview as unknown as Electron.WebviewTag).reload();
         setMessages(prev => [...prev, {
           id: Date.now().toString(),
           role: 'system',
@@ -2604,7 +2622,7 @@ export default function App() {
     `;
 
     try {
-      const result = await webview.executeJavaScript(highlightCode);
+      const result = await webview.executeJavaScript(highlightCode) as { success: boolean; element?: unknown; error?: string };
       console.log('[AI] Highlight by number result:', result);
       return result;
     } catch (err) {
@@ -2769,7 +2787,7 @@ export default function App() {
     `;
 
     try {
-      const result = await webview.executeJavaScript(searchCode);
+      const result = await webview.executeJavaScript(searchCode) as { success: boolean; matches?: { elementNumber: number; text: string; tagName: string }[]; error?: string };
       console.log('[AI] Find by text result:', result);
       return result;
     } catch (err) {
@@ -3362,7 +3380,7 @@ export default function App() {
         })()
       `;
 
-      const elements = await webview.executeJavaScript(scanCode);
+      const elements = await webview.executeJavaScript(scanCode) as TreeNode[];
 
       // Build tree with nested structure
       const treeData: TreeNode = {
@@ -3648,7 +3666,7 @@ export default function App() {
               classNames: Array.from(classNamesSet).slice(0, 5000)
             };
           })()
-        `);
+        `) as { success: boolean; styles?: Record<string, string>; computedStyles?: Record<string, string>; attributes?: Record<string, string>; dataset?: Record<string, string>; fontFamilies?: string[]; classNames?: string[] } | null;
         if (result?.success && result.styles) {
           setElementStyles((prev) => ({ ...prev, ...result.styles }))
           setSelectedLayerComputedStyles(result.computedStyles || null)
@@ -3689,8 +3707,8 @@ export default function App() {
         console.log('[App] File not found at', filePath, '- searching for:', filename)
 
         const searchResult = await window.electronAPI.files.findFiles(activeTab.projectPath, filename!)
-        if (searchResult.success && searchResult.files && searchResult.files.length > 0) {
-          const foundPath = searchResult.files[0]
+        if (searchResult.success && searchResult.data && searchResult.data.length > 0) {
+          const foundPath = searchResult.data[0]
           console.log('[App] Found file at:', foundPath)
           setEditorFilePath(foundPath)
           result = await window.electronAPI.files.readFile(foundPath)
@@ -3700,7 +3718,7 @@ export default function App() {
       if (!result.success) {
         throw new Error(result.error || 'Failed to read file')
       }
-      const content = result.content || result.data || ''
+      const content = result.data || ''
       console.log('[App] File loaded:', content.length, 'bytes')
       setEditorFileContent(content)
       setIsEditorMode(true) // Switch center pane to editor
@@ -4108,7 +4126,7 @@ export default function App() {
     `;
 
     try {
-      const result = await webview.executeJavaScript(scanCode);
+      const result = await webview.executeJavaScript(scanCode) as string;
       console.log('[AI] Page elements result:', result);
       return result;
     } catch (err) {
@@ -4173,8 +4191,8 @@ export default function App() {
     const pageElements = await handleGetPageElements('all', false);
     if (pageElements && !pageElements.startsWith('Error')) {
       const webview = webviewRefs.current.get(activeTabId);
-      const pageUrl = webview ? await webview.executeJavaScript('window.location.href').catch(() => '') : '';
-      const pageTitle = webview ? await webview.executeJavaScript('document.title').catch(() => '') : '';
+      const pageUrl = webview ? await webview.executeJavaScript('window.location.href').catch(() => '') as string : '';
+      const pageTitle = webview ? await webview.executeJavaScript('document.title').catch(() => '') as string : '';
 
       await primeSelectorContext({
         pageElements,
@@ -4273,7 +4291,7 @@ export default function App() {
           return { success: false, error: 'Element not found' };
         })()
       `;
-      const result = await webview.executeJavaScript(code);
+      const result = await webview.executeJavaScript(code) as { success: boolean; error?: string };
       return result;
     } catch (err) {
       return { success: false, error: (err as Error).message };
@@ -5720,7 +5738,7 @@ export default function App() {
                   const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
                   return el ? el.src : '';
                 })();
-              `);
+              `) as string;
 
               applyCode = `
                 (function() {
@@ -5785,7 +5803,7 @@ export default function App() {
                   }
                   return { hasChildImg: false, currentBg: el.style.backgroundImage };
                 })();
-              `);
+              `) as { hasChildImg: boolean; childSrc?: string; currentBg?: string } | null;
 
               if (childImgInfo?.hasChildImg) {
                 // Strategy 2a: Update child img src
@@ -5854,7 +5872,7 @@ export default function App() {
                     const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
                     return el ? { text: el.textContent, bg: el.style.backgroundImage, bgSize: el.style.backgroundSize, bgPos: el.style.backgroundPosition } : null;
                   })();
-                `);
+                `) as { text?: string; bg?: string; bgSize?: string; bgPos?: string } | null;
 
                 applyCode = `
                   (function() {
@@ -5928,7 +5946,7 @@ export default function App() {
                   const el = document.evaluate('${data.element.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
                   return el ? el.src : '';
                 })();
-              `);
+              `) as string;
 
               applyCode = `
                 (function() {
@@ -6312,12 +6330,12 @@ export default function App() {
                   console.log('[Inline Edit] Found text in:', filePath);
 
                   const readResult = await fileService.readFile(filePath);
-                  if (!readResult.success || !readResult.content) {
+                  if (!readResult.success || !readResult.data) {
                     console.error('[Inline Edit] Could not read file');
                     return;
                   }
 
-                  const originalContent = readResult.content;
+                  const originalContent = readResult.data;
                   // Simple find/replace
                   if (originalContent.includes(oldText)) {
                     const patchedContent = originalContent.replace(oldText, data.newText!);
@@ -7331,16 +7349,16 @@ Keep the summary brief but comprehensive enough to continue the conversation eff
 
     // /thinking [level] - Set reasoning mode
     if (command === 'thinking') {
-      const level = args.toLowerCase() as ThinkingLevel;
+      const levelArg = args.toLowerCase();
       const validLevels: ThinkingLevel[] = ['off', 'low', 'med', 'high', 'ultrathink'];
 
       // Handle 'on' as alias for 'med'
       let actualLevel: ThinkingLevel = 'med';
-      if (level === 'on' || level === '') {
+      if (levelArg === 'on' || levelArg === '') {
         // Toggle: if currently off, turn on (med); if on, turn off
         actualLevel = thinkingLevel === 'off' ? 'med' : 'off';
-      } else if (validLevels.includes(level)) {
-        actualLevel = level;
+      } else if (validLevels.includes(levelArg as ThinkingLevel)) {
+        actualLevel = levelArg as ThinkingLevel;
       } else {
         // Invalid level
         setMessages(prev => [...prev, {
@@ -7790,7 +7808,7 @@ If you're not sure what the user wants, ask for clarification.
 
               if (isImgElement) {
                 // Strategy 1: Direct img src replacement
-                const originalSrc = await (webview as Electron.WebviewTag).executeJavaScript(`
+                const originalSrc = await (webview as unknown as Electron.WebviewTag).executeJavaScript(`
                   (function() {
                     const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
                     return el ? el.src : '';
@@ -7813,7 +7831,7 @@ If you're not sure what the user wants, ask for clarification.
                 `;
                 description = `Set image src to ${filename}`;
 
-                await (webview as Electron.WebviewTag).executeJavaScript(applyCode);
+                await (webview as unknown as Electron.WebviewTag).executeJavaScript(applyCode);
 
                 // Prepare source patch
                 const approvalId = `dom-img-${Date.now()}`;
@@ -7832,7 +7850,7 @@ If you're not sure what the user wants, ask for clarification.
                 prepareDomPatch(approvalId, selectedElement, {}, description, undoCode, applyCode, userMessage.content || 'Insert image', projectPath, undefined, { oldSrc: originalSrc || '', newSrc: relativePath });
               } else if (isContainerElement) {
                 // Strategy 2: Check for child img, or use background-image
-                const childImgInfo = await (webview as Electron.WebviewTag).executeJavaScript(`
+                const childImgInfo = await (webview as unknown as Electron.WebviewTag).executeJavaScript(`
                   (function() {
                     const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
                     if (!el) return null;
@@ -7860,7 +7878,7 @@ If you're not sure what the user wants, ask for clarification.
                   description = `Set child image src to ${filename}`;
                 } else {
                   // Use background-image
-                  const captureContent = await (webview as Electron.WebviewTag).executeJavaScript(`
+                  const captureContent = await (webview as unknown as Electron.WebviewTag).executeJavaScript(`
                     (function() {
                       const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
                       return el ? { text: el.textContent, bg: el.style.backgroundImage, bgSize: el.style.backgroundSize, bgPos: el.style.backgroundPosition } : null;
@@ -7896,7 +7914,7 @@ If you're not sure what the user wants, ask for clarification.
                   description = `Set background image to ${filename}`;
                 }
 
-                await (webview as Electron.WebviewTag).executeJavaScript(applyCode!);
+                await (webview as unknown as Electron.WebviewTag).executeJavaScript(applyCode!);
 
                 // Prepare source patch for CSS changes
                 const approvalId = `dom-img-${Date.now()}`;
@@ -7924,7 +7942,7 @@ If you're not sure what the user wants, ask for clarification.
                 `;
                 undoCode = 'location.reload()';
                 description = `Set ${tagName} src to ${filename}`;
-                await (webview as Electron.WebviewTag).executeJavaScript(applyCode);
+                await (webview as unknown as Electron.WebviewTag).executeJavaScript(applyCode);
               }
 
               const successMessage: ChatMessage = {
@@ -8072,7 +8090,7 @@ If you're not sure what the user wants, ask for clarification.
 
             if (isImgElement) {
               // Strategy 1: Direct img src replacement
-              const originalSrc = await (webview as Electron.WebviewTag).executeJavaScript(`
+              const originalSrc = await (webview as unknown as Electron.WebviewTag).executeJavaScript(`
                 (function() {
                   const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
                   return el ? el.src : '';
@@ -8102,7 +8120,7 @@ If you're not sure what the user wants, ask for clarification.
               description = `Set image src to ${filename}`;
 
               // Execute and prepare source patch with srcChange
-              await (webview as Electron.WebviewTag).executeJavaScript(applyCode);
+              await (webview as unknown as Electron.WebviewTag).executeJavaScript(applyCode);
 
               if (selectedElement.sourceLocation?.sources?.[0]) {
                 const approvalId = `dom-img-${Date.now()}`;
@@ -8134,7 +8152,7 @@ If you're not sure what the user wants, ask for clarification.
 
             } else if (isContainerElement) {
               // Strategy 2: Check for child img, or use background-image
-              const childImgInfo = await (webview as Electron.WebviewTag).executeJavaScript(`
+              const childImgInfo = await (webview as unknown as Electron.WebviewTag).executeJavaScript(`
                 (function() {
                   const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
                   if (!el) return null;
@@ -8177,7 +8195,7 @@ If you're not sure what the user wants, ask for clarification.
                 description = `Set child image src to ${filename}`;
               } else {
                 // Strategy 2b: Use background-image and clear text content
-                const captureContent = await (webview as Electron.WebviewTag).executeJavaScript(`
+                const captureContent = await (webview as unknown as Electron.WebviewTag).executeJavaScript(`
                   (function() {
                     const el = document.evaluate('${selectedElement.xpath}', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
                     return el ? { text: el.textContent, bg: el.style.backgroundImage, bgSize: el.style.backgroundSize, bgPos: el.style.backgroundPosition } : null;
@@ -8248,7 +8266,7 @@ If you're not sure what the user wants, ask for clarification.
               }
 
               // Execute the DOM change
-              await (webview as Electron.WebviewTag).executeJavaScript(applyCode);
+              await (webview as unknown as Electron.WebviewTag).executeJavaScript(applyCode);
 
             } else {
               // Fallback: Try setting src anyway
@@ -8264,7 +8282,7 @@ If you're not sure what the user wants, ask for clarification.
               `;
               undoCode = 'location.reload()';
               description = `Set ${tagName} src to ${filename}`;
-              await (webview as Electron.WebviewTag).executeJavaScript(applyCode);
+              await (webview as unknown as Electron.WebviewTag).executeJavaScript(applyCode);
             }
 
             // Add success message
@@ -8370,7 +8388,7 @@ If you're not sure what the user wants, ask for clarification.
           `;
 
           try {
-            const originalJson = await (webview as Electron.WebviewTag).executeJavaScript(captureOriginalScript);
+            const originalJson = await (webview as unknown as Electron.WebviewTag).executeJavaScript(captureOriginalScript);
             const original = originalJson ? JSON.parse(originalJson) : { textContent: '', styles: {} };
             console.log('[Instant UI] Original captured:', original);
 
@@ -8419,7 +8437,7 @@ If you're not sure what the user wants, ask for clarification.
             `;
 
             // Now apply the changes
-            const result = await (webview as Electron.WebviewTag).executeJavaScript(storedApplyCode);
+            const result = await (webview as unknown as Electron.WebviewTag).executeJavaScript(storedApplyCode);
             console.log('[Instant UI] DOM update result:', result);
 
             // Add immediate feedback message
@@ -8594,7 +8612,7 @@ If you're not sure what the user wants, ask for clarification.
 
         const userCoreMessage: CoreMessage = {
           role: 'user',
-          content: userContentParts as CoreMessage['content'],
+          content: userContentParts as unknown as CoreMessage['content'],
         };
 
         // Add current message with full context
@@ -8701,9 +8719,10 @@ If you're not sure what the user wants, ask for clarification.
               } : null);
             }
           },
-          onReasoningChunk: (chunk) => {
+          onReasoningChunk: (chunk: unknown) => {
             // Reasoning chunk may be a string or an object with content
-            const reasoningStr = typeof chunk === 'string' ? chunk : (chunk?.content ?? String(chunk ?? ''));
+            const chunkObj = chunk as { content?: string } | string | null;
+            const reasoningStr = typeof chunkObj === 'string' ? chunkObj : ((chunkObj as { content?: string })?.content ?? String(chunk ?? ''));
             console.log('[AI SDK] Reasoning chunk:', reasoningStr.substring(0, 100));
             setStreamingMessage(prev => prev ? { ...prev, reasoning: (prev.reasoning || '') + reasoningStr } : null);
           },
@@ -9382,7 +9401,7 @@ If you're not sure what the user wants, ask for clarification.
     cancelledApprovalsRef.current.add(pendingDOMApproval.id);
     const webview = webviewRefs.current.get(activeTabId);
     if (pendingDOMApproval.undoCode && webview) {
-      (webview as Electron.WebviewTag).executeJavaScript(pendingDOMApproval.undoCode);
+      (webview as unknown as Electron.WebviewTag).executeJavaScript(pendingDOMApproval.undoCode);
     }
     setPendingDOMApproval(null);
     setPendingChange(null); // Clear pill toolbar too
@@ -10028,7 +10047,7 @@ If you're not sure what the user wants, ask for clarification.
                   console.log('[Jump to Source] Trying:', filename)
 
                   const searchResult = await window.electronAPI.files.glob(`**/${filename}`, activeTab.projectPath)
-                  const files = searchResult.data || searchResult.files || []
+                  const files = searchResult.data || []
 
                   if (searchResult.success && files.length > 0) {
                     const foundPath = typeof files[0] === 'string' ? files[0] : files[0]?.path
@@ -10360,6 +10379,7 @@ If you're not sure what the user wants, ask for clarification.
                       } : undefined}
                       // @ts-expect-error - webview is an Electron-specific element
                       allowpopups="true"
+                      // @ts-expect-error - webview is an Electron-specific element
                       nodeintegration="true"
                       webpreferences="contextIsolation=no"
                     />
@@ -11677,7 +11697,7 @@ If you're not sure what the user wants, ask for clarification.
                             const webview = webviewRefs.current.get(activeTabId);
                             if (pendingPatch.undoCode && webview) {
                               console.log('[Preview] Showing original');
-                              (webview as Electron.WebviewTag).executeJavaScript(pendingPatch.undoCode);
+                              (webview as unknown as Electron.WebviewTag).executeJavaScript(pendingPatch.undoCode);
                               setIsPreviewingPatchOriginal(true);
                             }
                           }}
@@ -11685,7 +11705,7 @@ If you're not sure what the user wants, ask for clarification.
                             const webview = webviewRefs.current.get(activeTabId);
                             if (pendingPatch.applyCode && webview) {
                               console.log('[Preview] Showing change');
-                              (webview as Electron.WebviewTag).executeJavaScript(pendingPatch.applyCode);
+                              (webview as unknown as Electron.WebviewTag).executeJavaScript(pendingPatch.applyCode);
                               setIsPreviewingPatchOriginal(false);
                             }
                           }}
@@ -11694,7 +11714,7 @@ If you're not sure what the user wants, ask for clarification.
                             const webview = webviewRefs.current.get(activeTabId);
                             if (pendingPatch.applyCode && webview) {
                               console.log('[Preview] Showing change (mouse leave)');
-                              (webview as Electron.WebviewTag).executeJavaScript(pendingPatch.applyCode);
+                              (webview as unknown as Electron.WebviewTag).executeJavaScript(pendingPatch.applyCode);
                               setIsPreviewingPatchOriginal(false);
                             }
                           }}
@@ -11714,7 +11734,7 @@ If you're not sure what the user wants, ask for clarification.
                           if (pendingPatch.undoCode) {
                             const webview = webviewRefs.current.get(activeTabId);
                             if (webview) {
-                              (webview as Electron.WebviewTag).executeJavaScript(pendingPatch.undoCode);
+                              (webview as unknown as Electron.WebviewTag).executeJavaScript(pendingPatch.undoCode);
                             }
                           }
                           setPendingPatch(null);
@@ -12422,7 +12442,7 @@ If you're not sure what the user wants, ask for clarification.
                                                   key={model.id}
                                                   onClick={() => {
                                                     if (model.isAvailable) {
-                                                      setSelectedModel({ id: model.id, name: model.name, Icon: model.Icon });
+                                                      setSelectedModel({ id: model.id, name: model.name, Icon: model.Icon as typeof DEFAULT_MODEL.Icon, provider: model.provider });
                                                       setIsModelMenuOpen(false);
                                                     }
                                                   }}
@@ -12580,7 +12600,6 @@ If you're not sure what the user wants, ask for clarification.
                                       setIsStreaming(false)
                                       setConnectionState('idle')
                                       setStreamingMessage(null)
-                                      setStreamingContent('')
                                   }}
                                   className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'bg-red-600 text-white hover:bg-red-500' : 'bg-red-500 text-white hover:bg-red-600'}`}
                                   title="Stop generating"

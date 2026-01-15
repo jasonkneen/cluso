@@ -80,7 +80,7 @@ function HighlightMatch({
 }: {
   text: string
   match: string
-}): JSX.Element {
+}): React.ReactElement {
   if (!match) return <>{text}</>
 
   const lowerMatch = match.toLowerCase()

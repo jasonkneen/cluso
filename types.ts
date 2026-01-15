@@ -44,6 +44,7 @@ export interface ComponentSource {
   file: string;
   line: number;
   column: number;
+  endLine?: number;
 }
 
 export interface ElementSourceInfo {
@@ -51,6 +52,7 @@ export interface ElementSourceInfo {
   summary: string; // e.g., "App.tsx (45-120)"
   isRSC?: boolean; // True if source info came from RSC payload (Server Components)
   componentStack?: ReactComponentInfo[];
+  likelyDefinitionFile?: string; // The most likely file that defines this element
 }
 
 /**

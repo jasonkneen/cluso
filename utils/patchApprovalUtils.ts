@@ -34,7 +34,7 @@ export interface ProjectApprovalPatterns {
  */
 export function generateDiff(before: string, after: string): PatchDiff {
   const diffs = dmp.diff_main(before, after)
-  dmp.diff_cleanup_semantic(diffs)
+  dmp.diff_cleanupSemantic(diffs)
 
   return {
     before,

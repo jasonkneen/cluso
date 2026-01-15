@@ -6,10 +6,12 @@
 
 import { type BundledLanguage } from 'shiki'
 
-export function getFileLanguage(filePath: string): BundledLanguage {
+type FileLanguage = BundledLanguage | 'plaintext'
+
+export function getFileLanguage(filePath: string): FileLanguage {
   const ext = filePath.split('.').pop()?.toLowerCase() || ''
 
-  const extensionMap: Record<string, BundledLanguage> = {
+  const extensionMap: Record<string, FileLanguage> = {
     'js': 'javascript',
     'jsx': 'javascript',
     'mjs': 'javascript',
@@ -75,11 +77,11 @@ export function getFileLanguage(filePath: string): BundledLanguage {
     't': 'perl',
     'r': 'r',
     'R': 'r',
-    'rmd': 'rmarkdown',
+    'rmd': 'markdown',
     'groovy': 'groovy',
     'gradle': 'groovy',
     'nix': 'nix',
-    'dhall': 'dhall',
+    'dhall': 'yaml',
     'hcl': 'hcl',
     'tf': 'hcl',
     'dart': 'dart',
@@ -96,11 +98,11 @@ export function getFileLanguage(filePath: string): BundledLanguage {
     'lhs': 'haskell',
     'purescript': 'purescript',
     'purs': 'purescript',
-    'pyx': 'cython',
-    'pxd': 'cython',
-    'pxi': 'cython',
+    'pyx': 'python',
+    'pxd': 'python',
+    'pxi': 'python',
     'proto': 'protobuf',
-    'thrift': 'thrift',
+    'thrift': 'plaintext',
     'graphql': 'graphql',
     'gql': 'graphql',
     'dockerfile': 'dockerfile',

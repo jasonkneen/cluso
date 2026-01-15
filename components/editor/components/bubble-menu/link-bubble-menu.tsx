@@ -89,6 +89,7 @@ export const LinkBubbleMenu: React.FC<LinkBubbleMenuProps> = ({ editor }) => {
     <BubbleMenu
       editor={editor}
       shouldShow={shouldShow}
+      // @ts-expect-error tippyOptions available in newer tiptap versions
       tippyOptions={{
         placement: 'bottom-start',
         onHidden: () => setShowEdit(false)

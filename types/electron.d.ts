@@ -13,6 +13,7 @@ interface ElectronGitAPI {
   getCurrentBranch: () => Promise<GitResult>
   getBranches: () => Promise<GitResult<string[]>>
   checkout: (branch: string) => Promise<GitResult>
+  checkoutFile: (filePath: string) => Promise<GitResult>
   createBranch: (name: string) => Promise<GitResult>
   getStatus: () => Promise<GitResult<GitStatus>>
   commit: (message: string) => Promise<GitResult>
@@ -376,6 +377,7 @@ interface ElectronMCPAPI {
   getPrompt: (serverId: string, name: string, args?: Record<string, string>) => Promise<{ messages?: unknown[]; error?: string }>
   getStatus: () => Promise<Record<string, MCPServerState>>
   onEvent: (callback: (event: MCPEvent) => void) => () => void
+  discover?: () => Promise<{ servers: MCPServerConfig[]; error?: string }>
 }
 
 // Voice logging types
@@ -430,6 +432,8 @@ interface ElectronVoiceAPI {
 import { KanbanColumn, TodoItem } from './tab'
 
 interface TabDataKanban {
+  boardId: string
+  boardTitle: string
   columns: KanbanColumn[]
   updatedAt?: string
 }
@@ -558,6 +562,7 @@ interface ElectronAgentSdkAPI {
   onComplete: (callback: (data: { requestId: string; text: string; thinking?: string }) => void) => () => void
   onError: (callback: (data: { requestId: string; error: string }) => void) => () => void
   onInterrupted: (callback: (data: { requestId: string }) => void) => () => void
+  onFileModified: (callback: (event: { type: 'write' | 'create' | 'delete'; path: string; originalContent?: string; newContent?: string }) => void) => () => void
   removeAllListeners: () => void
 }
 
@@ -602,9 +607,10 @@ interface FastApplyResult {
 
 interface ElectronFastApplyAPI {
   getStatus: () => Promise<FastApplyStatus>
-  listModels: () => Promise<FastApplyModelInfo[]>
+  listModels: () => Promise<{ success: boolean; models?: FastApplyModelInfo[]; error?: string }>
   download: (variant?: FastApplyModelVariant) => Promise<{ success: boolean; path?: string; error?: string }>
   setModel: (variant: FastApplyModelVariant) => Promise<{ success: boolean; error?: string }>
+  load: (variant?: FastApplyModelVariant) => Promise<{ success: boolean; error?: string }>
   apply: (code: string, update: string) => Promise<FastApplyResult>
   cancel: () => Promise<{ success: boolean }>
   delete: (variant: FastApplyModelVariant) => Promise<{ success: boolean; error?: string }>
@@ -1036,7 +1042,7 @@ interface ElectronWindowAPI {
 }
 
 // Extension Bridge API - Chrome extension communication
-interface ExtensionChatRequest {
+export interface ExtensionChatRequest {
   requestId: string
   message: string
   elements: Array<{
@@ -1139,6 +1145,18 @@ export interface ElectronAPI {
   dialog?: ElectronDialogAPI
   getWebviewPreloadPath: () => Promise<string>
   isElectron: boolean
+  // Shell operations
+  openExternal?: (url: string) => Promise<void>
+  // Auto-update functionality
+  updates?: {
+    check: () => Promise<{ available: boolean; version?: string }>
+    install: () => Promise<void>
+    onProgress?: (callback: (progress: number) => void) => () => void
+  }
+  // Code morphing API for source transformations
+  morph?: {
+    apply: (options: { filePath: string; changes: unknown }) => Promise<{ success: boolean; error?: string }>
+  }
 }
 
 interface ElectronPtyAPI {

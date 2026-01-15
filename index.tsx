@@ -2,8 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
-import { ThemeProvider } from './hooks/useTheme';
-import { ControlRegistryProvider } from './components/ui/controllable';
+import { AppProviders } from './components/AppProviders';
 import { initSourceLocationTracking } from './utils/source-location';
 
 // Initialize source location tracking for inspector
@@ -44,10 +43,8 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <ThemeProvider>
-      <ControlRegistryProvider>
-        <App />
-      </ControlRegistryProvider>
-    </ThemeProvider>
+    <AppProviders>
+      <App />
+    </AppProviders>
   </React.StrictMode>
 );

@@ -40,6 +40,50 @@ export default defineConfig(({ mode }) => {
         outDir: 'dist',
         emptyOutDir: true,
         sourcemap: true,
+        rollupOptions: {
+          output: {
+            manualChunks: (id) => {
+              // Vendor chunks for better caching
+              if (id.includes('node_modules')) {
+                // React ecosystem
+                if (id.includes('react') || id.includes('scheduler') || id.includes('react-dom')) {
+                  return 'vendor-react'
+                }
+                // AI SDK and related
+                if (id.includes('@ai-sdk') || id.includes('ai/') || id.includes('@google/genai')) {
+                  return 'vendor-ai'
+                }
+                // TipTap editor
+                if (id.includes('@tiptap') || id.includes('prosemirror')) {
+                  return 'vendor-editor'
+                }
+                // Syntax highlighting (shiki is already chunked by language)
+                if (id.includes('shiki') && !id.includes('langs')) {
+                  return 'vendor-shiki-core'
+                }
+                // Visualization
+                if (id.includes('mermaid') || id.includes('cytoscape') || id.includes('d3-')) {
+                  return 'vendor-viz'
+                }
+                // Radix UI components
+                if (id.includes('@radix-ui')) {
+                  return 'vendor-radix'
+                }
+                // Utility libraries
+                if (id.includes('lodash') || id.includes('date-fns') || id.includes('zod')) {
+                  return 'vendor-utils'
+                }
+                // Lucide icons
+                if (id.includes('lucide-react')) {
+                  return 'vendor-icons'
+                }
+              }
+              // Feature modules - keep app code together initially
+              // Can be split further as needed
+              return undefined
+            }
+          }
+        }
       },
       optimizeDeps: {
         // Pre-bundle shiki to avoid 504 errors during HMR

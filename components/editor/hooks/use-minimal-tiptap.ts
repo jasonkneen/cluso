@@ -192,6 +192,7 @@ export const useMinimalTiptapEditor = ({
   );
 
   const editor = useEditor({
+    // @ts-expect-error Extensions type mismatch due to duplicate @tiptap/core versions
     extensions: createExtensions(placeholder),
     editorProps: {
       attributes: {

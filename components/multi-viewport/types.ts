@@ -20,6 +20,7 @@ export interface Viewport {
   displayHeight?: number // Custom display height
   x?: number // Position on canvas
   y?: number // Position on canvas
+  zIndex?: number // Stacking order for overlapping viewports
   // Linked window support
   linkedToViewportId?: string // ID of the viewport this window is linked to
 }
