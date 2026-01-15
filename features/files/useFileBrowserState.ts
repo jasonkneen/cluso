@@ -41,7 +41,6 @@ export interface FileBrowserState {
   // Search/autocomplete state
   fileSearchQuery: string
   showFileAutocomplete: boolean
-  selectedFileIndex: number
   // Edited files drawer state
   editedFiles: EditedFile[]
   isEditedFilesDrawerOpen: boolean
@@ -55,7 +54,6 @@ export interface FileBrowserStateSetters {
   setCurrentDirectory: React.Dispatch<React.SetStateAction<string>>
   setFileSearchQuery: React.Dispatch<React.SetStateAction<string>>
   setShowFileAutocomplete: React.Dispatch<React.SetStateAction<boolean>>
-  setSelectedFileIndex: React.Dispatch<React.SetStateAction<number>>
   setEditedFiles: React.Dispatch<React.SetStateAction<EditedFile[]>>
   setIsEditedFilesDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>
 }
@@ -76,7 +74,6 @@ export function useFileBrowserState(): UseFileBrowserStateReturn {
   // Search/autocomplete state
   const [fileSearchQuery, setFileSearchQuery] = useState('')
   const [showFileAutocomplete, setShowFileAutocomplete] = useState(false)
-  const [selectedFileIndex, setSelectedFileIndex] = useState(0)
 
   // Edited files drawer state
   const [editedFiles, setEditedFiles] = useState<EditedFile[]>([])
@@ -88,7 +85,6 @@ export function useFileBrowserState(): UseFileBrowserStateReturn {
     currentDirectory,
     fileSearchQuery,
     showFileAutocomplete,
-    selectedFileIndex,
     editedFiles,
     isEditedFilesDrawerOpen,
     // Setters
@@ -96,7 +92,6 @@ export function useFileBrowserState(): UseFileBrowserStateReturn {
     setCurrentDirectory,
     setFileSearchQuery,
     setShowFileAutocomplete,
-    setSelectedFileIndex,
     setEditedFiles,
     setIsEditedFilesDrawerOpen,
   }

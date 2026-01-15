@@ -36,3 +36,24 @@ export * from './files'
 
 // Dialogs feature - dialog/modal visibility state management
 export * from './dialogs'
+
+// Media feature - voice input and screen sharing state management
+export * from './media'
+
+// Search feature - file/web search state management
+export * from './search'
+
+// Git feature - git panel UI state management
+export * from './git'
+
+// Inspector feature - inspector/screenshot/move tool state management
+export * from './inspector'
+
+// Tabs feature - browser tab state management
+export * from './tabs'
+
+// Todos feature - todo overlay state management
+export * from './todos'
+
+// Model feature - model selection and thinking level state management
+export * from './model'

@@ -54,7 +54,7 @@ import { useEditorState } from './features/editor';
 import { useViewportMode } from './features/viewport';
 import type { DevicePreset } from './features/viewport';
 import { useAppSettings } from './features/settings';
-import { useLayersPanel } from './features/layers';
+import { useLayerDetailsState, useLayersPanel } from './features/layers';
 import { useConsolePanel } from './features/console';
 import { useSidebarState } from './features/sidebar';
 import { usePatchState } from './features/patches';
@@ -66,6 +66,8 @@ import type { SelectedElementSourceSnippet } from './features/selection';
 import { useFileBrowserState } from './features/files';
 import type { EditedFile } from './features/files';
 import { useDialogState } from './features/dialogs';
+import { useMediaState } from './features/media';
+import { useGitPanelState } from './features/git';
 import { generateTurnId } from './utils/turnUtils';
 import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler';
 import { PatchApprovalDialog } from './components/PatchApprovalDialog';
@@ -737,6 +739,22 @@ export default function App() {
     setPageTitle,
   } = useNavigationState();
 
+  // File Browser State - centralized via useFileBrowserState hook
+  const {
+    directoryFiles,
+    setDirectoryFiles,
+    currentDirectory,
+    setCurrentDirectory,
+    fileSearchQuery,
+    setFileSearchQuery,
+    showFileAutocomplete,
+    setShowFileAutocomplete,
+    editedFiles,
+    setEditedFiles,
+    isEditedFilesDrawerOpen,
+    setIsEditedFilesDrawerOpen,
+  } = useFileBrowserState();
+
   // Chat state - centralized via useChatState hook
   const {
     messages,
@@ -789,8 +807,24 @@ export default function App() {
   // Ref to hold file modification handler (allows late binding after addEditedFile is defined)
   const fileModificationHandlerRef = useRef<(event: FileModificationEvent) => void>(() => {});
 
-  const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [isFloatingToolbarVisible, setIsFloatingToolbarVisible] = useState(true);
+  // Media state (voice input, screen sharing, toolbar visibility)
+  const {
+    isVoiceMode,
+    isRecording,
+    voiceInputText,
+    isScreenSharing,
+    isFloatingToolbarVisible,
+    setIsVoiceMode,
+    setIsRecording,
+    setVoiceInputText,
+    setIsScreenSharing,
+    setIsFloatingToolbarVisible,
+    startVoiceInput,
+    stopVoiceInput,
+    toggleScreenSharing,
+    toggleFloatingToolbar,
+    clearVoiceInput,
+  } = useMediaState();
 
   // Sidebar state (left and right panels)
   const {
@@ -844,11 +878,18 @@ export default function App() {
   const [multiViewportData, setMultiViewportData] = useState<Array<{ id: string; windowType: string; devicePresetId?: string }>>([]);
 
   const applyElementStylesTimerRef = useRef<number | null>(null)
-  const [selectedLayerComputedStyles, setSelectedLayerComputedStyles] = useState<Record<string, string> | null>(null)
-  const [selectedLayerAttributes, setSelectedLayerAttributes] = useState<Record<string, string> | null>(null)
-  const [selectedLayerDataset, setSelectedLayerDataset] = useState<Record<string, string> | null>(null)
-  const [selectedLayerFontFamilies, setSelectedLayerFontFamilies] = useState<string[] | null>(null)
-  const [selectedLayerClassNames, setSelectedLayerClassNames] = useState<string[] | null>(null)
+  const {
+    selectedLayerComputedStyles,
+    setSelectedLayerComputedStyles,
+    selectedLayerAttributes,
+    setSelectedLayerAttributes,
+    selectedLayerDataset,
+    setSelectedLayerDataset,
+    selectedLayerFontFamilies,
+    setSelectedLayerFontFamilies,
+    selectedLayerClassNames,
+    setSelectedLayerClassNames,
+  } = useLayerDetailsState()
 
   // Avoid referencing `isElectron` before it is initialized (it is declared later in this file).
 	const isElectronEnv = typeof window !== 'undefined' && !!window.electronAPI?.isElectron
@@ -1033,10 +1074,6 @@ export default function App() {
     lineStart?: number;
     lineEnd?: number;
   }>>([]);
-  const [fileSearchQuery, setFileSearchQuery] = useState('');
-  const [showFileAutocomplete, setShowFileAutocomplete] = useState(false);
-  const [directoryFiles, setDirectoryFiles] = useState<Array<{name: string; path: string; isDirectory: boolean}>>([]);
-  const [currentDirectory, setCurrentDirectory] = useState<string>('');
   const [directoryStack, setDirectoryStack] = useState<string[]>([]);
 
   // Autocomplete State (commands, chips, shared index)
@@ -1106,18 +1143,29 @@ export default function App() {
 
   // Git State
   const git = useGit();
-  const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
+  const gitPanel = useGitPanelState();
+  const {
+    isBranchMenuOpen,
+    setIsBranchMenuOpen,
+    commitMessage,
+    setCommitMessage,
+    newBranchName,
+    setNewBranchName,
+    isCreatingBranch,
+    setIsCreatingBranch,
+    gitLoading,
+    setGitLoading,
+    isStashDialogOpen,
+    setIsStashDialogOpen,
+    stashMessage,
+    setStashMessage,
+  } = gitPanel;
 
   // Tool Execution Tracking
   const toolTracker = useToolTracker();
 
   // Cluso Agent - initialized below after appSettings
   const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false);
-
-  const [commitMessage, setCommitMessage] = useState('');
-  const [newBranchName, setNewBranchName] = useState('');
-  const [isCreatingBranch, setIsCreatingBranch] = useState(false);
-  const [gitLoading, setGitLoading] = useState<string | null>(null);
 
   // Project Setup Flow State
   const [setupProject, setSetupProject] = useState<{ path: string; name: string; port?: number } | null>(null);
@@ -1726,10 +1774,6 @@ export default function App() {
     onAskClarifyingQuestion: handleAskClarifyingQuestion,
   });
 
-  // Stash Confirmation Dialog State
-  const [isStashDialogOpen, setIsStashDialogOpen] = useState(false);
-  const [stashMessage, setStashMessage] = useState('');
-
   // Pending Code Change State (for preview/approve/reject)
   const [pendingChange, setPendingChange] = useState<{
     code: string;
@@ -1740,21 +1784,6 @@ export default function App() {
     source?: 'dom' | 'code';
   } | null>(null);
   const [isPreviewingOriginal, setIsPreviewingOriginal] = useState(false);
-
-  // Edited Files Drawer State
-  interface EditedFile {
-    path: string;
-    fileName: string;
-    additions: number;
-    deletions: number;
-    undoCode?: string;
-    timestamp: Date;
-    // For file-based undo (tool modifications)
-    originalContent?: string;
-    isFileModification?: boolean;
-  }
-  const [editedFiles, setEditedFiles] = useState<EditedFile[]>([]);
-  const [isEditedFilesDrawerOpen, setIsEditedFilesDrawerOpen] = useState(false);
 
   // Viewport State - centralized via useViewportMode hook
   const {
