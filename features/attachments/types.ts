@@ -65,4 +65,10 @@ export interface AttachmentStateActions {
   clearSelectedFiles: () => void
   /** Clear all attachments (logs, images, files) */
   clearAllAttachments: () => void
+  /** Handle drag over for image upload */
+  handleDragOver: (e: React.DragEvent) => void
+  /** Handle drag leave for image upload */
+  handleDragLeave: (e: React.DragEvent) => void
+  /** Handle drop for image upload */
+  handleDrop: (e: React.DragEvent) => void
 }

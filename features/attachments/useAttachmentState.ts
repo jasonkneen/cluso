@@ -84,6 +84,43 @@ export function useAttachmentState(): UseAttachmentStateReturn {
     setSelectedFiles([])
   }, [])
 
+  // Drag handlers for image upload
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDraggingOver(true)
+    }
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDraggingOver(false)
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDraggingOver(false)
+
+    const files = Array.from(e.dataTransfer.files)
+    const imageFiles = files.filter(f => f.type.startsWith('image/'))
+    const filesToProcess = imageFiles.slice(0, 5 - attachedImages.length)
+
+    filesToProcess.forEach(file => {
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        const base64 = reader.result as string
+        setAttachedImages(prev => {
+          if (prev.length >= 5) return prev
+          return [...prev, base64]
+        })
+      }
+      reader.readAsDataURL(file)
+    })
+  }, [attachedImages.length])
+
   return {
     // State
     logs,
@@ -107,5 +144,9 @@ export function useAttachmentState(): UseAttachmentStateReturn {
     removeSelectedFile,
     clearSelectedFiles,
     clearAllAttachments,
+    // Drag handlers
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
   }
 }

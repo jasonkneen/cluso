@@ -76,17 +76,25 @@ export const Visualizer: React.FC<VisualizerProps> = ({ volume, isActive }) => {
   }, [volume, isActive]);
 
   useEffect(() => {
-    // Handle resize
+    // Handle resize with RAF throttling
+    let rafId: number | null = null
     const handleResize = () => {
+      if (rafId) return // Already scheduled
+      rafId = requestAnimationFrame(() => {
+        rafId = null
         if (canvasRef.current) {
-            canvasRef.current.width = window.innerWidth;
-            canvasRef.current.height = window.innerHeight;
+          canvasRef.current.width = window.innerWidth
+          canvasRef.current.height = window.innerHeight
         }
+      })
     }
-    window.addEventListener('resize', handleResize);
-    handleResize();
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+    window.addEventListener('resize', handleResize)
+    handleResize()
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      if (rafId) cancelAnimationFrame(rafId)
+    }
+  }, [])
 
   return (
     <canvas 

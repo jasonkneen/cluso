@@ -6,6 +6,7 @@
 
 export { useTabState } from './useTabState'
 export type { UseTabStateReturn } from './useTabState'
+export { useTabDataLoader } from './useTabDataLoader'
 export type {
   TabState,
   TabType,

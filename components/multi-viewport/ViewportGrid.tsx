@@ -60,6 +60,8 @@ function loadViewports(): Viewport[] {
       if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed.map((v: Viewport, i: number) => ({
           ...v,
+          // Migration: clear old apple.com default URL
+          url: v.url?.includes('apple.com') ? undefined : v.url,
           windowType: v.windowType || 'device',
           displayWidth: v.displayWidth || 400,
           displayHeight: v.displayHeight || 300,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 const DEFAULT_RECT: DOMRect = {
   top: 0,
@@ -14,22 +14,30 @@ const DEFAULT_RECT: DOMRect = {
 
 export function useContainerSize(element: HTMLElement | null): DOMRect {
   const [size, setSize] = useState<DOMRect>(() => element?.getBoundingClientRect() ?? DEFAULT_RECT)
+  const rafIdRef = useRef<number | null>(null)
 
   const handleResize = useCallback(() => {
     if (!element) return
 
-    const newRect = element.getBoundingClientRect()
+    // Throttle via RAF to prevent layout thrashing
+    if (rafIdRef.current) return
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null
+      if (!element) return
 
-    setSize(prevRect => {
-      if (
-        Math.round(prevRect.width) === Math.round(newRect.width) &&
-        Math.round(prevRect.height) === Math.round(newRect.height) &&
-        Math.round(prevRect.x) === Math.round(newRect.x) &&
-        Math.round(prevRect.y) === Math.round(newRect.y)
-      ) {
-        return prevRect
-      }
-      return newRect
+      const newRect = element.getBoundingClientRect()
+
+      setSize(prevRect => {
+        if (
+          Math.round(prevRect.width) === Math.round(newRect.width) &&
+          Math.round(prevRect.height) === Math.round(newRect.height) &&
+          Math.round(prevRect.x) === Math.round(newRect.x) &&
+          Math.round(prevRect.y) === Math.round(newRect.y)
+        ) {
+          return prevRect
+        }
+        return newRect
+      })
     })
   }, [element])
 
@@ -46,6 +54,7 @@ export function useContainerSize(element: HTMLElement | null): DOMRect {
       resizeObserver.disconnect()
       window.removeEventListener('click', handleResize)
       window.removeEventListener('resize', handleResize)
+      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
     }
   }, [element, handleResize])
 

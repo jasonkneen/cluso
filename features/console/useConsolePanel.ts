@@ -171,6 +171,31 @@ export function useConsolePanel(): UseConsolePanelReturn {
     setIsConsoleResizing(true)
   }, [consoleHeight])
 
+  // Console panel resize effect (handles mouse move/up events)
+  useEffect(() => {
+    if (!isConsoleResizing) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      // Calculate delta from start position (negative = dragging up = bigger)
+      const delta = consoleResizeStartY.current - e.clientY
+      const newHeight = consoleResizeStartHeight.current + delta
+      // Clamp between 100 and 500 pixels
+      setConsoleHeight(Math.max(100, Math.min(500, newHeight)))
+    }
+
+    const handleMouseUp = () => {
+      setIsConsoleResizing(false)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isConsoleResizing])
+
   // Handle log row click with shift-click range selection
   const handleLogRowClick = useCallback((index: number, event: React.MouseEvent) => {
     setSelectedLogIndices(prev => {

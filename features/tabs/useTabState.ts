@@ -10,8 +10,8 @@ import { TabState, createNewTab, TabType } from '../../types/tab'
 import type { Tab } from '../../components/TabBar'
 import type { TabStateHook, TabStateActions } from './types'
 
-// Default URL for new browser tabs
-const DEFAULT_URL = 'https://www.apple.com'
+// Default URL for new browser tabs - empty string shows NewTabPage/project selection
+const DEFAULT_URL = ''
 
 export interface UseTabStateReturn extends TabStateHook, TabStateActions {
   /** Ref to tabs array for use in callbacks that need current value */
@@ -20,6 +20,8 @@ export interface UseTabStateReturn extends TabStateHook, TabStateActions {
   activeTabIdRef: React.MutableRefObject<string>
   /** Ref to track if tab data has been loaded from disk */
   tabDataLoadedRef: React.MutableRefObject<boolean>
+  /** Ref to set project tab close callback after hook is initialized (for circular dependency resolution) */
+  onProjectTabCloseRef: React.MutableRefObject<((projectPath: string) => void) | null>
 }
 
 /**
@@ -48,6 +50,8 @@ export function useTabState(options?: {
   const tabsRef = useRef(tabs)
   const activeTabIdRef = useRef(activeTabId)
   const tabDataLoadedRef = useRef(false) // Prevent double-loading in StrictMode
+  // Ref-based callback for circular dependency resolution - can be set after hook initialization
+  const onProjectTabCloseRef = useRef<((projectPath: string) => void) | null>(null)
 
   // Keep refs in sync
   useEffect(() => { tabsRef.current = tabs }, [tabs])
@@ -87,9 +91,13 @@ export function useTabState(options?: {
       return filtered
     })
 
-    // Notify parent if closing a project tab
-    if (tabToClose?.projectPath && options?.onProjectTabClose) {
-      options.onProjectTabClose(tabToClose.projectPath)
+    // Notify parent if closing a project tab (via options or ref-based callback)
+    if (tabToClose?.projectPath) {
+      if (options?.onProjectTabClose) {
+        options.onProjectTabClose(tabToClose.projectPath)
+      } else if (onProjectTabCloseRef.current) {
+        onProjectTabCloseRef.current(tabToClose.projectPath)
+      }
     }
   }, [options])
 
@@ -138,5 +146,6 @@ export function useTabState(options?: {
     tabsRef,
     activeTabIdRef,
     tabDataLoadedRef,
+    onProjectTabCloseRef,
   }
 }

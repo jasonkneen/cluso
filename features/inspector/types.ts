@@ -73,3 +73,39 @@ export interface InspectorStateRefs {
   /** Ref to store pre-inspector settings for restoration */
   preInspectorSettingsRef: React.MutableRefObject<PreInspectorSettings | null>
 }
+
+/**
+ * Minimal webview interface for inspector sync
+ * Using a minimal type to avoid conflicts with the full WebviewElement from selection
+ */
+export interface InspectorWebviewRef {
+  send: (channel: string, ...args: unknown[]) => void
+  isConnected: boolean
+  getWebContentsId: () => number
+}
+
+/**
+ * Options for useInspectorSync hook
+ */
+export interface UseInspectorSyncOptions {
+  /** Whether running in Electron environment */
+  isElectron: boolean
+  /** Whether webview is ready to receive messages */
+  isWebviewReady: boolean
+  /** Active tab ID */
+  activeTabId: string
+  /** Active tab type */
+  activeTabType: string | undefined
+  /** Inspector mode state */
+  isInspectorActive: boolean
+  /** Screenshot mode state */
+  isScreenshotActive: boolean
+  /** Move mode state */
+  isMoveActive: boolean
+  /** Ref map to webview elements */
+  webviewRefs: React.MutableRefObject<Map<string, InspectorWebviewRef>>
+  /** Callback to clear selected element */
+  setSelectedElement: (element: null) => void
+  /** Callback to hide element chat */
+  setShowElementChat: (show: boolean) => void
+}

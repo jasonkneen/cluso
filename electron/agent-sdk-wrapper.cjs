@@ -355,6 +355,9 @@ You are working in a coding assistant application with direct file system access
  * @param {Array} options.mcpTools - MCP tool definitions
  */
 async function streamChat(options) {
+  const startTime = Date.now()
+  console.log('[Agent-SDK-Wrapper] streamChat called at', new Date().toISOString())
+
   const {
     requestId,
     modelId,
@@ -364,6 +367,8 @@ async function streamChat(options) {
     projectFolder,
     mcpTools = [],
   } = options
+
+  console.log('[Agent-SDK-Wrapper] Options:', { requestId, modelId, messageCount: messages.length, projectFolder })
 
   // Check if already processing - wait for previous session to complete
   if (isProcessing || querySession) {

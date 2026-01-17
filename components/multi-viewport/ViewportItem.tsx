@@ -113,31 +113,40 @@ function ResizeHandles({
   )
 }
 
-// Hook to measure container size - with debouncing to prevent render loops
+// Hook to measure container size - with RAF throttling to prevent layout thrashing
 function useContainerSize(ref: React.RefObject<HTMLDivElement | null>) {
   const [size, setSize] = useState({ width: 0, height: 0 })
   const lastSize = useRef({ width: 0, height: 0 })
+  const rafId = useRef<number | null>(null)
 
   useEffect(() => {
     if (!ref.current) return
 
     const observer = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (entry) {
-        const newWidth = Math.round(entry.contentRect.width)
-        const newHeight = Math.round(entry.contentRect.height)
+      // Throttle via RAF
+      if (rafId.current) return
+      rafId.current = requestAnimationFrame(() => {
+        rafId.current = null
+        const entry = entries[0]
+        if (entry) {
+          const newWidth = Math.round(entry.contentRect.width)
+          const newHeight = Math.round(entry.contentRect.height)
 
-        // Only update if size changed by more than 1px to prevent loops
-        if (Math.abs(newWidth - lastSize.current.width) > 1 ||
-            Math.abs(newHeight - lastSize.current.height) > 1) {
-          lastSize.current = { width: newWidth, height: newHeight }
-          setSize({ width: newWidth, height: newHeight })
+          // Only update if size changed by more than 1px to prevent loops
+          if (Math.abs(newWidth - lastSize.current.width) > 1 ||
+              Math.abs(newHeight - lastSize.current.height) > 1) {
+            lastSize.current = { width: newWidth, height: newHeight }
+            setSize({ width: newWidth, height: newHeight })
+          }
         }
-      }
+      })
     })
 
     observer.observe(ref.current)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      if (rafId.current) cancelAnimationFrame(rafId.current)
+    }
   }, []) // Empty deps - ref is stable
 
   return size

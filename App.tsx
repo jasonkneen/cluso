@@ -43,7 +43,7 @@ import { ClarifyingQuestion } from './components/ClarifyingQuestion';
 import { useLSPUI } from './hooks/useLSPUI';
 import { HoverTooltip } from './components/HoverTooltip';
 import { AutocompletePopup } from './components/AutocompletePopup';
-import { useMCP } from './hooks/useMCP';
+import { useMCPHandlers } from './features/mcp';
 import { useSelectorAgent } from './hooks/useSelectorAgent';
 import { useToolTracker } from './hooks/useToolTracker';
 import { useClusoAgent, AVAILABLE_DEMOS, DEMO_SCRIPTS } from './hooks/useClusoAgent';
@@ -53,48 +53,82 @@ import { useChatState } from './features/chat';
 import { useEditorState } from './features/editor';
 import { useViewportMode, useMultiViewportData } from './features/viewport';
 import type { DevicePreset } from './features/viewport';
-import { useWebviewState } from './features/webview';
+import { useWebviewState, useWebviewSetup } from './features/webview';
 import { useAppSettings } from './features/settings';
 import { useLayerDetailsState, useLayersPanel } from './features/layers';
 import { useConsolePanel } from './features/console';
-import { useSidebarState } from './features/sidebar';
-import { usePatchState } from './features/patches';
+import { useSidebarState, useResizeHandlers } from './features/sidebar';
+import { usePatchState, usePatchApproval } from './features/patches';
 import type { PendingPatch, PendingDOMApproval } from './features/patches';
-import { useNavigationState } from './features/navigation';
+import { useProjectSetup } from './features/project-setup';
+import { useDomApprovalLifecycle } from './features/dom-approval';
+import { useNavigationState, useBrowserNavigation } from './features/navigation';
 import { useAutocompleteState } from './features/autocomplete';
-import { useSelectionState } from './features/selection';
-import type { SelectedElementSourceSnippet } from './features/selection';
-import { useFileBrowserState } from './features/files';
+import { useSelectionState, useSelectionHandlers } from './features/selection';
+import type { SelectedElementSourceSnippet, SelectionHandlersDeps } from './features/selection';
+import { useFileBrowserState, useFileHandlers } from './features/files';
 import type { EditedFile } from './features/files';
 import { useDialogState } from './features/dialogs';
 import { useProjectState } from './features/project';
 import type { SetupProject } from './features/project';
-import { useExtensionState } from './features/extension';
+import { useExtensionState, useExtensionCursorSync } from './features/extension';
 import type { ExtensionCursor } from './features/extension';
+import { useTerminalPanel } from './features/terminal';
+import { useMgrepInit } from './features/mgrep';
+import { useFileWatcher } from './features/file-watcher';
 import { useMediaState } from './features/media';
 import { useGitPanelState } from './features/git';
-import { useThemeState } from './features/theme';
-import { useTabState } from './features/tabs';
-import { useInspectorState } from './features/inspector';
+import { useThemeState, useThemeHandlers } from './features/theme';
+import { useTabState, useTabDataLoader } from './features/tabs';
+import { useInternalWindowHandlers } from './features/internal-windows';
+import { useInspectorState, useInspectorSync } from './features/inspector';
 import { useSearchState } from './features/search';
 import { useAttachmentState } from './features/attachments';
 import { useModelState } from './features/model';
 import type { ThinkingLevel } from './features/model';
-import { useTodoOverlayState } from './features/todos';
+import { useTodoOverlayState, useTodosLoader } from './features/todos';
+import { useContextChipsPersistence } from './features/context-chips';
+import { useSourceSnippetLoader } from './features/source-snippet';
+import { useOnboardingSync } from './features/onboarding';
+import { useWebviewHmr } from './features/hmr';
 import { usePreviewState } from './features/preview';
-import { useScrollState } from './features/scroll';
+import { useScrollState, useScrollEffects } from './features/scroll';
 import { useAgentPanelState } from './features/agent';
 import type { PreviewIntent } from './features/preview';
 import { useDebugState } from './features/debug';
+// New extracted feature hooks
+import { useExtensionBridge } from './features/extension-bridge';
+import { useSidebarResize, useConsoleResize } from './features/resize';
+import { useScreenSharing } from './features/screen-sharing';
+import { useConsoleKeyboardShortcuts, useApprovalKeyboardShortcuts, useThinkingPopover } from './features/keyboard-shortcuts';
+import { useDOMApprovalAutoApply, usePrepareDomPatchRef } from './features/dom-approval';
+import { useCodingContextSync } from './features/coding-context';
+import { useSelectorAgentInit, useSelectorAgentPriming } from './features/selector-agent';
+import { useAutoTextareaResize } from './features/textarea';
+import { useWindowAppearance } from './features/window-appearance';
+import { useCompletedToolCallsClear } from './features/tool-calls';
+import {
+  useUrlSync,
+  useDarkModePersist,
+  useInspectorThinking,
+  useAutoShowElementChat,
+  useConnectionState as useConnectionStateEffect,
+  usePreviewReset,
+  useLayersStale,
+  useSidebarElementChat,
+} from './features/misc-effects';
 import { useAISelectionState } from './features/ai-selection';
 import type { AISelectedElement, DisplayedSourceCode } from './features/ai-selection';
 import { useFileBrowserPanelState } from './features/file-browser';
 import type { FileBrowserPanel, FileBrowserItem } from './features/file-browser';
-import { useCommandsState } from './features/commands';
+import { useToolExecution } from './features/tools';
+import { useCommandsState, useCommandsLoader } from './features/commands';
 import { useStatusState } from './features/status';
-import { usePendingChangeState } from './features/changes';
+import { usePendingChangeState, useChangeApprovalHandlers } from './features/changes';
 import { useErrorPanelState } from './features/error-panel';
 import { useClarifyingState } from './features/clarifying';
+import { useWindowInit } from './features/window';
+import { useFastApplyStatus } from './features/fast-apply';
 import { generateTurnId } from './utils/turnUtils';
 import { createToolError, formatErrorForDisplay } from './utils/toolErrorHandler';
 import { PatchApprovalDialog } from './components/PatchApprovalDialog';
@@ -106,10 +140,19 @@ import { FilePanel } from './components/FilePanel';
 import { TabbedLeftPanel } from './components/TabbedLeftPanel';
 import { CodeEditor } from './components/CodeEditor';
 import { GroupedToolChips } from './components/GroupedToolChips';
+import { FileBrowserOverlay } from './components/FileBrowserOverlay';
+import { StashDialog } from './components/StashDialog';
+import { AIElementSelectionToolbar } from './components/AIElementSelectionToolbar';
+import { PendingChangePreview } from './components/PendingChangePreview';
+import { ScreenshotPreviewModal } from './components/ScreenshotPreviewModal';
+import { ConsolePanel, ConsoleLog } from './components/ConsolePanel';
+import { FloatingToolbar } from './components/FloatingToolbar';
+import { FloatingChat } from './components/FloatingChat';
+import { GitHeader } from './components/GitHeader';
+import { ChatInputToolbar } from './components/ChatInputToolbar';
+import { BrowserToolbar } from './components/BrowserToolbar';
 
 import { getElectronAPI } from './hooks/useElectronAPI';
-import type { MCPServerConfig } from './types/mcp';
-import type { MCPServerConnection } from './components/SettingsDialog';
 import type { ExtensionChatRequest } from './types/electron.d';
 import { GoogleGenAI } from '@google/genai'; // Keep for voice streaming
 import { playApprovalSound, playRejectionSound, playUndoSound } from './utils/audio';
@@ -259,7 +302,11 @@ export default function App() {
     setDirectoryStack,
   } = useProjectState();
 
+  // Initialize window info on mount - extracted to useWindowInit hook
+  useWindowInit({ setWindowId, setLockedProjectPath, setLockedProjectName });
+
   // Tab State - extracted to useTabState hook
+  // Note: We need tabState.updateCurrentTab for useProjectSetup, so it comes first
   const tabState = useTabState();
   const {
     tabs,
@@ -268,6 +315,7 @@ export default function App() {
     setActiveTabId,
     activeTab,
     handleNewTab,
+    handleCloseTab,
     handleSelectTab,
     handleReorderTabs,
     updateCurrentTab,
@@ -275,7 +323,19 @@ export default function App() {
     tabsRef,
     activeTabIdRef,
     tabDataLoadedRef,
+    onProjectTabCloseRef,
   } = tabState;
+
+  // Load tab data from disk on startup - extracted to useTabDataLoader hook
+  useTabDataLoader({ setTabs, tabDataLoadedRef });
+
+  // Internal window handlers (kanban, todos, notes) - extracted to useInternalWindowHandlers hook
+  const {
+    handleUpdateKanbanColumns,
+    handleUpdateKanbanTitle,
+    handleUpdateTodoItems,
+    handleUpdateNotesContent,
+  } = useInternalWindowHandlers({ tabsRef, activeTabIdRef, updateCurrentTab });
 
   // Error panel state - centralized via useErrorPanelState hook
   const {
@@ -298,428 +358,6 @@ export default function App() {
     enableAutoSearch: true,
     debounceMs: 1000,
   });
-
-  // Tab close handler - needs extra dependencies beyond useTabState hook
-  const handleCloseTab = useCallback((tabId: string) => {
-    // Find the tab to check if it's a project tab
-    const tabToClose = tabs.find(t => t.id === tabId);
-
-    // If it's a project tab, show confirmation
-    if (tabToClose?.projectPath) {
-      const confirmed = window.confirm(
-        `Close project "${tabToClose.title || 'Untitled'}"?\n\nThis will close the project and clear its chat history.`
-      );
-      if (!confirmed) return;
-    }
-
-    setTabs(prev => {
-      const filtered = prev.filter(t => t.id !== tabId);
-      if (filtered.length === 0) {
-        // Don't allow closing last tab
-        return prev;
-      }
-      // If closing active tab, switch to adjacent one
-      if (tabId === activeTabId) {
-        const closedIndex = prev.findIndex(t => t.id === tabId);
-        const newActiveIndex = Math.min(closedIndex, filtered.length - 1);
-        setActiveTabId(filtered[newActiveIndex].id);
-      }
-      return filtered;
-    });
-
-    // Clear chat history and stop file watcher for the closed tab
-    if (tabToClose?.projectPath) {
-      setMessages([]);
-      setSelectedFiles([]);
-      setSelectedElement(null);
-      // Stop file watcher for this project
-      window.electronAPI?.fileWatcher?.stop(tabToClose.projectPath).catch((err: Error) => {
-        console.error('[App] Failed to stop file watcher:', err);
-      });
-    }
-  }, [activeTabId, tabs, setTabs, setActiveTabId]);
-
-  // Sync URL input when switching tabs
-  useEffect(() => {
-    setUrlInput(activeTab.url || '');
-  }, [activeTabId, activeTab.url]);
-
-  // Load existing tab data from disk on startup
-  useEffect(() => {
-    async function loadTabData() {
-      // Guard against double-loading in React StrictMode
-      if (tabDataLoadedRef.current) return;
-      tabDataLoadedRef.current = true;
-
-      if (!window.electronAPI?.tabdata) return;
-
-      try {
-        // Load kanban, todos, and notes data from disk
-        const [kanbanResult, todosResult, notesResult] = await Promise.all([
-          window.electronAPI.tabdata.loadKanban(undefined),
-          window.electronAPI.tabdata.loadTodos(undefined),
-          window.electronAPI.tabdata.loadNotes(undefined)
-        ]);
-
-        // If any data exists, create tabs for them
-        const tabsToAdd: TabState[] = [];
-
-        // Load all kanban boards (data is now an array)
-        if (kanbanResult.success && Array.isArray(kanbanResult.data) && kanbanResult.data.length > 0) {
-          for (const board of kanbanResult.data) {
-            console.log('[TabData] Loaded kanban board:', board.boardId, board.boardTitle);
-            tabsToAdd.push({
-              ...createNewTab(undefined, 'kanban'),
-              title: board.boardTitle || 'Kanban',
-              kanbanData: {
-                boardId: board.boardId,
-                boardTitle: board.boardTitle || 'Kanban',
-                columns: board.columns || []
-              }
-            });
-          }
-        }
-
-        if (todosResult.success && todosResult.data) {
-          console.log('[TabData] Loaded todos data');
-          tabsToAdd.push({
-            ...createNewTab(undefined, 'todos'),
-            todosData: { items: todosResult.data.items }
-          });
-        }
-
-        if (notesResult.success && notesResult.data) {
-          console.log('[TabData] Loaded notes data');
-          tabsToAdd.push({
-            ...createNewTab(undefined, 'notes'),
-            notesData: { content: notesResult.data.content }
-          });
-        }
-
-        // Add loaded tabs to the existing tabs
-        if (tabsToAdd.length > 0) {
-          setTabs(prev => [...prev, ...tabsToAdd]);
-        }
-      } catch (error) {
-        console.error('[TabData] Error loading tab data:', error);
-      }
-    }
-
-    loadTabData();
-  }, []);
-
-  // Tab-specific data update handlers with persistence
-  const saveKanbanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const saveTodosTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const saveNotesTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Initialize window info on mount (for multi-window project locking)
-  useEffect(() => {
-    async function initWindowInfo() {
-      if (!window.electronAPI?.window) return;
-
-      try {
-        const info = await window.electronAPI.window.getInfo();
-        if (info.windowId) {
-          setWindowId(info.windowId);
-        }
-        if (info.projectPath) {
-          setLockedProjectPath(info.projectPath);
-          setLockedProjectName(info.projectName);
-          console.log(`[Window] Window ${info.windowId} locked to project: ${info.projectPath}`);
-        }
-      } catch (e) {
-        console.warn('[Window] Failed to get window info:', e);
-      }
-    }
-
-    initWindowInfo();
-
-    // Also listen for window info sent on ready-to-show
-    const unsubscribe = window.electronAPI?.window?.onInfo?.((info) => {
-      if (info.windowId) setWindowId(info.windowId);
-      if (info.projectPath) {
-        setLockedProjectPath(info.projectPath);
-        setLockedProjectName(info.projectName);
-      }
-    });
-
-    return () => {
-      unsubscribe?.();
-    };
-  }, []);
-
-  // Handle extension chat requests (Chrome extension communication)
-  useEffect(() => {
-    if (!window.electronAPI?.extensionBridge) return;
-
-    // Check initial connection status and poll periodically
-    const checkStatus = async () => {
-      try {
-        const status = await window.electronAPI.extensionBridge?.getStatus();
-        setExtensionConnected(status?.connected ?? false);
-      } catch {
-        setExtensionConnected(false);
-      }
-    };
-
-    checkStatus();
-    const statusInterval = setInterval(checkStatus, 5000); // Check every 5 seconds
-
-    const handleChatRequest = async (request: ExtensionChatRequest) => {
-      console.log('[ExtensionBridge] Chat request:', request.requestId, request.message);
-      setExtensionConnected(true); // If we receive a request, we're connected
-
-      try {
-        // Build context from selected elements
-        const elementContext = request.elements.length > 0
-          ? `\n\nSelected elements:\n${request.elements.map(el =>
-              `- ${el.tagName} (${el.label})${el.fullInfo ? `: ${JSON.stringify(el.fullInfo)}` : ''}`
-            ).join('\n')}`
-          : '';
-
-        const pageContext = `Page: ${request.pageTitle} (${request.pageUrl})`;
-
-        // Use aiSdk.generate if available
-        if (window.electronAPI.aiSdk?.generate) {
-          const result = await window.electronAPI.aiSdk.generate({
-            messages: [{
-              role: 'user',
-              content: `${request.message}\n\n${pageContext}${elementContext}`
-            }],
-            modelId: selectedModelRef.current.id, // Use selected model, not hardcoded Gemini
-            providers: {}, // Providers are loaded from settings in the main process
-            system: 'You are Cluso, a helpful AI assistant for web development. The user is inspecting elements on a web page and may ask questions about them or request changes. Keep responses concise.',
-          });
-
-          if (result.success && result.text) {
-            await window.electronAPI.extensionBridge?.sendChatResponse(request.requestId, result.text);
-            console.log('[ExtensionBridge] Response sent for:', request.requestId);
-          } else {
-            await window.electronAPI.extensionBridge?.sendChatResponse(request.requestId, undefined, result.error || 'Failed to generate response');
-          }
-        } else {
-          // Fallback: return a helpful message
-          await window.electronAPI.extensionBridge?.sendChatResponse(
-            request.requestId,
-            `I received your message about ${request.elements.length} element(s) on "${request.pageTitle}". AI generation is not currently available.`
-          );
-        }
-      } catch (err) {
-        console.error('[ExtensionBridge] Chat error:', err);
-        await window.electronAPI.extensionBridge?.sendChatResponse(
-          request.requestId,
-          undefined,
-          err instanceof Error ? err.message : 'Unknown error'
-        );
-      }
-    };
-
-    const unsubscribe = window.electronAPI.extensionBridge.onChatRequest(handleChatRequest);
-    console.log('[ExtensionBridge] Chat request listener registered');
-
-    return () => {
-      unsubscribe?.();
-      clearInterval(statusInterval);
-    };
-  }, []);
-
-  // Track which projects have mgrep initialized (persistent across tab switches)
-  const mgrepInitializedProjects = useRef<Set<string>>(new Set())
-
-  // Auto-initialize mgrep when project loads - BUT ONLY ONCE PER PROJECT
-  useEffect(() => {
-    const projectPath = activeTab?.projectPath
-    if (!projectPath || !window.electronAPI?.mgrep) return
-
-    // Check if already handled for this project
-    if (mgrepInitializedProjects.current.has(projectPath)) {
-      console.log('[mgrep] Already handled for:', projectPath)
-      return
-    }
-
-    let isCancelled = false
-
-    // Check if this project needs initialization
-    const checkStatus = async () => {
-      try {
-        const result = await Promise.race([
-          window.electronAPI.mgrep.getStatus(projectPath),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
-        ]) as any
-
-        if (isCancelled) return
-
-        if (result.success && result.status && !result.status.ready) {
-          // Not initialized yet - check if user wants to enable indexing
-          const hasSeenPrompt = localStorage.getItem('mgrep-onboarding-seen')
-          if (!hasSeenPrompt) {
-            // First time - show onboarding with demo (but only once per app session)
-            const onboardingShown = mgrepInitializedProjects.current.has('__onboarding_shown__')
-            if (!onboardingShown) {
-              setTimeout(() => {
-                if (!isCancelled) setShowMgrepOnboarding(true)
-              }, 1500)
-              mgrepInitializedProjects.current.add('__onboarding_shown__')
-            }
-            return
-          }
-
-          // Auto-init if user previously opted in
-          const autoInit = localStorage.getItem('mgrep-auto-init')
-          if (autoInit === 'true') {
-            console.log('[mgrep] Initializing for:', projectPath)
-            setIndexingStatus('indexing')
-            window.electronAPI.mgrep.initialize(projectPath).then(() => {
-              // Mark as initialized - won't init again even if we switch back to this tab
-              mgrepInitializedProjects.current.add(projectPath)
-              setIndexingStatus('indexed')
-              console.log('[mgrep] ✓ Initialized for:', projectPath)
-            }).catch(err => {
-              console.error('[mgrep] Auto-init failed:', err)
-              setIndexingStatus('idle')
-            })
-          } else {
-            // User opted out - mark as "handled" so we don't keep checking
-            mgrepInitializedProjects.current.add(projectPath)
-          }
-        } else if (result.success && result.status && result.status.ready) {
-          // Already initialized - mark it so we don't check again
-          mgrepInitializedProjects.current.add(projectPath)
-          setIndexingStatus('indexed')
-          console.log('[mgrep] Already ready for:', projectPath)
-        }
-      } catch (err) {
-        console.error('[mgrep] Status check failed:', err)
-      }
-    }
-
-    checkStatus()
-
-    // NO CLEANUP - let initialization persist across tab switches
-    return () => {
-      isCancelled = true
-    }
-  }, [activeTab?.projectPath])
-
-  const handleUpdateKanbanColumns = useCallback((columns: KanbanColumn[]) => {
-    console.log('[TabData] handleUpdateKanbanColumns called, columns:', columns.length);
-    const currentActiveTab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
-    if (!currentActiveTab?.kanbanData) return;
-
-    updateCurrentTab({
-      kanbanData: {
-        ...currentActiveTab.kanbanData,
-        columns
-      }
-    });
-
-    // Debounced save to disk
-    if (saveKanbanTimeoutRef.current) {
-      clearTimeout(saveKanbanTimeoutRef.current);
-    }
-    saveKanbanTimeoutRef.current = setTimeout(async () => {
-      const tab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
-      console.log('[TabData] Debounce fired, activeTab:', tab?.id, 'type:', tab?.type, 'hasTabdata:', !!window.electronAPI?.tabdata);
-      if (window.electronAPI?.tabdata && tab?.kanbanData) {
-        try {
-          const result = await window.electronAPI.tabdata.saveKanban(tab.projectPath, {
-            boardId: tab.kanbanData.boardId,
-            boardTitle: tab.kanbanData.boardTitle,
-            columns,
-            updatedAt: new Date().toISOString()
-          });
-          console.log('[TabData] Kanban save result:', result);
-        } catch (e) {
-          console.error('[TabData] Failed to save kanban:', e);
-        }
-      } else {
-        console.warn('[TabData] Cannot save - tabdata API:', !!window.electronAPI?.tabdata, 'activeTab:', !!tab);
-      }
-    }, 500);
-  }, [updateCurrentTab]);
-
-  const handleUpdateTodoItems = useCallback((items: TodoItem[]) => {
-    updateCurrentTab({ todosData: { items } });
-
-    // Debounced save to disk
-    if (saveTodosTimeoutRef.current) {
-      clearTimeout(saveTodosTimeoutRef.current);
-    }
-    saveTodosTimeoutRef.current = setTimeout(async () => {
-      const currentActiveTab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
-      if (window.electronAPI?.tabdata && currentActiveTab) {
-        try {
-          await window.electronAPI.tabdata.saveTodos(currentActiveTab.projectPath, {
-            items,
-            updatedAt: new Date().toISOString()
-          });
-          console.log('[TabData] Todos saved');
-        } catch (e) {
-          console.error('[TabData] Failed to save todos:', e);
-        }
-      }
-    }, 500);
-  }, [updateCurrentTab]);
-
-  const handleUpdateNotesContent = useCallback((content: string) => {
-    updateCurrentTab({ notesData: { content } });
-
-    // Debounced save to disk
-    if (saveNotesTimeoutRef.current) {
-      clearTimeout(saveNotesTimeoutRef.current);
-    }
-    saveNotesTimeoutRef.current = setTimeout(async () => {
-      const currentActiveTab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
-      if (window.electronAPI?.tabdata && currentActiveTab) {
-        try {
-          await window.electronAPI.tabdata.saveNotes(currentActiveTab.projectPath, {
-            content,
-            updatedAt: new Date().toISOString()
-          });
-          console.log('[TabData] Notes saved');
-        } catch (e) {
-          console.error('[TabData] Failed to save notes:', e);
-        }
-      }
-    }, 500);
-  }, [updateCurrentTab]);
-
-  // Handle kanban board title update
-  const handleUpdateKanbanTitle = useCallback((title: string) => {
-    const currentActiveTab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
-    if (!currentActiveTab?.kanbanData) return;
-
-    // Update both tab title and kanban boardTitle
-    updateCurrentTab({
-      title,
-      kanbanData: {
-        ...currentActiveTab.kanbanData,
-        boardTitle: title
-      }
-    });
-
-    // Trigger save with the updated title
-    if (saveKanbanTimeoutRef.current) {
-      clearTimeout(saveKanbanTimeoutRef.current);
-    }
-    saveKanbanTimeoutRef.current = setTimeout(async () => {
-      const tab = tabsRef.current.find(t => t.id === activeTabIdRef.current);
-      if (window.electronAPI?.tabdata && tab?.kanbanData) {
-        try {
-          const result = await window.electronAPI.tabdata.saveKanban(tab.projectPath, {
-            boardId: tab.kanbanData.boardId,
-            boardTitle: title,
-            columns: tab.kanbanData.columns,
-            updatedAt: new Date().toISOString()
-          });
-          console.log('[TabData] Kanban title saved:', result);
-        } catch (e) {
-          console.error('[TabData] Failed to save kanban title:', e);
-        }
-      }
-    }, 500);
-  }, [updateCurrentTab]);
 
   // Convert TabState to Tab for TabBar - only show browser tabs (kanban/todos/notes are internal windows)
   const tabBarTabs: Tab[] = tabs
@@ -746,6 +384,30 @@ export default function App() {
     pageTitle,
     setPageTitle,
   } = useNavigationState();
+
+  // Sync URL input when switching tabs - extracted to useUrlSync hook
+  useUrlSync({
+    activeTabId,
+    activeTabUrl: activeTab.url,
+    setUrlInput,
+  });
+
+  // Project Setup Handlers - extracted to useProjectSetup hook
+  const {
+    handleOpenProject,
+    handleSetupComplete,
+    handleSetupCancel,
+    handleOpenUrl,
+  } = useProjectSetup({
+    lockedProjectPath,
+    setLockedProjectPath,
+    setLockedProjectName,
+    setSetupProject,
+    setupProject,
+    updateCurrentTab,
+    getRecentProject,
+    addToRecentProjects,
+  });
 
   // File Browser State - centralized via useFileBrowserState hook
   const {
@@ -860,6 +522,16 @@ export default function App() {
     setIsLeftResizing,
   } = useSidebarState();
 
+  // Sidebar resize handlers (extracted from App.tsx to useResizeHandlers hook)
+  const { handleResizeStart, handleLeftResizeStart } = useResizeHandlers({
+    isResizing,
+    setIsResizing,
+    setSidebarWidth,
+    leftPanelWidth,
+    setIsLeftResizing,
+    setLeftPanelWidth,
+  });
+
   // Code editor state (center pane)
   const {
     isEditorMode,
@@ -911,122 +583,21 @@ export default function App() {
   // Avoid referencing `isElectron` before it is initialized (it is declared later in this file).
 	const isElectronEnv = typeof window !== 'undefined' && !!window.electronAPI?.isElectron
 
-	const resolveSourceFilePath = useCallback((projectPath: string, raw: string) => {
-		let file = String(raw || '').trim()
-		if (!file) return { absPath: '', displayPath: '' }
-
-		let fromHttpUrl = false
-		let fromFileUrl = false
-		try {
-			if (file.startsWith('http://') || file.startsWith('https://')) {
-				const u = new URL(file)
-				file = u.pathname
-				fromHttpUrl = true
-			} else if (file.startsWith('file://')) {
-				const u = new URL(file)
-				file = u.pathname
-				fromFileUrl = true
-			}
-		} catch (e) {
-			// ignore
-		}
-
-		// Drop any query/hash noise from sourcemap-style URLs.
-		file = file.split('?')[0].split('#')[0]
-		file = file.replace(/^webpack-internal:\/\//, '')
-			file = file.replace(/^webpack:\/{3}/, '') // webpack:///src/App.tsx
-		file = file.replace(/^webpack:\/\//, '') // webpack://src/App.tsx
-		// Fallback if URL parsing failed (keeps old behavior for file:// URLs)
-		file = file.replace(/^file:\/\//, '')
-		// Vite dev URLs can show file system paths as /@fs/Users/...; normalize back.
-		file = file.replace(/^\/@fs\//, '/')
-
-		const displayPath = fromHttpUrl ? file.replace(/^\/+/, '') : file
-
-		const isWindowsAbs = /^[A-Z]:\\/.test(file)
-		const isPosixAbs = file.startsWith('/')
-
-		// IMPORTANT: If a file path came from an http(s) URL, its pathname is *project-relative*.
-		// Also treat /src/... as project-relative, since this is a common URL pathname shape.
-		const treatPosixAbsAsProjectRelative =
-			!!projectPath &&
-			isPosixAbs &&
-			!fromFileUrl &&
-			(fromHttpUrl || file.startsWith('/src/'))
-
-		const absPath =
-			isWindowsAbs || (isPosixAbs && !treatPosixAbsAsProjectRelative)
-				? file
-				: `${projectPath}/${file.replace(/^\/+/, '')}`.replace(/\/{2,}/g, '/')
-		return { absPath, displayPath }
-	}, [])
-
-  const getCodeLanguageFromPath = useCallback((path: string) => {
-    const ext = (path.split('.').pop() || '').toLowerCase()
-    if (ext === 'tsx') return 'tsx'
-    if (ext === 'ts') return 'typescript'
-    if (ext === 'jsx') return 'jsx'
-    if (ext === 'js') return 'javascript'
-    if (ext === 'html' || ext === 'htm') return 'html'
-    if (ext === 'css') return 'css'
-    if (ext === 'json') return 'json'
-    if (ext === 'md' || ext === 'markdown') return 'markdown'
-    return 'tsx'
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    const src0 = selectedElement?.sourceLocation?.sources?.[0] as { file?: string; line?: number } | undefined
-    const rawFile = src0?.file
-    const rawLine = src0?.line
-    const projectPath = activeTab.projectPath
-
-    if (!isElectronEnv || !projectPath || !rawFile || !rawLine) {
-      setSelectedElementSourceSnippet(null)
-      return
-    }
-
-    const { absPath, displayPath } = resolveSourceFilePath(projectPath, rawFile)
-    if (!absPath) {
-      setSelectedElementSourceSnippet(null)
-      return
-    }
-
-    fileService.readFileFull(absPath).then((result: { success: boolean; data?: string; error?: string }) => {
-      if (cancelled) return
-      if (!result.success || typeof result.data !== 'string') {
-        setSelectedElementSourceSnippet(null)
-        return
-      }
-
-      const allLines = result.data.split('\n')
-      const focusLine = Math.max(1, Math.min(allLines.length, Number(rawLine) || 1))
-      const startLine = Math.max(1, focusLine - 12)
-      const endLine = Math.min(allLines.length, focusLine + 28)
-      const code = allLines.slice(startLine - 1, endLine).join('\n')
-
-      setSelectedElementSourceSnippet({
-        filePath: absPath,
-        displayPath,
-        startLine,
-        focusLine,
-        language: getCodeLanguageFromPath(displayPath),
-        code,
-      })
-    }).catch(() => {
-      if (!cancelled) setSelectedElementSourceSnippet(null)
-    })
-
-    return () => {
-      cancelled = true
-    }
-  }, [selectedElement?.sourceLocation?.sources?.[0]?.file, selectedElement?.sourceLocation?.sources?.[0]?.line, activeTab.projectPath, isElectronEnv, resolveSourceFilePath, getCodeLanguageFromPath])
+  // Load source code snippets for selected elements - extracted to useSourceSnippetLoader hook
+  useSourceSnippetLoader({
+    selectedElement,
+    projectPath: activeTab.projectPath,
+    isElectron: isElectronEnv,
+    setSelectedElementSourceSnippet,
+  })
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   // Scroll state - extracted to useScrollState hook
   const { isAutoScrollEnabled, setIsAutoScrollEnabled, showScrollToBottom, setShowScrollToBottom } = useScrollState();
   const isUserScrollingRef = useRef(false);
+
+  // Scroll effects - extracted to useScrollEffects hook (note: called later after messages/streaming are defined)
 
   // Inspector & Context State - extracted to useInspectorState hook
   const inspectorState = useInspectorState();
@@ -1058,6 +629,11 @@ export default function App() {
     setIsDraggingOver,
     selectedFiles,
     setSelectedFiles,
+    // Drag handlers
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+    removeImage: removeAttachedImage,
   } = attachmentState;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1088,12 +664,29 @@ export default function App() {
     setShowTodoOverlay,
   } = todoOverlayState;
 
-  // Auto-show floating chat when element is selected
+  // Auto-show floating chat when element is selected - extracted to useAutoShowElementChat hook
+  useAutoShowElementChat({
+    selectedElement,
+    isSidebarOpen,
+    setShowElementChat,
+  });
+
+  // Wire up tab close cleanup callback (resolves circular dependency between useTabState and other hooks)
   useEffect(() => {
-    if (selectedElement && !isSidebarOpen) {
-      setShowElementChat(true);
-    }
-  }, [selectedElement, isSidebarOpen]);
+    onProjectTabCloseRef.current = (projectPath: string) => {
+      // Clear chat history and selection state when project tab is closed
+      setMessages([]);
+      setSelectedFiles([]);
+      setSelectedElement(null);
+      // Stop file watcher for this project
+      window.electronAPI?.fileWatcher?.stop(projectPath).catch((err: Error) => {
+        console.error('[App] Failed to stop file watcher:', err);
+      });
+    };
+    return () => {
+      onProjectTabCloseRef.current = null;
+    };
+  }, [setMessages, setSelectedFiles, setSelectedElement, onProjectTabCloseRef]);
 
   // Autocomplete State (commands, chips, shared index)
   const {
@@ -1114,43 +707,6 @@ export default function App() {
     autocompleteIndex,
     setAutocompleteIndex,
   } = useAutocompleteState();
-
-  // Helper to format file display: "LandingPage.tsx / Button (1426-31)"
-  const formatFileDisplay = useCallback((file: typeof selectedFiles[0]): string => {
-    // Get clean filename (remove query params like ?t=...)
-    const rawName = file.path.split('/').pop() || file.path;
-    const cleanName = rawName.split('?')[0];
-
-    // Build display parts
-    let display = cleanName;
-
-    // Add element type if available
-    if (file.elementType) {
-      display += ` / ${file.elementType}`;
-    }
-
-    // Add line range if available (compact format: 1426-31 instead of 1426-1431)
-    if (file.lineStart !== undefined) {
-      if (file.lineEnd !== undefined && file.lineEnd !== file.lineStart) {
-        // Compact line range: if same prefix, show shortened end
-        const startStr = file.lineStart.toString();
-        const endStr = file.lineEnd.toString();
-        // Find common prefix length
-        let commonLen = 0;
-        while (commonLen < startStr.length && commonLen < endStr.length &&
-               startStr[commonLen] === endStr[commonLen]) {
-          commonLen++;
-        }
-        // Show shortened end if they share a prefix
-        const shortEnd = commonLen > 0 ? endStr.slice(commonLen) : endStr;
-        display += ` (${startStr}-${shortEnd})`;
-      } else {
-        display += ` (${file.lineStart})`;
-      }
-    }
-
-    return display;
-  }, []);
 
   // Slash Command State (/ commands) - extracted to useCommandsState hook
   const { availableCommands, setAvailableCommands } = useCommandsState();
@@ -1199,6 +755,9 @@ export default function App() {
   // Dark Mode State
   const { isDarkMode, setIsDarkMode } = useThemeState();
 
+  // Theme handlers (toggleDarkMode + localStorage persistence)
+  const { toggleDarkMode } = useThemeHandlers({ isDarkMode, setIsDarkMode });
+
   // Theme context - get current theme colors
   const { currentTheme } = useTheme();
   const themeColors = currentTheme.colors;
@@ -1239,6 +798,13 @@ export default function App() {
     setIndexingStatus,
   } = useStatusState();
 
+  // Mgrep initialization - extracted to useMgrepInit hook
+  useMgrepInit({
+    projectPath: activeTab?.projectPath,
+    setIndexingStatus,
+    setShowOnboarding: setShowMgrepOnboarding,
+  })
+
   // Extension Bridge State - Chrome extension connection and cursor sharing
   const {
     extensionConnected,
@@ -1249,40 +815,11 @@ export default function App() {
     setExtensionCursor,
   } = useExtensionState();
 
-  // Send Cluso's cursor to extension when sharing is active
-  useEffect(() => {
-    if (!extensionSharing || !window.electronAPI?.extensionBridge?.sendCursor) return;
-
-    let lastUpdate = 0;
-    const handleMouseMove = (e: MouseEvent) => {
-      // Throttle to 30fps
-      const now = Date.now();
-      if (now - lastUpdate < 33) return;
-      lastUpdate = now;
-
-      // Send cursor data to extension
-      window.electronAPI?.extensionBridge?.sendCursor?.({
-        pageX: e.pageX,
-        pageY: e.pageY,
-        clientX: e.clientX,
-        clientY: e.clientY,
-        scrollX: window.scrollX,
-        scrollY: window.scrollY,
-        viewportWidth: window.innerWidth,
-        viewportHeight: window.innerHeight,
-        documentWidth: document.documentElement.scrollWidth,
-        documentHeight: document.documentElement.scrollHeight,
-        pageUrl: activeTab?.url || window.location.href,
-      });
-    };
-
-    // Track cursor movement across the app
-    document.addEventListener('mousemove', handleMouseMove);
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-    };
-  }, [extensionSharing, activeTab?.url]);
+  // Extension cursor sync - extracted to useExtensionCursorSync hook
+  useExtensionCursorSync({
+    extensionSharing,
+    activeTabUrl: activeTab?.url,
+  })
 
   // Patch Approval State - centralized via usePatchState hook
   const {
@@ -1306,46 +843,48 @@ export default function App() {
     setIsApprovalDialogOpen,
   } = usePatchState()
 
+  // Patch Approval Handlers - centralized via usePatchApproval hook
+  const {
+    handleApprovePatch,
+    handleRejectPatch,
+    handleEditPatch,
+    showPatchApprovalDialog,
+  } = usePatchApproval({
+    currentPatchIndex,
+    setCurrentPatchIndex,
+    pendingPatches,
+    setPendingPatches,
+    setIsApprovalDialogOpen,
+  })
+
   // App Settings State - centralized via useAppSettings hook
   const { appSettings, setAppSettings, appSettingsRef } = useAppSettings()
+
+  // Fast Apply status - extracted to useFastApplyStatus hook
+  useFastApplyStatus({
+    clusoCloudEditsEnabled: appSettings.clusoCloudEditsEnabled,
+    setFastApplyReady,
+  })
 
   // Cluso Agent - AI control of UI elements (must be after appSettings)
   const clusoAgent = useClusoAgent({
     googleApiKey: appSettings.providers.find(p => p.id === 'google')?.apiKey,
   })
 
-  // Apply Electron window appearance settings
-  useEffect(() => {
-    const isElectronEnv = typeof window !== 'undefined' && !!window.electronAPI?.isElectron;
-    if (!isElectronEnv || !window.electronAPI?.window?.setAppearance) return;
-    window.electronAPI.window.setAppearance({
-      transparencyEnabled: !!appSettings.transparencyEnabled,
-      opacity: appSettings.windowOpacity,
-      blur: appSettings.windowBlur,
-    }).catch((err: unknown) => {
-      console.warn('[App] Failed to apply window appearance:', err);
-    });
-  }, [appSettings.transparencyEnabled, appSettings.windowOpacity, appSettings.windowBlur]);
+  // Apply Electron window appearance settings - extracted to useWindowAppearance hook
+  useWindowAppearance({
+    transparencyEnabled: appSettings.transparencyEnabled,
+    windowOpacity: appSettings.windowOpacity,
+    windowBlur: appSettings.windowBlur,
+  });
 
 
-  // Close onboarding modal when project changes (but not on initial load)
-  const prevProjectPathRef = useRef<string | null | undefined>(undefined)
-  useEffect(() => {
-    const currentPath = activeTab?.projectPath
-
-    // Skip on first mount
-    if (prevProjectPathRef.current === undefined) {
-      prevProjectPathRef.current = currentPath
-      return
-    }
-
-    // Only close if project actually changed (not just same project reloading)
-    if (prevProjectPathRef.current !== currentPath && showMgrepOnboarding) {
-      setShowMgrepOnboarding(false)
-    }
-
-    prevProjectPathRef.current = currentPath
-  }, [activeTab?.projectPath, showMgrepOnboarding])
+  // Close onboarding modal when project changes - extracted to useOnboardingSync hook
+  useOnboardingSync({
+    projectPath: activeTab?.projectPath,
+    showMgrepOnboarding,
+    setShowMgrepOnboarding,
+  })
 
   // Provider order: Claude first, then OpenAI, then Gemini
   const providerSortOrder: Record<string, number> = {
@@ -1411,182 +950,17 @@ export default function App() {
   const selectedModelRef = useRef(selectedModel);
   selectedModelRef.current = selectedModel;
 
-  // Auto-clear completed tool calls after a delay (state managed by useChatState hook)
-  useEffect(() => {
-    if (completedToolCalls.length > 0) {
-      const timer = setTimeout(() => {
-        setCompletedToolCalls([])
-      }, 5000) // Clear after 5 seconds
-      return () => clearTimeout(timer)
-    }
-  }, [completedToolCalls])
+  // Handle extension chat requests (Chrome extension communication) - extracted to useExtensionBridge hook
+  useExtensionBridge({
+    selectedModelRef,
+    setExtensionConnected,
+  });
 
-  type DomEditTelemetryEvent =
-    | 'preview_applied'
-    | 'patch_generation_started'
-    | 'patch_ready'
-    | 'patch_failed'
-    | 'user_accept'
-    | 'user_reject'
-    | 'auto_cancel'
-    | 'source_write_started'
-    | 'source_write_succeeded'
-    | 'source_write_failed'
-
-  type DomEditTelemetry = {
-    id: string
-    createdAtMs: number
-    tabId: string
-    elementXpath?: string
-    events: Partial<Record<DomEditTelemetryEvent, number>>
-  }
-
-  const domEditTelemetryRef = useRef<Record<string, DomEditTelemetry>>({})
-  const domEditContextRef = useRef<{ id: string; tabId: string; elementXpath?: string } | null>(null)
-
-  const nowMs = () => {
-    if (typeof performance !== 'undefined' && typeof performance.now === 'function') return performance.now()
-    return Date.now()
-  }
-
-  const ensureDomTelemetry = useCallback((id: string, init?: Partial<DomEditTelemetry>) => {
-    if (!domEditTelemetryRef.current[id]) {
-      domEditTelemetryRef.current[id] = {
-        id,
-        createdAtMs: nowMs(),
-        tabId: init?.tabId || String(activeTabId),
-        elementXpath: init?.elementXpath,
-        events: {},
-      }
-    }
-    const existing = domEditTelemetryRef.current[id]
-    domEditTelemetryRef.current[id] = {
-      ...existing,
-      ...init,
-      events: { ...existing.events, ...(init?.events || {}) },
-    }
-  }, [activeTabId])
-
-  const markDomTelemetry = useCallback((id: string, event: DomEditTelemetryEvent) => {
-    ensureDomTelemetry(id)
-    const telemetry = domEditTelemetryRef.current[id]
-    if (!telemetry.events[event]) {
-      telemetry.events[event] = nowMs()
-    }
-  }, [ensureDomTelemetry])
-
-  const finalizeDomTelemetry = useCallback((id: string, outcome: 'accepted' | 'rejected' | 'cancelled') => {
-    const telemetry = domEditTelemetryRef.current[id]
-    if (!telemetry) return
-    const e = telemetry.events
-    const ms = (a?: number, b?: number) => (a !== undefined && b !== undefined) ? Math.round(b - a) : undefined
-
-    const summary = {
-      outcome,
-      tabId: telemetry.tabId,
-      xpath: telemetry.elementXpath,
-      previewToPatchReadyMs: ms(e.preview_applied, e.patch_ready),
-      patchGenMs: ms(e.patch_generation_started, e.patch_ready ?? e.patch_failed),
-      acceptToWriteMs: ms(e.user_accept, e.source_write_succeeded ?? e.source_write_failed),
-      createdToEndMs: ms(telemetry.createdAtMs, e.source_write_succeeded ?? e.source_write_failed ?? e.user_reject ?? e.auto_cancel ?? e.patch_failed),
-    }
-
-    console.log('[Telemetry][DOM Edit]', id, summary)
-    cancelledApprovalsRef.current.delete(id)
-    delete domEditTelemetryRef.current[id]
-  }, [])
-
-  const cancelDomApprovalValue = useCallback((
-    approval: PendingDOMApproval,
-    params: { tabIdForUndo: string; reason: 'superseded' | 'context_change' }
-  ) => {
-    const { tabIdForUndo, reason } = params
-    const webview = webviewRefs.current.get(tabIdForUndo)
-
-    console.log('[DOM Approval] Cancelling pending change:', { id: approval.id, reason })
-    clearDomApprovalPatchTimeout(approval.id)
-    markDomTelemetry(approval.id, 'auto_cancel')
-    cancelledApprovalsRef.current.add(approval.id)
-    if (approval.undoCode && webview) {
-      ;(webview as unknown as Electron.WebviewTag).executeJavaScript(approval.undoCode)
-    }
-    finalizeDomTelemetry(approval.id, 'cancelled')
-  }, [markDomTelemetry, finalizeDomTelemetry, clearDomApprovalPatchTimeout])
-
-  const cancelPendingDomApproval = useCallback((reason: 'superseded' | 'context_change') => {
-    if (!pendingDOMApproval) return
-    if (pendingDOMApproval.userApproved || isGeneratingSourcePatch) return
-
-    const ctx = domEditContextRef.current
-    const tabIdForUndo = ctx?.id === pendingDOMApproval.id ? ctx.tabId : String(activeTabId)
-    cancelDomApprovalValue(pendingDOMApproval, { tabIdForUndo, reason })
-    setPendingDOMApproval(null)
-    setPendingChange(null)
-  }, [pendingDOMApproval, isGeneratingSourcePatch, activeTabId, cancelDomApprovalValue])
-
-  // Latest-wins: if a new DOM approval replaces an older pending one, auto-cancel the older preview.
-  const lastPendingDomApprovalRef = useRef<PendingDOMApproval | null>(null)
-  useEffect(() => {
-    const prev = lastPendingDomApprovalRef.current
-    const next = pendingDOMApproval
-    lastPendingDomApprovalRef.current = next
-
-    if (!prev || !next) return
-    if (prev.id === next.id) return
-    if (prev.userApproved || isGeneratingSourcePatch) return
-
-    // If telemetry wasn't initialized yet (e.g. rapid supersede), create a minimal record now.
-    const ctx = domEditContextRef.current
-    const tabIdForUndo = ctx?.id === prev.id
-      ? ctx.tabId
-      : (domEditTelemetryRef.current[prev.id]?.tabId || String(activeTabId))
-
-    ensureDomTelemetry(prev.id, { tabId: tabIdForUndo, elementXpath: prev.element?.xpath })
-    cancelDomApprovalValue(prev, { tabIdForUndo, reason: 'superseded' })
-  }, [pendingDOMApproval?.id, isGeneratingSourcePatch, activeTabId, ensureDomTelemetry, cancelDomApprovalValue])
-
-  // Initialize telemetry whenever a new pending DOM approval appears.
-  useEffect(() => {
-    if (!pendingDOMApproval) {
-      domEditContextRef.current = null
-      return
-    }
-    domEditContextRef.current = {
-      id: pendingDOMApproval.id,
-      tabId: String(activeTabId),
-      elementXpath: pendingDOMApproval.element?.xpath,
-    }
-    ensureDomTelemetry(pendingDOMApproval.id, {
-      tabId: String(activeTabId),
-      elementXpath: pendingDOMApproval.element?.xpath,
-    })
-    markDomTelemetry(pendingDOMApproval.id, 'preview_applied')
-  }, [pendingDOMApproval?.id, activeTabId, ensureDomTelemetry, markDomTelemetry])
-
-  // Auto-cancel an unapproved DOM edit if the user switches tabs.
-  useEffect(() => {
-    if (!pendingDOMApproval || !domEditContextRef.current) return
-    const ctx = domEditContextRef.current
-    if (ctx.id !== pendingDOMApproval.id) return
-    if (ctx.tabId === String(activeTabId)) return
-
-    console.log('[DOM Approval] Auto-cancelling pending change due to tab switch:', { from: ctx.tabId, to: activeTabId })
-    cancelPendingDomApproval('context_change')
-  }, [activeTabId, pendingDOMApproval, cancelPendingDomApproval])
-
-  // Auto-cancel if the user changes the selection to a different element (keeps unapproved previews from lingering).
-  useEffect(() => {
-    if (!pendingDOMApproval || !domEditContextRef.current) return
-    const ctx = domEditContextRef.current
-    if (ctx.id !== pendingDOMApproval.id) return
-    if (!ctx.elementXpath) return
-    const selectedXpath = selectedElement?.xpath
-    if (!selectedXpath) return
-    if (selectedXpath === ctx.elementXpath) return
-
-    console.log('[DOM Approval] Auto-cancelling pending change due to selection change:', { from: ctx.elementXpath, to: selectedXpath })
-    cancelPendingDomApproval('context_change')
-  }, [activeTabId, pendingDOMApproval, selectedElement?.xpath, cancelPendingDomApproval])
+  // Auto-clear completed tool calls after a delay - extracted to useCompletedToolCallsClear hook
+  useCompletedToolCallsClear({
+    completedToolCalls,
+    setCompletedToolCalls,
+  });
 
   // Initialize AI Chat hook with streaming support
   const { generate: generateAI, stream: streamAI, cancel: cancelAI, isLoading: isAILoading, isGenerating: isAIGenerating, isInitialized: isAIInitialized } = useAIChat({
@@ -1670,55 +1044,21 @@ export default function App() {
     },
   });
 
-  // Update connection state when AI SDK initializes
-  useEffect(() => {
-    if (isAIInitialized && connectionState === 'disconnected') {
-      setConnectionState('idle')
-    }
-  }, [isAIInitialized, connectionState])
+  // Update connection state when AI SDK initializes - extracted to useConnectionState hook
+  useConnectionStateEffect({
+    isAIInitialized,
+    connectionState,
+    setConnectionState,
+  });
 
-  // Initialize MCP hook for Model Context Protocol server connections
-  // Extract MCP server configs from settings connections
-  const mcpServerConfigs = useMemo((): MCPServerConfig[] => {
-    return (appSettings.connections || [])
-      .filter((conn): conn is MCPServerConnection => conn.type === 'mcp' && 'transport' in conn)
-      .filter(conn => conn.enabled)
-      .map(({ id, name, transport, enabled, timeout }): MCPServerConfig => ({
-        id,
-        name,
-        transport,
-        enabled,
-        timeout,
-      }))
-  }, [appSettings.connections])
-
+  // MCP State - centralized via useMCPHandlers hook
   const {
-    allTools: mcpTools,
-    callTool: callMCPTool,
-    servers: mcpServers,
-    isAvailable: mcpAvailable,
-  } = useMCP({
-    initialServers: mcpServerConfigs,
-    autoConnect: true,
-    onError: (err, serverId) => {
-      console.error(`[MCP] Error${serverId ? ` on server ${serverId}` : ''}:`, err.message)
-    },
-  })
-
-  // Convert MCP tools to the format expected by useCodingAgent
-  // Ensure inputSchema has required 'type: object' field for Anthropic API compatibility
-  const mcpToolDefinitions: MCPToolDefinition[] = useMemo(() => {
-    return mcpTools.map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: {
-        type: 'object' as const,
-        properties: tool.inputSchema?.properties || {},
-        required: tool.inputSchema?.required || [],
-      },
-      serverId: tool.serverId,
-    }))
-  }, [mcpTools])
+    mcpToolDefinitions,
+    mcpTools,
+    mcpServers,
+    mcpAvailable,
+    callMCPTool,
+  } = useMCPHandlers(appSettings)
 
   // Clarifying Questions State - centralized via useClarifyingState hook
   const {
@@ -1821,10 +1161,6 @@ export default function App() {
     handleClearConsole,
   } = useConsolePanel()
 
-  // Terminal refs (terminal is separate from console panel)
-  const terminalContainerRef = useRef<HTMLDivElement>(null);
-  const terminalInstanceRef = useRef<unknown>(null);
-
   // Check if in Electron (moved early for hook dependencies)
   const isElectron = typeof window !== 'undefined' && window.electronAPI?.isElectron;
 
@@ -1836,6 +1172,14 @@ export default function App() {
     setPtyPort,
     debugLog,
   } = useDebugState({ enqueueConsoleLog, isElectron });
+
+  // Terminal panel - extracted to useTerminalPanel hook
+  const { terminalContainerRef } = useTerminalPanel({
+    consolePanelTab,
+    isDarkMode,
+    ptyPort,
+    consoleHeight,
+  })
 
   // AI Selection State - AI-selected element and displayed source code (extracted to hook)
   const {
@@ -1849,29 +1193,6 @@ export default function App() {
 
   // LSP UI - hover tooltips and autocomplete for code
   const lspUI = useLSPUI(displayedSourceCode?.fileName);
-
-  // Handle mouse move over code for LSP hover
-  const handleCodeMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!displayedSourceCode) return;
-
-    // Get position relative to the code block
-    const target = e.target as HTMLElement;
-    const codeElement = target.closest('pre');
-    if (!codeElement) return;
-
-    // Calculate approximate line and character from mouse position
-    const rect = codeElement.getBoundingClientRect();
-    const lineHeight = 20; // Approximate line height in pixels
-    const charWidth = 8;   // Approximate character width in monospace
-
-    const relativeY = e.clientY - rect.top;
-    const relativeX = e.clientX - rect.left;
-
-    const line = Math.floor(relativeY / lineHeight) + displayedSourceCode.startLine;
-    const character = Math.floor(relativeX / charWidth);
-
-    lspUI.showHover(e.clientX, e.clientY, line, character);
-  }, [displayedSourceCode, lspUI]);
 
   // File Browser Panel State - stack navigation, visibility, and base path (extracted to hook)
   const {
@@ -1892,13 +1213,198 @@ export default function App() {
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // Map of webview refs by tab id - each tab has its own webview instance
-  const webviewRefs = useRef<Map<string, WebviewElement>>(new Map());
 
-  // Helper to get the current tab's webview ref
-  const getWebviewRef = useCallback((tabId: string) => webviewRefs.current.get(tabId), []);
+  // Ref for prepareDomPatch (defined later, used by webview setup hook)
+  const prepareDomPatchRef = useRef<
+    | ((
+        approvalId: string,
+        element: SelectedElement,
+        cssChanges: Record<string, string>,
+        description: string,
+        undoCode: string,
+        applyCode: string,
+        userRequest: string,
+        projectPath?: string,
+        textChange?: { oldText: string; newText: string },
+        srcChange?: { oldSrc: string; newSrc: string }
+      ) => void)
+    | null
+  >(null);
+
+  // Bridge refs for handler functions - these are populated later in the component
+  // and consumed by useWebviewSetup to avoid circular dependency issues
+  const handleRefreshLayersRef = useRef<(() => Promise<void>) | null>(null);
+  const handleTreeNodeSelectRef = useRef<((node: import('./components/ComponentTree').TreeNode) => void) | null>(null);
+  const addEditedFileRef = useRef<((file: {
+    path: string;
+    additions?: number;
+    deletions?: number;
+    undoCode?: string;
+    originalContent?: string;
+    isFileModification?: boolean;
+  }) => void) | null>(null);
+
+  // Webview setup hook - handles all webview event handlers
+  // Note: The large setupWebviewHandlers function (~1000 lines) has been extracted to
+  // features/webview/useWebviewSetup.ts for better code organization.
+  const {
+    setupWebviewHandlers: _setupWebviewHandlers,
+    getWebviewRefCallback,
+    webviewRefs,
+    webviewCleanups: _webviewCleanups,
+  } = useWebviewSetup({
+    updateTab,
+    enqueueConsoleLog,
+    activeTabId,
+    tabsRef,
+    setUrlInput,
+    setHoveredElement,
+    setSelectedElement,
+    setSelectedTreeNodeId,
+    setConsoleLogs,
+    setAiSelectedElement,
+    setMessages,
+    setScreenshotElement,
+    setIsScreenshotActive,
+    setCapturedScreenshot,
+    setMoveTargetPosition,
+    setIsMoveActive,
+    setPendingDOMApproval,
+    setPendingChange,
+    selectedElementRef,
+    isLeftPanelOpenRef,
+    layersTreeDataRef,
+    layersTreeStaleRef,
+    isLayersLoadingRef,
+    isInspectorActiveRef,
+    isScreenshotActiveRef,
+    handleRefreshLayersRef,
+    handleTreeNodeSelectRef,
+    addEditedFileRef,
+    prepareDomPatchRef,
+  });
+
+  // DOM Approval Lifecycle - handles telemetry, auto-cancellation on tab switch/selection change
+  const {
+    ensureDomTelemetry,
+    markDomTelemetry,
+    finalizeDomTelemetry,
+    cancelDomApprovalValue,
+    domEditTelemetryRef,
+  } = useDomApprovalLifecycle({
+    pendingDOMApproval,
+    activeTabId,
+    selectedElementXpath: selectedElement?.xpath,
+    isGeneratingSourcePatch,
+    cancelledApprovalsRef,
+    webviewRefs: webviewRefs as unknown as React.MutableRefObject<Map<string, { executeJavaScript: (code: string) => Promise<unknown> }>>,
+    clearDomApprovalPatchTimeout,
+  });
+
   const activeWebview = webviewRefs.current.get(activeTabId);
   const isWebviewReady = activeTab.isWebviewReady;
+
+  // Browser navigation operations - extracted to useBrowserNavigation hook
+  const {
+    navigateTo,
+    handleUrlSubmit,
+    goBack,
+    goForward,
+    reload,
+  } = useBrowserNavigation({
+    activeTabId,
+    tabs,
+    activeTab,
+    updateCurrentTab,
+    setUrlInput,
+    urlInput,
+    isElectron,
+    webviewRefs,
+  });
+
+  // Change approval handlers - extracted to useChangeApprovalHandlers hook
+  const {
+    handleApproveChange,
+    handleRejectChange,
+    handleVoiceApprove,
+    handleVoiceReject,
+    handleVoiceUndo,
+  } = useChangeApprovalHandlers({
+    pendingChange,
+    setPendingChange,
+    setMessages,
+    activeTabId,
+    webviewRefs: webviewRefs as unknown as React.MutableRefObject<Map<string, { executeJavaScript: (code: string) => Promise<unknown>; reload: () => void }>>,
+  });
+
+  // Selection handlers from extracted hook
+  const {
+    handleAiElementSelect,
+    handleExecuteCode,
+    handleConfirmSelection,
+    handleHighlightByNumber,
+    handleClearFocus,
+    handleSetViewport,
+    handleSwitchTab,
+    handleFindElementByText,
+    handleSelectParent,
+    handleSelectChildren,
+    handleSelectSiblings,
+    handleSelectAllMatching,
+    handleStartDrillSelection,
+    handleDrillInto,
+    handleDrillBack,
+    handleDrillForward,
+    handleExitDrillMode,
+    handleRefreshLayers,
+    handleRefreshLayersRef: _handleRefreshLayersRef,
+    handleTreeNodeSelect,
+    handleTreeNodeSelectRef: _handleTreeNodeSelectRef,
+    handleElementStyleChange,
+    flushApplyElementStyles,
+    queueApplyElementStyles,
+    handleGetPageElements,
+  } = useSelectionHandlers({
+    webviewRefs: webviewRefs as unknown as SelectionHandlersDeps['webviewRefs'],
+    activeTabId,
+    activeTab: { url: activeTab.url, projectPath: activeTab.projectPath },
+    isWebviewReady,
+    setSelectedElement,
+    setMessages,
+    setAiSelectedElement,
+    setViewportSize,
+    setActiveTabId,
+    handleNewTab,
+    tabs: tabs.map(t => ({ id: t.id, type: t.type })),
+    setIsLayersLoading,
+    setLayersTreeData,
+    layersTreeStaleRef,
+    isMultiViewportMode,
+    multiViewportData: multiViewportData.map(v => ({ id: v.id, windowType: v.windowType, devicePresetId: v.devicePresetId })),
+    setSelectedTreeNodeId,
+    setSelectedLayerElementNumber,
+    setSelectedLayerElementName,
+    setSelectedLayerComputedStyles,
+    setSelectedLayerAttributes,
+    setSelectedLayerDataset,
+    setSelectedLayerFontFamilies,
+    setSelectedLayerClassNames,
+    setElementStyles,
+    elementStylesRef,
+    selectedLayerElementNumberRef,
+    activeTabIdRef,
+    viewportControlsRef,
+    aiSelectedElement,
+  });
+
+  // Bridge effects: populate refs from useSelectionHandlers for useWebviewSetup
+  useEffect(() => {
+    handleRefreshLayersRef.current = handleRefreshLayers;
+  }, [handleRefreshLayers]);
+
+  useEffect(() => {
+    handleTreeNodeSelectRef.current = handleTreeNodeSelect;
+  }, [handleTreeNodeSelect]);
 
   // Debug: log electron status on mount
   useEffect(() => {
@@ -1906,119 +1412,14 @@ export default function App() {
     console.log('electronAPI:', window.electronAPI);
   }, [isElectron]);
 
-  // Persist dark mode preference
-  useEffect(() => {
-    localStorage.setItem('darkMode', String(isDarkMode));
-  }, [isDarkMode]);
-
-  // Check Fast Apply status (Pro Feature)
-  useEffect(() => {
-    const checkFastApplyStatus = async () => {
-      if (appSettings.clusoCloudEditsEnabled) {
-        setFastApplyReady(false);
-        return;
-      }
-      if (!window.electronAPI?.fastApply) return;
-      try {
-        const status = await window.electronAPI.fastApply.getStatus();
-        setFastApplyReady(status.ready);
-      } catch (err) {
-        console.log('[FastApply] Status check error:', err);
-      }
-    };
-
-    checkFastApplyStatus();
-
-    // Listen for model loaded/unloaded events
-    const unsubLoaded = window.electronAPI?.fastApply?.onModelLoaded(() => {
-      setFastApplyReady(true);
-    });
-    const unsubUnloaded = window.electronAPI?.fastApply?.onModelUnloaded(() => {
-      setFastApplyReady(false);
-    });
-
-    return () => {
-      unsubLoaded?.();
-      unsubUnloaded?.();
-    };
-  }, [appSettings.clusoCloudEditsEnabled]);
-
-  // Inspector should not auto-switch models.
-  // We only disable thinking for responsiveness while active.
-  useEffect(() => {
-    if (isInspectorActive) {
-      preInspectorSettingsRef.current = {
-        model: selectedModel,
-        thinkingLevel: thinkingLevel,
-      };
-
-      if (thinkingLevel !== 'off') {
-        console.log('[Inspector] Disabling thinking mode');
-        setThinkingLevel('off');
-      }
-    } else if (preInspectorSettingsRef.current) {
-      console.log('[Inspector] Restoring previous thinking level:', preInspectorSettingsRef.current.thinkingLevel);
-      setThinkingLevel(preInspectorSettingsRef.current.thinkingLevel);
-      preInspectorSettingsRef.current = null;
-    }
-  }, [isInspectorActive]); // Only trigger on inspector state change
-
-  const toggleDarkMode = useCallback(() => {
-    setIsDarkMode(prev => !prev);
-  }, []);
-
-  // Sidebar resize handlers
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsResizing(true);
-  }, []);
-
-  useEffect(() => {
-    if (!isResizing) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const newWidth = window.innerWidth - e.clientX;
-      // Clamp between 430 and 800 pixels
-      setSidebarWidth(Math.max(430, Math.min(800, newWidth)));
-    };
-
-    const handleMouseUp = () => {
-      setIsResizing(false);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isResizing]);
-
-  // Console panel resize effect (handles mouse move/up events)
-  useEffect(() => {
-    if (!isConsoleResizing) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      // Calculate delta from start position (negative = dragging up = bigger)
-      const delta = consoleResizeStartY.current - e.clientY;
-      const newHeight = consoleResizeStartHeight.current + delta;
-      // Clamp between 100 and 500 pixels
-      setConsoleHeight(Math.max(100, Math.min(500, newHeight)));
-    };
-
-    const handleMouseUp = () => {
-      setIsConsoleResizing(false);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isConsoleResizing]);
+  // Inspector should not auto-switch models - extracted to useInspectorThinking hook
+  useInspectorThinking({
+    isInspectorActive,
+    selectedModel,
+    thinkingLevel,
+    preInspectorSettingsRef,
+    setThinkingLevel,
+  });
 
   // Stash with optional message
   const handleStash = useCallback(async (message?: string) => {
@@ -2034,1819 +1435,11 @@ export default function App() {
     setStashMessage('');
   }, [git]);
 
-  // Approve pending code change - already applied, just confirm
-  const handleApproveChange = useCallback(() => {
-    console.log('[Exec] Changes confirmed');
-    setPendingChange(null);
-    setMessages(prev => [...prev, {
-      id: Date.now().toString(),
-      role: 'system',
-      content: 'Changes confirmed.',
-      timestamp: new Date()
-    }]);
-    // Play approval sound for voice confirmation feedback
-    playApprovalSound().catch(err => console.error('[Audio] Approval sound error:', err));
-  }, []);
-
-  // Reject pending code change - undo and clear
-  const handleRejectChange = useCallback(async () => {
-    const webview = webviewRefs.current.get(activeTabId);
-    console.log('[Exec] Rejecting change, pendingChange:', pendingChange);
-    console.log('[Exec] undoCode:', pendingChange?.undoCode);
-    console.log('[Exec] webview:', !!webview);
-
-    let undoSucceeded = false;
-
-    if (pendingChange?.undoCode && webview) {
-      console.log('[Exec] Rejecting - running undo code:', pendingChange.undoCode);
-      try {
-        await webview.executeJavaScript(pendingChange.undoCode);
-        console.log('[Exec] Undo executed successfully');
-        undoSucceeded = true;
-      } catch (err) {
-        console.error('[Exec] Undo error:', err);
-      }
-    } else {
-      console.log('[Exec] No undo code available or no webview');
-    }
-
-    // If undo failed and we have a webview, reload the page as fallback
-    if (!undoSucceeded && webview) {
-      console.log('[Exec] Undo failed - reloading page as fallback');
-      try {
-        (webview as unknown as Electron.WebviewTag).reload();
-        setMessages(prev => [...prev, {
-          id: Date.now().toString(),
-          role: 'system',
-          content: 'Changes discarded. Page reloaded to restore state.',
-          timestamp: new Date()
-        }]);
-      } catch (e) {
-        console.error('[Exec] Failed to reload:', e);
-      }
-    } else {
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        role: 'system',
-        content: 'Changes discarded.',
-        timestamp: new Date()
-      }]);
-    }
-
-    setPendingChange(null);
-    // Play rejection sound for voice confirmation feedback
-    playRejectionSound().catch(err => console.error('[Audio] Rejection sound error:', err));
-  }, [pendingChange, activeTabId]);
-
-  // Voice approval handlers that work with the existing pendingChange system
-  const handleVoiceApprove = useCallback((reason?: string) => {
-    console.log('[Voice] User said approve:', reason);
-    // Delegate to existing approve handler which handles the DOM/code execution
-    handleApproveChange();
-  }, []);
-
-  const handleVoiceReject = useCallback((reason?: string) => {
-    console.log('[Voice] User said reject:', reason);
-    // Delegate to existing reject handler which undoes changes
-    handleRejectChange();
-  }, []);
-
-  const handleVoiceUndo = useCallback((reason?: string) => {
-    console.log('[Voice] User said undo:', reason);
-    // For undo via voice, just trigger the reject handler (same effect)
-    // This reverts to the last pending change state
-    if (pendingChange) {
-      handleRejectChange();
-    } else {
-      // If no pending change, could implement undo history here
-      playUndoSound().catch(err => console.error('[Audio] Undo sound error:', err));
-      console.log('[Voice] No pending change to undo');
-    }
-  }, [pendingChange]);
-
-  // Browser navigation functions - update active tab's URL
-  const navigateTo = useCallback((url: string) => {
-    let finalUrl = url.trim();
-    if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
-      finalUrl = 'http://' + finalUrl;
-    }
-    console.log('Navigating to:', finalUrl);
-
-    // Check if any existing tab has this URL with a projectPath - inherit it
-    const matchingProjectTab = tabs.find(t =>
-      t.projectPath && t.url && t.url.toLowerCase() === finalUrl.toLowerCase()
-    );
-
-    // Update both display URL and tab's navigation URL
-    setUrlInput(finalUrl);
-    if (matchingProjectTab && !activeTab.projectPath) {
-      // Inherit projectPath from matching project tab
-      console.log('Inheriting projectPath from matching tab:', matchingProjectTab.projectPath);
-      updateCurrentTab({ url: finalUrl, projectPath: matchingProjectTab.projectPath });
-    } else {
-      updateCurrentTab({ url: finalUrl });
-    }
-  }, [updateCurrentTab, tabs, activeTab.projectPath]);
-
-  const handleUrlSubmit = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    navigateTo(urlInput);
-  }, [urlInput, navigateTo]);
-
-  const goBack = useCallback(() => {
-    const webview = webviewRefs.current.get(activeTabId);
-    if (webview && isElectron) {
-      webview.goBack();
-    }
-  }, [isElectron, activeTabId]);
-
-  const goForward = useCallback(() => {
-    const webview = webviewRefs.current.get(activeTabId);
-    if (webview && isElectron) {
-      webview.goForward();
-    }
-  }, [isElectron, activeTabId]);
-
-  const reload = useCallback(() => {
-    const webview = webviewRefs.current.get(activeTabId);
-    if (webview && isElectron) {
-      webview.reload();
-    }
-  }, [isElectron, activeTabId]);
-
-  // Handle AI element selection request
-  const handleAiElementSelect = useCallback((selector: string, reasoning?: string) => {
-    console.log('[AI] Requesting element selection:', selector, reasoning);
-
-    // Validate selector - catch common jQuery mistakes
-    const invalidPatterns = [
-      { pattern: /:contains\s*\(/i, name: ':contains()' },
-      { pattern: /:has\s*\([^)]*text/i, name: ':has(text)' },
-      { pattern: /:eq\s*\(/i, name: ':eq()' },
-      { pattern: /:gt\s*\(/i, name: ':gt()' },
-      { pattern: /:lt\s*\(/i, name: ':lt()' },
-      { pattern: /:first(?!\-)/i, name: ':first (use :first-child or :first-of-type)' },
-      { pattern: /:last(?!\-)/i, name: ':last (use :last-child or :last-of-type)' },
-    ];
-
-    for (const { pattern, name } of invalidPatterns) {
-      if (pattern.test(selector)) {
-        console.error(`[AI] Invalid selector: ${name} is not valid CSS. Use attribute selectors like [attr*="text"] instead.`);
-        setMessages(prev => [...prev, {
-          id: Date.now().toString(),
-          role: 'system',
-          content: `Invalid selector: ${name} is jQuery-only, not valid CSS. Use attribute selectors like [attr*="text"] or call get_page_elements first.`,
-          timestamp: new Date()
-        }]);
-        return;
-      }
-    }
-
-    const webview = webviewRefs.current.get(activeTabId);
-    if (webview && isWebviewReady) {
-      // Send IPC message to webview to highlight the element
-      webview.send('select-element-by-selector', selector);
-
-      // Store pending selection (we'll get confirmation via message)
-      setAiSelectedElement({ selector, reasoning: reasoning || '' });
-    }
-  }, [isWebviewReady, activeTabId]);
-
-  // Handle AI code execution
-  const handleExecuteCode = useCallback((code: string, description: string) => {
-    console.log('[AI] Executing code:', description);
-    console.log('[AI] Code to execute:', code);
-    const webview = webviewRefs.current.get(activeTabId);
-    if (webview && isWebviewReady) {
-      // Wrap code in try-catch to capture actual error from webview
-      const wrappedCode = `
-        (function() {
-          try {
-            ${code}
-            return { success: true };
-          } catch (err) {
-            return { success: false, error: err.message, stack: err.stack };
-          }
-        })()
-      `;
-      webview.executeJavaScript(wrappedCode)
-        .then((result: { success: boolean; error?: string; stack?: string }) => {
-          if (result && result.success) {
-            console.log('[AI] Code executed successfully');
-            setMessages(prev => [...prev, {
-              id: Date.now().toString(),
-              role: 'system',
-              content: `✓ ${description}`,
-              timestamp: new Date()
-            }]);
-          } else {
-            const errorMsg = result?.error || 'Unknown error';
-            console.error('[AI] Code execution error inside webview:', errorMsg);
-            if (result?.stack) console.error('[AI] Stack:', result.stack);
-            setMessages(prev => [...prev, {
-              id: Date.now().toString(),
-              role: 'system',
-              content: `✗ Error: ${errorMsg}`,
-              timestamp: new Date()
-            }]);
-          }
-        })
-        .catch((err: Error) => {
-          // This catches syntax errors that prevent the code from even running
-          console.error('[AI] Code execution error (syntax/parse):', err);
-          setMessages(prev => [...prev, {
-            id: Date.now().toString(),
-            role: 'system',
-            content: `✗ Syntax Error: ${err.message}`,
-            timestamp: new Date()
-          }]);
-        });
-    }
-  }, [isWebviewReady, activeTabId]);
-
-  // Handle voice confirmation - can optionally specify which numbered element (1-indexed)
-  const handleConfirmSelection = useCallback((confirmed: boolean, elementNumber?: number) => {
-    console.log('[AI] Voice confirmation:', confirmed, 'element number:', elementNumber);
-    const webview = webviewRefs.current.get(activeTabId);
-    if (confirmed && aiSelectedElement?.elements && aiSelectedElement.elements.length > 0) {
-      // If elementNumber specified (1-indexed), use that, otherwise use first
-      const index = elementNumber ? Math.min(Math.max(elementNumber - 1, 0), aiSelectedElement.elements.length - 1) : 0;
-      setSelectedElement(aiSelectedElement.elements[index]);
-      webview?.send('clear-selection');
-      setAiSelectedElement(null);
-    } else {
-      webview?.send('clear-selection');
-      setAiSelectedElement(null);
-    }
-  }, [aiSelectedElement, activeTabId]);
-
-  // Handle highlight by number - visually highlights element without editing code
-  // Uses window.__numberedElements from get_page_elements to ensure consistent numbering
-  const handleHighlightByNumber = useCallback(async (elementNumber: number): Promise<{ success: boolean; element?: any; error?: string }> => {
-    console.log('[AI] Highlighting element by number:', elementNumber);
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview || !isWebviewReady) {
-      return { success: false, error: 'Webview not ready' };
-    }
-
-    const highlightCode = `
-      (function() {
-        const elementNumber = ${elementNumber};
-        const elements = window.__numberedElements;
-
-        if (!elements || elements.length === 0) {
-          return { success: false, error: 'No numbered elements. Call get_page_elements first.' };
-        }
-
-        const index = elementNumber - 1; // Convert to 0-indexed
-        if (index < 0 || index >= elements.length) {
-          return { success: false, error: 'Element ' + elementNumber + ' not found. Valid range: 1-' + elements.length };
-        }
-
-        const element = elements[index];
-
-        // Clear any previous highlight
-        document.querySelectorAll('.cluso-highlighted').forEach(el => {
-          el.classList.remove('cluso-highlighted');
-          el.style.outline = '';
-          el.style.outlineOffset = '';
-        });
-
-        // Clear all number badges now that user has selected one
-        document.querySelectorAll('.element-number-badge').forEach(b => b.remove());
-
-        // Highlight the selected element
-        element.classList.add('cluso-highlighted');
-        element.style.outline = '3px solid #3b82f6';
-        element.style.outlineOffset = '2px';
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-        // Store as current focus for subsequent operations
-        window.__focusedElement = element;
-
-        const text = element.innerText?.substring(0, 50) || '';
-        const tag = element.tagName.toLowerCase();
-
-        return {
-          success: true,
-          element: { number: elementNumber, tag, text: text.trim(), totalElements: elements.length }
-        };
-      })()
-    `;
-
-    try {
-      const result = await webview.executeJavaScript(highlightCode) as { success: boolean; element?: unknown; error?: string };
-      console.log('[AI] Highlight by number result:', result);
-      return result;
-    } catch (err) {
-      console.error('[AI] Highlight by number error:', err);
-      return { success: false, error: (err as Error).message };
-    }
-  }, [isWebviewReady, activeTabId]);
-
-  // Handle clear_focus tool - clears the hierarchical focus scope
-  const handleClearFocus = useCallback(async (): Promise<{ success: boolean }> => {
-    console.log('[AI] Clearing focus scope');
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview || !isWebviewReady) {
-      return { success: false };
-    }
-
-    const clearCode = `
-      (function() {
-        // Clear focus
-        window.__focusedElement = null;
-
-        // Clear all highlights
-        document.querySelectorAll('.cluso-highlighted').forEach(el => {
-          el.classList.remove('cluso-highlighted');
-          el.style.outline = '';
-          el.style.outlineOffset = '';
-        });
-
-        // Clear number badges
-        document.querySelectorAll('.element-number-badge').forEach(b => b.remove());
-
-        // Clear stored elements
-        window.__numberedElements = [];
-
-        return { success: true };
-      })()
-    `;
-
-    try {
-      await webview.executeJavaScript(clearCode);
-      console.log('[AI] Focus cleared');
-      return { success: true };
-    } catch (err) {
-      console.error('[AI] Clear focus error:', err);
-      return { success: false };
-    }
-  }, [isWebviewReady, activeTabId]);
-
-  // Handle set_viewport tool - switches between mobile/tablet/desktop views
-  const handleSetViewport = useCallback(async (mode: 'mobile' | 'tablet' | 'desktop'): Promise<{ success: boolean }> => {
-    console.log('[AI] Setting viewport to:', mode);
-    setViewportSize(mode);
-    return { success: true };
-  }, []);
-
-  // Handle switch_tab tool - switches to or creates different tab types
-  const handleSwitchTab = useCallback(async (type: 'browser' | 'kanban' | 'todos' | 'notes'): Promise<{ success: boolean }> => {
-    console.log('[AI] Switching to tab type:', type);
-    // Check if a tab of this type already exists
-    const existingTab = tabs.find(t => t.type === type);
-    if (existingTab) {
-      setActiveTabId(existingTab.id);
-    } else {
-      // Create a new tab of the specified type
-      handleNewTab(type);
-    }
-    return { success: true };
-  }, [tabs, handleNewTab]);
-
-  // Handle find_element_by_text tool - searches page for elements by visible text content
-  const handleFindElementByText = useCallback(async (
-    searchText: string,
-    elementType?: string
-  ): Promise<{ success: boolean; matches?: Array<{ elementNumber: number; text: string; tagName: string }>; error?: string }> => {
-    console.log('[AI] Finding elements by text:', searchText, 'type:', elementType);
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview || !isWebviewReady) {
-      return { success: false, error: 'Webview not ready' };
-    }
-
-    const searchCode = `
-      (function() {
-        const searchText = ${JSON.stringify(searchText.toLowerCase())};
-        const elementType = ${elementType ? JSON.stringify(elementType.toLowerCase()) : 'null'};
-
-        // Get all visible elements with text content
-        const allElements = Array.from(document.querySelectorAll('*'));
-        const matches = [];
-        let elementNumber = 0;
-
-        // Store elements for later highlighting
-        const numberedElements = [];
-
-        for (const el of allElements) {
-          // Skip invisible elements
-          const style = window.getComputedStyle(el);
-          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
-
-          // Skip non-interactive elements (unless they have meaningful text)
-          const tagName = el.tagName.toLowerCase();
-          const interactiveTags = ['button', 'a', 'input', 'select', 'textarea', 'label', 'span', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div', 'li'];
-          if (!interactiveTags.includes(tagName)) continue;
-
-          // Filter by element type if specified
-          if (elementType && tagName !== elementType) continue;
-
-          // Get text content (direct text, not from children)
-          let text = '';
-          if (tagName === 'input') {
-            text = el.value || el.placeholder || el.getAttribute('aria-label') || '';
-          } else {
-            // Get direct text content
-            text = Array.from(el.childNodes)
-              .filter(n => n.nodeType === Node.TEXT_NODE)
-              .map(n => n.textContent)
-              .join(' ').trim();
-            // If no direct text, try innerText but limit to prevent huge strings
-            if (!text) {
-              text = (el.innerText || '').substring(0, 100);
-            }
-          }
-
-          // Also check aria-label and title
-          const ariaLabel = el.getAttribute('aria-label') || '';
-          const title = el.getAttribute('title') || '';
-          const combinedText = (text + ' ' + ariaLabel + ' ' + title).toLowerCase();
-
-          // Check for match (case-insensitive, partial match)
-          if (combinedText.includes(searchText)) {
-            elementNumber++;
-            numberedElements.push(el);
-            matches.push({
-              elementNumber,
-              text: text.trim().substring(0, 100) || ariaLabel || title || tagName,
-              tagName: tagName.toUpperCase()
-            });
-
-            // Limit to 20 matches
-            if (matches.length >= 20) break;
-          }
-        }
-
-        // Store for highlighting
-        window.__numberedElements = numberedElements;
-
-        // Add number badges to matched elements
-        document.querySelectorAll('.element-number-badge').forEach(b => b.remove());
-        numberedElements.forEach((el, i) => {
-          const badge = document.createElement('div');
-          badge.className = 'element-number-badge';
-          badge.setAttribute('data-cluso-ui', '1');
-          badge.textContent = String(i + 1);
-          badge.style.cssText = 'position:absolute;background:#3b82f6;color:white;font-size:10px;font-weight:bold;padding:1px 4px;border-radius:3px;z-index:99999;pointer-events:none;';
-          const rect = el.getBoundingClientRect();
-          badge.style.top = (rect.top + window.scrollY - 15) + 'px';
-          badge.style.left = (rect.left + window.scrollX) + 'px';
-          document.body.appendChild(badge);
-        });
-
-        return { success: true, matches };
-      })()
-    `;
-
-    try {
-      const result = await webview.executeJavaScript(searchCode) as { success: boolean; matches?: { elementNumber: number; text: string; tagName: string }[]; error?: string };
-      console.log('[AI] Find by text result:', result);
-      return result;
-    } catch (err) {
-      console.error('[AI] Find by text error:', err);
-      return { success: false, error: (err as Error).message };
-    }
-  }, [isWebviewReady, activeTabId]);
-
-  // DOM Navigation handlers for voice agent - these communicate with iframe-injection.ts
-  const handleSelectParent = useCallback(async (levels: number = 1): Promise<{ success: boolean; element?: Record<string, unknown>; error?: string }> => {
-    console.log('[AI] Select parent, levels:', levels);
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview || !isWebviewReady) {
-      return { success: false, error: 'Webview not ready' };
-    }
-
-    return new Promise((resolve) => {
-      const handleResponse = (event: MessageEvent) => {
-        if (event.data?.type === 'SELECT_PARENT_RESULT') {
-          window.removeEventListener('message', handleResponse);
-          if (event.data.success && event.data.element) {
-            resolve({ success: true, element: event.data.element });
-          } else {
-            resolve({ success: false, error: event.data.error || 'Failed to select parent' });
-          }
-        }
-      };
-      window.addEventListener('message', handleResponse);
-
-      // Send message to webview
-      webview.contentWindow?.postMessage({ type: 'SELECT_PARENT', levels }, getTargetOrigin(activeTab?.url));
-
-      // Timeout after 5 seconds
-      setTimeout(() => {
-        window.removeEventListener('message', handleResponse);
-        resolve({ success: false, error: 'Timeout waiting for parent selection' });
-      }, 5000);
-    });
-  }, [isWebviewReady, activeTabId, activeTab?.url]);
-
-  const handleSelectChildren = useCallback(async (selector?: string): Promise<{ success: boolean; children?: Record<string, unknown>[]; error?: string }> => {
-    console.log('[AI] Select children, filter:', selector);
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview || !isWebviewReady) {
-      return { success: false, error: 'Webview not ready' };
-    }
-
-    return new Promise((resolve) => {
-      const handleResponse = (event: MessageEvent) => {
-        if (event.data?.type === 'SELECT_CHILDREN_RESULT') {
-          window.removeEventListener('message', handleResponse);
-          if (event.data.success) {
-            const children = event.data.children?.map((c: { element: Record<string, unknown> }) => c.element) || [];
-            resolve({ success: true, children });
-          } else {
-            resolve({ success: false, error: event.data.error || 'Failed to get children' });
-          }
-        }
-      };
-      window.addEventListener('message', handleResponse);
-
-      webview.contentWindow?.postMessage({ type: 'SELECT_CHILDREN', selector }, getTargetOrigin(activeTab?.url));
-
-      setTimeout(() => {
-        window.removeEventListener('message', handleResponse);
-        resolve({ success: false, error: 'Timeout waiting for children' });
-      }, 5000);
-    });
-  }, [isWebviewReady, activeTabId, activeTab?.url]);
-
-  const handleSelectSiblings = useCallback(async (direction: 'next' | 'prev' | 'all'): Promise<{ success: boolean; siblings?: Record<string, unknown>[]; error?: string }> => {
-    console.log('[AI] Select siblings, direction:', direction);
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview || !isWebviewReady) {
-      return { success: false, error: 'Webview not ready' };
-    }
-
-    return new Promise((resolve) => {
-      const handleResponse = (event: MessageEvent) => {
-        if (event.data?.type === 'SELECT_SIBLINGS_RESULT') {
-          window.removeEventListener('message', handleResponse);
-          if (event.data.success) {
-            const siblings = event.data.siblings?.map((s: { element: Record<string, unknown> }) => s.element) || [];
-            resolve({ success: true, siblings });
-          } else {
-            resolve({ success: false, error: event.data.error || 'Failed to get siblings' });
-          }
-        }
-      };
-      window.addEventListener('message', handleResponse);
-
-      webview.contentWindow?.postMessage({ type: 'SELECT_SIBLINGS', direction }, getTargetOrigin(activeTab?.url));
-
-      setTimeout(() => {
-        window.removeEventListener('message', handleResponse);
-        resolve({ success: false, error: 'Timeout waiting for siblings' });
-      }, 5000);
-    });
-  }, [isWebviewReady, activeTabId, activeTab?.url]);
-
-  const handleSelectAllMatching = useCallback(async (matchBy: 'tag' | 'class' | 'both'): Promise<{ success: boolean; matches?: Record<string, unknown>[]; error?: string }> => {
-    console.log('[AI] Select all matching, by:', matchBy);
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview || !isWebviewReady) {
-      return { success: false, error: 'Webview not ready' };
-    }
-
-    return new Promise((resolve) => {
-      const handleResponse = (event: MessageEvent) => {
-        if (event.data?.type === 'SELECT_ALL_MATCHING_RESULT') {
-          window.removeEventListener('message', handleResponse);
-          if (event.data.success) {
-            const matches = event.data.matches?.map((m: { element: Record<string, unknown> }) => m.element) || [];
-            resolve({ success: true, matches });
-          } else {
-            resolve({ success: false, error: event.data.error || 'Failed to find matching elements' });
-          }
-        }
-      };
-      window.addEventListener('message', handleResponse);
-
-      webview.contentWindow?.postMessage({ type: 'SELECT_ALL_MATCHING', matchBy }, getTargetOrigin(activeTab?.url));
-
-      setTimeout(() => {
-        window.removeEventListener('message', handleResponse);
-        resolve({ success: false, error: 'Timeout waiting for matching elements' });
-      }, 5000);
-    });
-  }, [isWebviewReady, activeTabId, activeTab?.url]);
-
-  // --- Hierarchical Drill-Down Selection Handlers ---
-  const handleStartDrillSelection = useCallback(async (): Promise<{ success: boolean; sections?: Record<string, unknown>[]; level?: number; error?: string }> => {
-    console.log('[AI] Starting drill-down selection');
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview || !isWebviewReady) {
-      return { success: false, error: 'Webview not ready' };
-    }
-
-    return new Promise((resolve) => {
-      const handleResponse = (event: MessageEvent) => {
-        if (event.data?.type === 'START_DRILL_SELECTION_RESULT') {
-          window.removeEventListener('message', handleResponse);
-          if (event.data.success) {
-            resolve({ success: true, sections: event.data.sections, level: event.data.level });
-          } else {
-            resolve({ success: false, error: event.data.error || 'Failed to start drill selection' });
-          }
-        }
-      };
-      window.addEventListener('message', handleResponse);
-
-      webview.contentWindow?.postMessage({ type: 'START_DRILL_SELECTION' }, getTargetOrigin(activeTab?.url));
-
-      setTimeout(() => {
-        window.removeEventListener('message', handleResponse);
-        resolve({ success: false, error: 'Timeout starting drill selection' });
-      }, 5000);
-    });
-  }, [isWebviewReady, activeTabId, activeTab?.url]);
-
-  const handleDrillInto = useCallback(async (elementNumber: number): Promise<{ success: boolean; isFinalSelection?: boolean; element?: Record<string, unknown>; children?: Record<string, unknown>[]; description?: string; level?: number; canGoBack?: boolean; canGoForward?: boolean; error?: string }> => {
-    console.log('[AI] Drill into element:', elementNumber);
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview || !isWebviewReady) {
-      return { success: false, error: 'Webview not ready' };
-    }
-
-    return new Promise((resolve) => {
-      const handleResponse = (event: MessageEvent) => {
-        if (event.data?.type === 'DRILL_INTO_RESULT') {
-          window.removeEventListener('message', handleResponse);
-          if (event.data.success) {
-            resolve({
-              success: true,
-              isFinalSelection: event.data.isFinalSelection,
-              element: event.data.element,
-              children: event.data.children,
-              description: event.data.description || event.data.parentDescription,
-              level: event.data.level,
-              canGoBack: event.data.canGoBack,
-              canGoForward: event.data.canGoForward,
-            });
-          } else {
-            resolve({ success: false, error: event.data.error || 'Failed to drill into element' });
-          }
-        }
-      };
-      window.addEventListener('message', handleResponse);
-
-      webview.contentWindow?.postMessage({ type: 'DRILL_INTO', elementNumber }, getTargetOrigin(activeTab?.url));
-
-      setTimeout(() => {
-        window.removeEventListener('message', handleResponse);
-        resolve({ success: false, error: 'Timeout drilling into element' });
-      }, 5000);
-    });
-  }, [isWebviewReady, activeTabId, activeTab?.url]);
-
-  const handleDrillBack = useCallback(async (): Promise<{ success: boolean; children?: Record<string, unknown>[]; level?: number; canGoBack?: boolean; canGoForward?: boolean; error?: string }> => {
-    console.log('[AI] Drill back');
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview || !isWebviewReady) {
-      return { success: false, error: 'Webview not ready' };
-    }
-
-    return new Promise((resolve) => {
-      const handleResponse = (event: MessageEvent) => {
-        if (event.data?.type === 'DRILL_BACK_RESULT') {
-          window.removeEventListener('message', handleResponse);
-          if (event.data.success) {
-            resolve({
-              success: true,
-              children: event.data.children,
-              level: event.data.level,
-              canGoBack: event.data.canGoBack,
-              canGoForward: event.data.canGoForward,
-            });
-          } else {
-            resolve({ success: false, error: event.data.error || 'Cannot go back' });
-          }
-        }
-      };
-      window.addEventListener('message', handleResponse);
-
-      webview.contentWindow?.postMessage({ type: 'DRILL_BACK' }, getTargetOrigin(activeTab?.url));
-
-      setTimeout(() => {
-        window.removeEventListener('message', handleResponse);
-        resolve({ success: false, error: 'Timeout going back' });
-      }, 5000);
-    });
-  }, [isWebviewReady, activeTabId, activeTab?.url]);
-
-  const handleDrillForward = useCallback(async (): Promise<{ success: boolean; children?: Record<string, unknown>[]; level?: number; canGoBack?: boolean; canGoForward?: boolean; error?: string }> => {
-    console.log('[AI] Drill forward');
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview || !isWebviewReady) {
-      return { success: false, error: 'Webview not ready' };
-    }
-
-    return new Promise((resolve) => {
-      const handleResponse = (event: MessageEvent) => {
-        if (event.data?.type === 'DRILL_FORWARD_RESULT') {
-          window.removeEventListener('message', handleResponse);
-          if (event.data.success) {
-            resolve({
-              success: true,
-              children: event.data.children,
-              level: event.data.level,
-              canGoBack: event.data.canGoBack,
-              canGoForward: event.data.canGoForward,
-            });
-          } else {
-            resolve({ success: false, error: event.data.error || 'No forward history' });
-          }
-        }
-      };
-      window.addEventListener('message', handleResponse);
-
-      webview.contentWindow?.postMessage({ type: 'DRILL_FORWARD' }, getTargetOrigin(activeTab?.url));
-
-      setTimeout(() => {
-        window.removeEventListener('message', handleResponse);
-        resolve({ success: false, error: 'Timeout going forward' });
-      }, 5000);
-    });
-  }, [isWebviewReady, activeTabId, activeTab?.url]);
-
-  const handleExitDrillMode = useCallback(async (): Promise<{ success: boolean }> => {
-    console.log('[AI] Exit drill mode');
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview || !isWebviewReady) {
-      return { success: false };
-    }
-
-    return new Promise((resolve) => {
-      const handleResponse = (event: MessageEvent) => {
-        if (event.data?.type === 'EXIT_DRILL_MODE_RESULT') {
-          window.removeEventListener('message', handleResponse);
-          resolve({ success: event.data.success });
-        }
-      };
-      window.addEventListener('message', handleResponse);
-
-      webview.contentWindow?.postMessage({ type: 'EXIT_DRILL_MODE' }, getTargetOrigin(activeTab?.url));
-
-      setTimeout(() => {
-        window.removeEventListener('message', handleResponse);
-        resolve({ success: true }); // Assume success on timeout
-      }, 2000);
-    });
-  }, [isWebviewReady, activeTabId, activeTab?.url]);
-
-  // Layers panel handlers
-  const handleRefreshLayers = useCallback(async () => {
-    setIsLayersLoading(true);
-    try {
-      // In multi-viewport mode, show canvas/nodes tree instead of page elements
-      if (isMultiViewportMode && multiViewportData.length > 0) {
-        const getNodeName = (v: { windowType: string; devicePresetId?: string }) => {
-          if (v.windowType === 'device') {
-            const presetNames: Record<string, string> = {
-              'desktop': 'Desktop',
-              'laptop': 'Laptop',
-              'iphone-15-pro': 'iPhone 15 Pro',
-              'iphone-15': 'iPhone 15',
-              'iphone-se': 'iPhone SE',
-              'pixel-8': 'Pixel 8',
-              'galaxy-s24': 'Galaxy S24',
-              'ipad-pro-12': 'iPad Pro 12.9"',
-              'ipad-pro-11': 'iPad Pro 11"',
-              'ipad-mini': 'iPad Mini',
-            };
-            return presetNames[v.devicePresetId || 'desktop'] || v.devicePresetId || 'Device';
-          }
-          const typeNames: Record<string, string> = {
-            'kanban': 'Kanban Board',
-            'todo': 'Todo List',
-            'notes': 'Notes',
-            'terminal': 'Terminal',
-          };
-          return typeNames[v.windowType] || v.windowType;
-        };
-
-        const getNodeType = (windowType: string): TreeNode['type'] => {
-          if (windowType === 'device') return 'frame';
-          if (windowType === 'terminal') return 'input';
-          return 'component';
-        };
-
-        const canvasTree: TreeNode = {
-          id: 'canvas',
-          name: 'Canvas',
-          type: 'page',
-          children: multiViewportData.map(v => ({
-            id: `node-${v.id}`,
-            name: getNodeName(v),
-            type: getNodeType(v.windowType),
-            tagName: v.windowType,
-          })),
-        };
-
-        setLayersTreeData(canvasTree);
-        setIsLayersLoading(false);
-        return;
-      }
-
-      // Single viewport mode - scan page elements
-      if (!isWebviewReady) {
-        setIsLayersLoading(false);
-        return;
-      }
-
-      const webview = webviewRefs.current.get(activeTabId);
-      if (!webview) {
-        setIsLayersLoading(false);
-        return;
-      }
-
-      // Get page elements and build tree structure with proper DOM nesting
-      const scanCode = `
-        (function() {
-          let elementNumber = 0;
-          const elementMap = new Map(); // Store elements by number for highlighting
-
-          // Important selectors - elements we want to show in tree
-          const importantTags = new Set(['button', 'a', 'input', 'textarea', 'select', 'img', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'form', 'nav', 'header', 'footer', 'main', 'section', 'article', 'aside', 'ul', 'ol', 'table']);
-          const containerTags = new Set(['div', 'span', 'li', 'p', 'label', 'td', 'tr', 'th']);
-
-          function getXPath(el) {
-            try {
-              if (!el) return '';
-              if (el.id) return '//*[@id=\"' + String(el.id).replace(/\"/g, '') + '\"]';
-              const parts = [];
-              let node = el;
-              while (node && node.nodeType === 1) {
-                let idx = 1;
-                let sib = node.previousSibling;
-                while (sib) {
-                  if (sib.nodeType === 1 && sib.tagName === node.tagName) idx++;
-                  sib = sib.previousSibling;
-                }
-                parts.unshift(node.tagName.toLowerCase() + '[' + idx + ']');
-                node = node.parentNode;
-              }
-              return '/' + parts.join('/');
-            } catch (e) {
-              return '';
-            }
-          }
-
-          function getElementType(el) {
-            const tagName = el.tagName.toLowerCase();
-            if (tagName === 'button' || el.getAttribute('role') === 'button') return 'button';
-            if (tagName === 'a') return 'link';
-            if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') return 'input';
-            if (tagName === 'img') return 'image';
-            if (['h1','h2','h3','h4','h5','h6','p'].includes(tagName)) return 'text';
-            if (['ul','ol','li'].includes(tagName)) return 'list';
-            if (['nav','header','footer','main','section','article','aside','form'].includes(tagName)) return 'frame';
-            return 'component';
-          }
-
-          const markerClasses = new Set([
-            'inspector-hover-target',
-            'inspector-selected-target',
-            'screenshot-hover-target',
-            'move-hover-target',
-            'inspector-drag-over',
-            'move-original-hidden',
-            'cluso-highlighted',
-          ]);
-
-          function getElementName(el) {
-            const tagName = el.tagName.toLowerCase();
-            function getCleanClassToken(node) {
-              const cls = String(node.className || '');
-              if (!cls) return '';
-              const tokens = cls.split(/\s+/).map(s => s.trim()).filter(Boolean);
-              const clean = tokens.filter(t => !markerClasses.has(t));
-              return clean[0] || '';
-            }
-
-            function getCleanText(node, maxLen = 30) {
-              try {
-                const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
-                  acceptNode(textNode) {
-                    const parent = textNode.parentElement;
-                    if (!parent) return NodeFilter.FILTER_REJECT;
-                    if (parent.closest && parent.closest('[data-cluso-ui="1"]')) return NodeFilter.FILTER_REJECT;
-                    const pCls = String(parent.className || '');
-                    if (pCls.includes('element-number-badge')) return NodeFilter.FILTER_REJECT;
-                    if (pCls.includes('inspector-edit-toolbar') || pCls.includes('inspector-edit-btn')) return NodeFilter.FILTER_REJECT;
-                    if (pCls.includes('drop-zone-label')) return NodeFilter.FILTER_REJECT;
-                    if (pCls.includes('move-floating-overlay') || pCls.includes('move-resize-handle') || pCls.includes('move-position-label')) return NodeFilter.FILTER_REJECT;
-                    const txt = (textNode.textContent || '').trim();
-                    if (!txt) return NodeFilter.FILTER_REJECT;
-                    return NodeFilter.FILTER_ACCEPT;
-                  }
-                });
-                let out = '';
-                while (walker.nextNode()) {
-                  const t = String(walker.currentNode.textContent || '').replace(/\s+/g, ' ').trim();
-                  if (!t) continue;
-                  out = (out ? (out + ' ' + t) : t);
-                  if (out.length >= maxLen) break;
-                }
-                return out.substring(0, maxLen).trim();
-              } catch (e) {
-                return '';
-              }
-            }
-
-            const text = getCleanText(el, 30);
-            const ariaLabel = el.getAttribute('aria-label');
-            const placeholder = el.getAttribute('placeholder');
-            const id = el.id;
-            const className = getCleanClassToken(el);
-
-            if (ariaLabel) return ariaLabel.substring(0, 30);
-            if (text && text.length < 30 && !text.includes('\\n')) return text;
-            if (placeholder) return placeholder.substring(0, 30);
-            if (id) return '#' + id;
-            if (className && typeof className === 'string') return '.' + className;
-            return '<' + tagName + '>';
-          }
-
-          function isElementVisible(el) {
-            const style = window.getComputedStyle(el);
-            if (style.display === 'none') return false;
-            if (style.opacity === '0') return false;
-            if (style.visibility === 'hidden') {
-              // Ignore our own temporary hiding class so Layers doesn't change due to inspector/move tooling.
-              const cls = String(el.className || '');
-              if (!cls.includes('move-original-hidden')) return false;
-            }
-            return true;
-          }
-
-          function isClusoUi(el) {
-            try {
-              if (!el) return false;
-              if (el.closest && el.closest('[data-cluso-ui="1"]')) return true;
-              const id = String(el.id || '');
-              if (id === 'cluso-hover-overlay' || id === 'cluso-selection-overlay' || id === 'cluso-rect-selection' || id === 'inspector-styles') return true;
-              const cls = String(el.className || '');
-              if (!cls) return false;
-              if (cls.includes('element-number-badge')) return true;
-              if (cls.includes('inspector-edit-toolbar') || cls.includes('inspector-edit-btn')) return true;
-              if (cls.includes('drop-zone-label')) return true;
-              if (cls.includes('move-floating-overlay') || cls.includes('move-resize-handle') || cls.includes('move-position-label')) return true;
-            } catch (e) {}
-            return false;
-          }
-
-          function shouldInclude(el) {
-            if (isClusoUi(el)) return false;
-            if (!isElementVisible(el)) return false;
-            const tagName = el.tagName.toLowerCase();
-
-            // Always include important tags
-            if (importantTags.has(tagName)) return true;
-            if (el.getAttribute('role') === 'button') return true;
-
-            // Include containers only if they have meaningful attributes
-            if (containerTags.has(tagName)) {
-              const hasId = !!el.id;
-              const hasMeaningfulClass = el.className && typeof el.className === 'string' &&
-                el.className.split(' ').some(c => c && c.length > 2 && !markerClasses.has(c) && !c.includes('__') && !c.includes('css-'));
-              const hasRole = !!el.getAttribute('role');
-              const hasAriaLabel = !!el.getAttribute('aria-label');
-              const hasDirectText = el.childNodes.length > 0 &&
-                Array.from(el.childNodes).some(n => n.nodeType === 3 && n.textContent?.trim());
-
-              if (hasId || hasRole || hasAriaLabel) return true;
-              if (hasMeaningfulClass && (hasDirectText || el.children.length > 0)) return true;
-              if (['p', 'li', 'label', 'td', 'th'].includes(tagName) && hasDirectText) return true;
-            }
-
-            return false;
-          }
-
-          function buildTree(el, maxDepth = 10) {
-            if (maxDepth <= 0) return null;
-
-            const children = [];
-            for (const child of el.children) {
-              if (isClusoUi(child)) continue;
-              if (shouldInclude(child)) {
-                elementNumber++;
-
-                // Extract Cluso metadata if present
-                const clusoId = child.getAttribute('data-cluso-id');
-                const clusoName = child.getAttribute('data-cluso-name');
-
-                let sourceFile = null;
-                let sourceLine = null;
-                let sourceColumn = null;
-
-				if (clusoId) {
-					// Parse format: "src/App.tsx:45:12"
-					const parts = clusoId.split(':');
-					const colStr = parts.pop();
-					const lineStr = parts.pop();
-					const col = colStr ? parseInt(colStr, 10) : NaN;
-					const line = lineStr ? parseInt(lineStr, 10) : NaN;
-					sourceColumn = Number.isFinite(col) ? col : null;
-					sourceLine = Number.isFinite(line) ? line : null;
-					const sf = parts.join(':'); // Handle Windows paths (e.g. C:\\...)
-					sourceFile = sf || null;
-				}
-
-                const node = {
-                  id: getXPath(child) || ('element-' + elementNumber),
-                  name: clusoName || getElementName(child), // Prefer data-cluso-name
-                  type: getElementType(child),
-                  tagName: child.tagName.toLowerCase(),
-                  elementNumber,
-                  sourceFile,
-                  sourceLine,
-                  sourceColumn,
-                  children: []
-                };
-                elementMap.set(elementNumber, child);
-
-                // Recursively build children
-                const childTree = buildTree(child, maxDepth - 1);
-                if (childTree && childTree.length > 0) {
-                  node.children = childTree;
-                } else {
-                  delete node.children;
-                }
-                children.push(node);
-              } else {
-                // Skip this element but check its children
-                const nested = buildTree(child, maxDepth);
-                if (nested) children.push(...nested);
-              }
-            }
-            return children.length > 0 ? children : null;
-          }
-
-          // Build from body
-          const tree = buildTree(document.body, 12);
-
-          // Store element map for highlighting
-          window.__layersElements = elementMap;
-
-          return tree || [];
-        })()
-      `;
-
-      const elements = await webview.executeJavaScript(scanCode) as TreeNode[];
-
-      // Build tree with nested structure
-      const treeData: TreeNode = {
-        id: 'root',
-        name: 'Page',
-        type: 'page',
-        children: elements.slice(0, 200), // Limit for performance
-      };
-
-      setLayersTreeData(treeData);
-      layersTreeStaleRef.current = false
-    } catch (err) {
-      console.error('[Layers] Refresh error:', err);
-    }
-    setIsLayersLoading(false);
-  }, [isWebviewReady, activeTabId, isMultiViewportMode, multiViewportData]);
-  const handleRefreshLayersRef = useRef<() => Promise<void>>(() => Promise.resolve());
-  useEffect(() => { handleRefreshLayersRef.current = handleRefreshLayers; }, [handleRefreshLayers]);
-
-  const handleTreeNodeSelect = useCallback(async (node: TreeNode) => {
-    setSelectedTreeNodeId(node.id);
-
-    // In multi-viewport mode, clicking a node focuses it on the canvas
-    if (isMultiViewportMode && node.id.startsWith('node-')) {
-      const viewportId = node.id.replace('node-', '');
-      viewportControlsRef.current?.focusViewport?.(viewportId);
-      return;
-    }
-
-    if (node.elementNumber) {
-      setSelectedLayerElementNumber(node.elementNumber)
-      setSelectedLayerElementName(node.name || null)
-
-      // Highlight in webview
-      const webview = webviewRefs.current.get(activeTabId);
-      if (!webview) return;
-
-      // Also sync selection into the inspector overlay for a unified experience
-      try {
-        webview.send('select-layer-element-by-number', node.elementNumber);
-      } catch (e) {
-        // ignore
-      }
-
-      // Pull computed styles for the element to seed the properties panel
-      try {
-        const result = await webview.executeJavaScript(`
-          (function() {
-            const map = window.__layersElements;
-            if (!map || !(map instanceof Map)) return { success: false, error: 'No element map' };
-            const el = map.get(${node.elementNumber});
-            if (!el) return { success: false, error: 'Element not found' };
-
-            const rect = el.getBoundingClientRect();
-            const cs = window.getComputedStyle(el);
-            const computedStyles = {};
-            try {
-              for (let i = 0; i < cs.length; i++) {
-                const prop = cs[i];
-                computedStyles[prop] = String(cs.getPropertyValue(prop) || '').trim();
-              }
-            } catch (e) {}
-
-            const attributes = {};
-            try {
-              for (const attr of Array.from(el.attributes || [])) {
-                if (!attr || !attr.name) continue;
-                attributes[attr.name] = String(attr.value ?? '');
-              }
-            } catch (e) {}
-
-            const dataset = {};
-            try {
-              const ds = el.dataset || {};
-              for (const k in ds) {
-                if (!Object.prototype.hasOwnProperty.call(ds, k)) continue;
-                dataset[k] = String(ds[k] ?? '');
-              }
-            } catch (e) {}
-
-            function addFamilies(set, raw) {
-              if (!raw) return;
-              const parts = String(raw)
-                .split(',')
-                .map(s => s.trim())
-                .filter(Boolean)
-                .map(s => s.replace(/^['\"]|['\"]$/g, ''));
-              for (const p of parts) {
-                if (p) set.add(p);
-              }
-            }
-
-            const fontFamiliesSet = new Set();
-            try {
-              addFamilies(fontFamiliesSet, cs.fontFamily);
-              const sheets = Array.from(document.styleSheets || []);
-              for (const sheet of sheets) {
-                let rules;
-                try { rules = sheet.cssRules; } catch (e) { continue; }
-                if (!rules) continue;
-                for (const rule of Array.from(rules)) {
-                  const t = rule.type;
-                  // CSSFontFaceRule
-                  if (t === 5 && rule.style) {
-                    addFamilies(fontFamiliesSet, rule.style.getPropertyValue('font-family'));
-                    continue;
-                  }
-                  // CSSStyleRule
-                  if (t === 1 && rule.style) {
-                    addFamilies(fontFamiliesSet, rule.style.fontFamily || rule.style.getPropertyValue('font-family'));
-                    continue;
-                  }
-                }
-              }
-            } catch (e) {}
-
-            const classNamesSet = new Set();
-            try {
-              const all = Array.from(document.querySelectorAll('[class]'));
-              for (const node of all) {
-                if (node.closest && node.closest('[data-cluso-ui="1"]')) continue;
-                const cls = node.className;
-                if (!cls) continue;
-                const tokens = String(cls).split(/\\s+/).map(s => s.trim()).filter(Boolean);
-                for (const t of tokens) {
-                  if (!t || t.length >= 80) continue;
-                  if (t === 'element-number-badge' || t === 'inspector-hover-target' || t === 'inspector-selected-target') continue;
-                  if (t === 'screenshot-hover-target' || t === 'move-hover-target') continue;
-                  if (t === 'drop-zone-label' || t === 'move-floating-overlay' || t === 'move-resize-handle' || t === 'move-position-label') continue;
-                  classNamesSet.add(t);
-                }
-                if (classNamesSet.size > 5000) break;
-              }
-            } catch (e) {}
-
-            function px(v) {
-              const n = parseFloat(String(v || '0'));
-              return Number.isFinite(n) ? n : 0;
-            }
-
-            function rgbToHex(color) {
-              if (!color) return '#000000';
-              const c = String(color).trim();
-              if (c.startsWith('#')) return c;
-              const m = c.match(/^rgba?\\((\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)/i);
-              if (!m) return '#000000';
-              const r = Number(m[1]) || 0;
-              const g = Number(m[2]) || 0;
-              const b = Number(m[3]) || 0;
-              const toHex = (n) => n.toString(16).padStart(2, '0');
-              return '#' + toHex(r) + toHex(g) + toHex(b);
-            }
-
-            function parseTransform(transform) {
-              const t = String(transform || '').trim();
-              if (!t || t === 'none') return { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1 };
-              const m2 = t.match(/^matrix\\(([^)]+)\\)$/);
-              if (m2) {
-                const parts = m2[1].split(',').map(s => parseFloat(s.trim()));
-                if (parts.length >= 6) {
-                  const [a, b, c, d, tx, ty] = parts;
-                  const rotation = Math.round(Math.atan2(b, a) * (180 / Math.PI));
-                  const scaleX = Math.sign(a || 1) * Math.sqrt((a * a) + (b * b));
-                  const scaleY = Math.sign(d || 1) * Math.sqrt((c * c) + (d * d));
-                  return { x: Math.round(tx), y: Math.round(ty), rotation, scaleX: scaleX >= 0 ? 1 : -1, scaleY: scaleY >= 0 ? 1 : -1 };
-                }
-              }
-              const m3 = t.match(/^matrix3d\\(([^)]+)\\)$/);
-              if (m3) {
-                const parts = m3[1].split(',').map(s => parseFloat(s.trim()));
-                if (parts.length >= 16) {
-                  const a = parts[0];
-                  const b = parts[1];
-                  const c = parts[4];
-                  const d = parts[5];
-                  const tx = parts[12];
-                  const ty = parts[13];
-                  const rotation = Math.round(Math.atan2(b, a) * (180 / Math.PI));
-                  const scaleX = Math.sign(a || 1) * Math.sqrt((a * a) + (b * b));
-                  const scaleY = Math.sign(d || 1) * Math.sqrt((c * c) + (d * d));
-                  return { x: Math.round(tx), y: Math.round(ty), rotation, scaleX: scaleX >= 0 ? 1 : -1, scaleY: scaleY >= 0 ? 1 : -1 };
-                }
-              }
-              return { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1 };
-            }
-
-            const transform = parseTransform(cs.transform);
-            const display = cs.display === 'flex' ? 'flex' : cs.display === 'grid' ? 'grid' : 'block';
-            const flexDirection = cs.flexDirection === 'column' ? 'column' : 'row';
-            const justify = ['flex-start', 'center', 'flex-end', 'space-between'].includes(cs.justifyContent)
-              ? cs.justifyContent
-              : 'flex-start';
-            const align = ['flex-start', 'center', 'flex-end'].includes(cs.alignItems)
-              ? cs.alignItems
-              : 'flex-start';
-
-            return {
-              success: true,
-              styles: {
-                className: (el.className || ''),
-                cssOverrides: {},
-                attributeOverrides: {},
-                datasetOverrides: {},
-                x: transform.x,
-                y: transform.y,
-                rotation: transform.rotation,
-                scaleX: transform.scaleX,
-                scaleY: transform.scaleY,
-                width: Math.round(rect.width),
-                height: Math.round(rect.height),
-                display,
-                flexDirection,
-                justifyContent: justify,
-                alignItems: align,
-                gap: px(cs.gap),
-                padding: px(cs.paddingTop),
-                overflow: (cs.overflow === 'hidden' || cs.overflowX === 'hidden' || cs.overflowY === 'hidden') ? 'hidden' : 'visible',
-                boxSizing: cs.boxSizing === 'content-box' ? 'content-box' : 'border-box',
-                backgroundColor: rgbToHex(cs.backgroundColor),
-                opacity: Math.round(parseFloat(cs.opacity || '1') * 100),
-                borderRadius: px(cs.borderTopLeftRadius),
-                borderWidth: px(cs.borderTopWidth),
-                borderStyle: ['none', 'solid', 'dashed', 'dotted'].includes(cs.borderTopStyle) ? cs.borderTopStyle : 'solid',
-                borderColor: rgbToHex(cs.borderTopColor),
-                color: rgbToHex(cs.color),
-                fontFamily: String(cs.fontFamily || 'system-ui'),
-                fontSize: px(cs.fontSize),
-                fontWeight: Number.parseInt(String(cs.fontWeight || '400'), 10) || 400,
-                lineHeight: String(cs.lineHeight || '').trim() === 'normal' ? 0 : px(cs.lineHeight),
-                letterSpacing: String(cs.letterSpacing || '').trim() === 'normal' ? 0 : px(cs.letterSpacing),
-                textAlign: ['left', 'center', 'right', 'justify'].includes(cs.textAlign) ? cs.textAlign : 'left',
-                shadowEnabled: String(cs.boxShadow || '').trim() !== '' && String(cs.boxShadow || '').trim() !== 'none',
-                shadowVisible: String(cs.boxShadow || '').trim() !== '' && String(cs.boxShadow || '').trim() !== 'none',
-                shadowType: String(cs.boxShadow || '').includes('inset') ? 'inner' : 'drop',
-                shadowX: (function() {
-                  const m = String(cs.boxShadow || '').match(/(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px/);
-                  return m ? (parseFloat(m[1]) || 0) : 0;
-                })(),
-                shadowY: (function() {
-                  const m = String(cs.boxShadow || '').match(/(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px/);
-                  return m ? (parseFloat(m[2]) || 0) : 0;
-                })(),
-                shadowBlur: (function() {
-                  const m = String(cs.boxShadow || '').match(/(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px/);
-                  return m ? (parseFloat(m[3]) || 0) : 0;
-                })(),
-                shadowSpread: (function() {
-                  const m = String(cs.boxShadow || '').match(/(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px\\s+(-?\\d+(?:\\.\\d+)?)px/);
-                  return m ? (parseFloat(m[4]) || 0) : 0;
-                })(),
-                shadowColor: (function() {
-                  const c = String(cs.boxShadow || '');
-                  const m = c.match(/(rgba?\\([^\\)]+\\)|#[0-9a-fA-F]{3,8})/);
-                  return m ? m[1] : 'rgba(0,0,0,0.25)';
-                })(),
-                blurType: (function() {
-                  const b = String(cs.backdropFilter || '').match(/blur\\(([-\\d.]+)px\\)/);
-                  if (b) return 'backdrop';
-                  return 'layer';
-                })(),
-                blurEnabled: (function() {
-                  const b = String(cs.backdropFilter || '').match(/blur\\(([-\\d.]+)px\\)/);
-                  const f = String(cs.filter || '').match(/blur\\(([-\\d.]+)px\\)/);
-                  return !!(b || f);
-                })(),
-                blurVisible: (function() {
-                  const b = String(cs.backdropFilter || '').match(/blur\\(([-\\d.]+)px\\)/);
-                  const f = String(cs.filter || '').match(/blur\\(([-\\d.]+)px\\)/);
-                  return !!(b || f);
-                })(),
-                blur: (function() {
-                  const b = String(cs.backdropFilter || '').match(/blur\\(([-\\d.]+)px\\)/);
-                  if (b) return (parseFloat(b[1]) || 0);
-                  const m = String(cs.filter || '').match(/blur\\(([-\\d.]+)px\\)/);
-                  return m ? (parseFloat(m[1]) || 0) : 0;
-                })(),
-              }
-              ,
-              computedStyles,
-              attributes,
-              dataset,
-              fontFamilies: Array.from(fontFamiliesSet).slice(0, 200),
-              classNames: Array.from(classNamesSet).slice(0, 5000)
-            };
-          })()
-        `) as { success: boolean; styles?: Record<string, string>; computedStyles?: Record<string, string>; attributes?: Record<string, string>; dataset?: Record<string, string>; fontFamilies?: string[]; classNames?: string[] } | null;
-        if (result?.success && result.styles) {
-          setElementStyles((prev) => ({ ...prev, ...result.styles }))
-          setSelectedLayerComputedStyles(result.computedStyles || null)
-          setSelectedLayerAttributes(result.attributes || null)
-          setSelectedLayerDataset(result.dataset || null)
-          setSelectedLayerFontFamilies(Array.isArray(result.fontFamilies) ? result.fontFamilies : null)
-          setSelectedLayerClassNames(Array.isArray(result.classNames) ? result.classNames : null)
-        }
-      } catch (e) {
-        console.warn('[Layers] Failed to read element styles:', e)
-      }
-    } else {
-      setSelectedLayerElementNumber(null)
-      setSelectedLayerElementName(null)
-      setSelectedLayerComputedStyles(null)
-      setSelectedLayerAttributes(null)
-      setSelectedLayerDataset(null)
-      setSelectedLayerFontFamilies(null)
-      setSelectedLayerClassNames(null)
-    }
-  }, [activeTabId, isMultiViewportMode]);
-  const handleTreeNodeSelectRef = useRef<(node: TreeNode) => void>(() => {});
-  useEffect(() => { handleTreeNodeSelectRef.current = handleTreeNodeSelect as unknown as (node: TreeNode) => void; }, [handleTreeNodeSelect]);
-
-  // Handle file selection from file tree
-  const handleFileTreeSelect = useCallback(async (filePath: string) => {
-    console.log('[App] File selected from tree:', filePath)
-    setEditorFilePath(filePath)
-    setHasUnsavedEdits(false)
-
-    // Load file content
-    try {
-      let result = await window.electronAPI.files.readFile(filePath)
-
-      // If file not found, try searching for it by filename
-      if (!result.success && result.error?.includes('ENOENT') && activeTab.projectPath) {
-        const filename = filePath.split('/').pop()
-        console.log('[App] File not found at', filePath, '- searching for:', filename)
-
-        const searchResult = await window.electronAPI.files.findFiles(activeTab.projectPath, filename!)
-        if (searchResult.success && searchResult.data && searchResult.data.length > 0) {
-          const foundPath = searchResult.data[0]
-          console.log('[App] Found file at:', foundPath)
-          setEditorFilePath(foundPath)
-          result = await window.electronAPI.files.readFile(foundPath)
-        }
-      }
-
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to read file')
-      }
-      const content = result.data || ''
-      console.log('[App] File loaded:', content.length, 'bytes')
-      setEditorFileContent(content)
-      setIsEditorMode(true) // Switch center pane to editor
-    } catch (error) {
-      console.error('[App] Failed to load file:', error)
-      setEditorFileContent(`// Error loading file: ${error instanceof Error ? error.message : 'Unknown error'}`)
-      setIsEditorMode(true)
-    }
-  }, [activeTab.projectPath])
-
-  const flushApplyElementStyles = useCallback(() => {
-    if (applyElementStylesTimerRef.current) {
-      window.clearTimeout(applyElementStylesTimerRef.current)
-      applyElementStylesTimerRef.current = null
-    }
-
-    const elementNumber = selectedLayerElementNumberRef.current
-    if (!elementNumber) return
-
-    const tabId = activeTabIdRef.current
-    const webview = webviewRefs.current.get(tabId)
-    if (!webview) return
-
-    const s = elementStylesRef.current
-    const payload = JSON.stringify({
-      className: s.className,
-      cssOverrides: s.cssOverrides,
-      attributeOverrides: s.attributeOverrides,
-      datasetOverrides: s.datasetOverrides,
-      googleFonts: s.googleFonts,
-      fontFaces: s.fontFaces,
-      x: s.x,
-      y: s.y,
-      rotation: s.rotation,
-      scaleX: s.scaleX,
-      scaleY: s.scaleY,
-      width: s.width,
-      height: s.height,
-      display: s.display,
-      flexDirection: s.flexDirection,
-      justifyContent: s.justifyContent,
-      alignItems: s.alignItems,
-      gap: s.gap,
-      padding: s.padding,
-      overflow: s.overflow,
-      boxSizing: s.boxSizing,
-      backgroundColor: s.backgroundColor,
-      opacity: s.opacity,
-      borderRadius: s.borderRadius,
-      borderWidth: s.borderWidth,
-      borderStyle: s.borderStyle,
-      borderColor: s.borderColor,
-      color: s.color,
-      fontFamily: s.fontFamily,
-      fontSize: s.fontSize,
-      fontWeight: s.fontWeight,
-      lineHeight: s.lineHeight,
-      letterSpacing: s.letterSpacing,
-      textAlign: s.textAlign,
-      shadowEnabled: s.shadowEnabled,
-      shadowVisible: s.shadowVisible,
-      shadowType: s.shadowType,
-      shadowX: s.shadowX,
-      shadowY: s.shadowY,
-      shadowBlur: s.shadowBlur,
-      shadowSpread: s.shadowSpread,
-      shadowColor: s.shadowColor,
-      blurEnabled: s.blurEnabled,
-      blurVisible: s.blurVisible,
-      blurType: s.blurType,
-      blur: s.blur,
-    })
-
-    try {
-      webview.executeJavaScript(`
-        (function() {
-          const map = window.__layersElements;
-          if (!map || !(map instanceof Map)) return { success: false, error: 'No element map' };
-          const el = map.get(${elementNumber});
-          if (!el) return { success: false, error: 'Element not found' };
-          const s = ${payload};
-
-          if (typeof s.className === 'string') {
-            el.className = s.className;
-          }
-
-          // Apply attribute/dataset overrides from the Properties section
-          const nextAttrs = (s.attributeOverrides && typeof s.attributeOverrides === 'object') ? s.attributeOverrides : {};
-          const prevAttrKeys = Array.isArray(el.__clusoAttrOverrideKeys) ? el.__clusoAttrOverrideKeys : [];
-          for (const k of prevAttrKeys) {
-            if (!(k in nextAttrs)) {
-              try { el.removeAttribute(k); } catch (e) {}
-            }
-          }
-          const appliedAttrKeys = [];
-          for (const k in nextAttrs) {
-            if (!Object.prototype.hasOwnProperty.call(nextAttrs, k)) continue;
-            const v = String(nextAttrs[k] ?? '');
-            try {
-              if (v === '') el.removeAttribute(k);
-              else el.setAttribute(k, v);
-              appliedAttrKeys.push(k);
-            } catch (e) {}
-          }
-          el.__clusoAttrOverrideKeys = appliedAttrKeys;
-
-          const nextDataset = (s.datasetOverrides && typeof s.datasetOverrides === 'object') ? s.datasetOverrides : {};
-          const prevDataKeys = Array.isArray(el.__clusoDataOverrideKeys) ? el.__clusoDataOverrideKeys : [];
-          for (const k of prevDataKeys) {
-            if (!(k in nextDataset)) {
-              try { delete el.dataset[k]; } catch (e) {}
-            }
-          }
-          const appliedDataKeys = [];
-          for (const k in nextDataset) {
-            if (!Object.prototype.hasOwnProperty.call(nextDataset, k)) continue;
-            const v = String(nextDataset[k] ?? '');
-            try {
-              if (v === '') delete el.dataset[k];
-              else el.dataset[k] = v;
-              appliedDataKeys.push(k);
-            } catch (e) {}
-          }
-          el.__clusoDataOverrideKeys = appliedDataKeys;
-
-          // Ensure Google fonts are loaded (document-scoped)
-          try {
-            const families = Array.isArray(s.googleFonts) ? s.googleFonts : [];
-            for (const fam of families) {
-              const family = String(fam || '').trim();
-              if (!family) continue;
-              const slug = family.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-              const id = 'cluso-google-font-' + slug;
-              if (!document.getElementById(id)) {
-                const link = document.createElement('link');
-                link.id = id;
-                link.rel = 'stylesheet';
-                const familyParam = encodeURIComponent(family).replace(/%20/g, '+');
-                link.href = 'https://fonts.googleapis.com/css2?family=' + familyParam + ':wght@100;200;300;400;500;600;700;800;900&display=swap';
-                document.head.appendChild(link);
-              }
-            }
-          } catch (e) {}
-
-          // Ensure @font-face rules exist for project/local fonts (document-scoped)
-          try {
-            const faces = Array.isArray(s.fontFaces) ? s.fontFaces : [];
-            let styleEl = document.getElementById('cluso-font-faces');
-            if (!styleEl) {
-              styleEl = document.createElement('style');
-              styleEl.id = 'cluso-font-faces';
-              document.head.appendChild(styleEl);
-            }
-            const seen = new Set();
-            const rules = [];
-            for (const face of faces) {
-              if (!face) continue;
-              const family = String(face.family || '').trim();
-              const srcUrl = String(face.srcUrl || '').trim();
-              if (!family || !srcUrl) continue;
-              const key = family + '|' + srcUrl;
-              if (seen.has(key)) continue;
-              seen.add(key);
-              const fmt = String(face.format || '').trim();
-              const fmtPart = fmt ? (' format(\\'' + fmt.replace(/'/g, '') + '\\')') : '';
-              rules.push(\"@font-face{font-family:'\" + family.replace(/'/g, \"\\\\'\") + \"';src:url('\" + srcUrl.replace(/'/g, \"\\\\'\") + \"')\" + fmtPart + \";font-display:swap;}\");
-            }
-            styleEl.textContent = rules.join('\\n');
-          } catch (e) {}
-
-          el.style.width = s.width + 'px';
-          el.style.height = s.height + 'px';
-          el.style.transform = 'translate(' + s.x + 'px, ' + s.y + 'px) rotate(' + s.rotation + 'deg) scale(' + (s.scaleX || 1) + ',' + (s.scaleY || 1) + ')';
-
-          el.style.display = s.display;
-          if (s.display === 'flex') {
-            el.style.flexDirection = s.flexDirection;
-            el.style.justifyContent = s.justifyContent;
-            el.style.alignItems = s.alignItems;
-          }
-
-          el.style.gap = s.gap + 'px';
-          el.style.padding = s.padding + 'px';
-
-          el.style.overflow = s.overflow;
-          el.style.boxSizing = s.boxSizing;
-
-          el.style.backgroundColor = s.backgroundColor;
-          el.style.opacity = String((s.opacity || 0) / 100);
-          el.style.borderRadius = s.borderRadius + 'px';
-
-          el.style.borderWidth = (s.borderWidth || 0) + 'px';
-          el.style.borderStyle = s.borderStyle || (s.borderWidth ? 'solid' : 'none');
-          el.style.borderColor = s.borderColor || '';
-
-          el.style.color = s.color || '';
-          el.style.fontFamily = s.fontFamily || '';
-          el.style.fontSize = (s.fontSize || 0) ? (s.fontSize + 'px') : '';
-          el.style.fontWeight = s.fontWeight ? String(s.fontWeight) : '';
-          el.style.lineHeight = (s.lineHeight || 0) ? (s.lineHeight + 'px') : '';
-          el.style.letterSpacing = (s.letterSpacing || 0) ? (s.letterSpacing + 'px') : '';
-          el.style.textAlign = s.textAlign || '';
-
-          if (s.shadowEnabled && s.shadowVisible) {
-            const inset = (s.shadowType === 'inner') ? 'inset ' : '';
-            el.style.boxShadow = inset + (s.shadowX || 0) + 'px ' + (s.shadowY || 0) + 'px ' + (s.shadowBlur || 0) + 'px ' + (s.shadowSpread || 0) + 'px ' + (s.shadowColor || 'rgba(0,0,0,0.25)');
-          } else {
-            el.style.boxShadow = 'none';
-          }
-
-          if (s.blurEnabled && s.blurVisible && (s.blur || 0) > 0) {
-            if (s.blurType === 'backdrop') {
-              el.style.backdropFilter = 'blur(' + s.blur + 'px)';
-              el.style.filter = '';
-            } else {
-              el.style.filter = 'blur(' + s.blur + 'px)';
-              el.style.backdropFilter = '';
-            }
-          } else {
-            el.style.filter = '';
-            el.style.backdropFilter = '';
-          }
-
-          // Apply custom CSS overrides (e.g., from the CSS inspector tab)
-          const nextOverrides = (s.cssOverrides && typeof s.cssOverrides === 'object') ? s.cssOverrides : {};
-          const prevKeys = Array.isArray(el.__clusoCssOverrideKeys) ? el.__clusoCssOverrideKeys : [];
-          for (const k of prevKeys) {
-            if (!(k in nextOverrides)) {
-              el.style.removeProperty(k);
-            }
-          }
-          const appliedKeys = [];
-          for (const k in nextOverrides) {
-            if (!Object.prototype.hasOwnProperty.call(nextOverrides, k)) continue;
-            const v = String(nextOverrides[k] ?? '').trim();
-            if (!v) {
-              el.style.removeProperty(k);
-              continue;
-            }
-            el.style.setProperty(k, v);
-            appliedKeys.push(k);
-          }
-          el.__clusoCssOverrideKeys = appliedKeys;
-
-          return { success: true };
-        })()
-      `);
-    } catch (e) {
-      console.warn('[Properties] Failed to apply styles:', e)
-    }
-  }, [])
-
-  const queueApplyElementStyles = useCallback(() => {
-    if (applyElementStylesTimerRef.current) {
-      window.clearTimeout(applyElementStylesTimerRef.current)
-    }
-    applyElementStylesTimerRef.current = window.setTimeout(flushApplyElementStyles, 120)
-  }, [flushApplyElementStyles])
-
-  useEffect(() => {
-    return () => {
-      if (applyElementStylesTimerRef.current) {
-        window.clearTimeout(applyElementStylesTimerRef.current)
-        applyElementStylesTimerRef.current = null
-      }
-    }
-  }, [])
-
-  const handleElementStyleChange = useCallback((key: keyof ElementStyles, value: ElementStyles[keyof ElementStyles]) => {
-    setElementStyles(prev => {
-      const next = { ...prev, [key]: value } as ElementStyles
-      elementStylesRef.current = next
-      return next
-    })
-    queueApplyElementStyles()
-  }, [queueApplyElementStyles])
-
-  // Left panel resize handlers
-  const handleLeftResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsLeftResizing(true);
-    const startX = e.clientX;
-    const startWidth = leftPanelWidth;
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const deltaX = moveEvent.clientX - startX;
-      const newWidth = Math.max(200, Math.min(400, startWidth + deltaX));
-      setLeftPanelWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      setIsLeftResizing(false);
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  }, [leftPanelWidth]);
-
   // Mark Layers tree stale on navigation changes; refresh is user/event-driven only.
   useEffect(() => {
     if (activeTab.url) layersTreeStaleRef.current = true
   }, [activeTab.url])
 
-  // No auto-refresh on open; Layers refresh is selection/manual driven.
-
-  // Handle get_page_elements tool - scans page for interactive elements
-  // Supports hierarchical focusing: if an element is focused, only shows children of that element
-  // showBadges: when false, doesn't create visual number badges (used for background context priming)
-  const handleGetPageElements = useCallback(async (category?: string, showBadges: boolean = true): Promise<string> => {
-    console.log('[AI] Getting page elements, category:', category, 'showBadges:', showBadges);
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview || !isWebviewReady) {
-      return 'Error: Webview not ready';
-    }
-
-    // Build selector based on category - this selector is used for BOTH counting AND numbering
-    const categorySelectors: Record<string, string> = {
-      'buttons': 'button, [role="button"], [data-slot="button"], input[type="button"], input[type="submit"]',
-      'links': 'a[href], [role="link"]',
-      'inputs': 'input, textarea, select, [role="textbox"], [contenteditable="true"]',
-      'images': 'img, [role="img"], svg',
-      'headings': 'h1, h2, h3, h4, h5, h6, [role="heading"]',
-      'all': 'button, [role="button"], a[href], input, textarea, select, img, h1, h2, h3, h4, h5, h6'
-    };
-
-    const selector = categorySelectors[category || 'all'] || categorySelectors['all'];
-
-    const scanCode = `
-      (function() {
-        const category = '${category || 'all'}';
-        const selector = '${selector}';
-        const showBadges = ${showBadges};
-        const results = {};
-
-        // Clear existing number badges
-        document.querySelectorAll('.element-number-badge').forEach(b => b.remove());
-
-        // Check if we have a focused element (scoped search)
-        const focusScope = window.__focusedElement;
-        const searchRoot = focusScope || document;
-
-        // Helper to get element summary
-        function summarize(el, number) {
-          const text = el.innerText?.substring(0, 50) || '';
-          const id = el.id ? '#' + el.id : '';
-          const classes = el.className ? '.' + String(el.className).split(' ').filter(c => c && !c.includes('inspector') && !c.includes('cluso')).slice(0, 2).join('.') : '';
-          const href = el.getAttribute('href') || '';
-          const ariaLabel = el.getAttribute('aria-label') || '';
-          return { number, tag: el.tagName.toLowerCase(), id, classes, text: text.trim(), href, ariaLabel };
-        }
-
-        // Create number badge
-        function createBadge(number) {
-          const badge = document.createElement('div');
-          badge.className = 'element-number-badge';
-          badge.setAttribute('data-cluso-ui', '1');
-          badge.setAttribute('aria-hidden', 'true');
-          badge.textContent = number;
-          badge.style.cssText = 'position:absolute;top:-8px;left:-8px;width:20px;height:20px;background:#3b82f6;color:white;border-radius:50%;font-size:11px;font-weight:bold;display:flex;align-items:center;justify-content:center;z-index:999999;pointer-events:none;box-shadow:0 1px 3px rgba(0,0,0,0.3);';
-          return badge;
-        }
-
-        // Find elements - scoped to focused element if exists
-        const elements = searchRoot.querySelectorAll(selector);
-        const numberedElements = [];
-
-        // Collect element info (and optionally add badges)
-        elements.forEach((el, idx) => {
-          // Skip if element is hidden
-          const style = window.getComputedStyle(el);
-          if (style.display === 'none' || style.visibility === 'hidden') return;
-
-          const num = numberedElements.length + 1;
-
-          // Only create badges if showBadges is true
-          if (showBadges) {
-            const badge = createBadge(num);
-            const rect = el.getBoundingClientRect();
-            badge.style.top = (rect.top + window.scrollY - 8) + 'px';
-            badge.style.left = (rect.left + window.scrollX - 8) + 'px';
-            document.body.appendChild(badge);
-          }
-          numberedElements.push({ ...summarize(el, num), element: el });
-        });
-
-        // Store elements for highlight_element_by_number to use
-        window.__numberedElements = numberedElements.map(e => e.element);
-
-        results.totalElements = numberedElements.length;
-        results.category = category;
-        results.elements = numberedElements.slice(0, 20).map(({ element, ...rest }) => rest); // Return first 20 for AI context
-        results.focusScope = focusScope ? {
-          tag: focusScope.tagName.toLowerCase(),
-          text: (focusScope.innerText || '').substring(0, 30),
-          hint: 'Showing elements WITHIN focused scope. Say "clear focus" to see all elements.'
-        } : null;
-        results.note = numberedElements.length > 0
-          ? 'Elements numbered on page. Use highlight_element_by_number(N) to highlight or set focus.'
-          : 'No elements found' + (focusScope ? ' within focused area.' : '.');
-
-        return JSON.stringify(results, null, 2);
-      })()
-    `;
-
-    try {
-      const result = await webview.executeJavaScript(scanCode) as string;
-      console.log('[AI] Page elements result:', result);
-      return result;
-    } catch (err) {
-      console.error('[AI] Failed to scan page elements:', err);
-      return 'Error scanning page: ' + (err as Error).message;
-    }
-  }, [isWebviewReady, activeTabId]);
 
   // Selector Agent - persistent claude-agent-sdk session for fast element selection
   const {
@@ -3874,615 +1467,107 @@ export default function App() {
     }, []),
   });
 
-  // Initialize selector agent when Electron is available
+  // Initialize selector agent when Electron is available - extracted to useSelectorAgentInit hook
+  useSelectorAgentInit({
+    isElectron: !!isElectron,
+    selectorAgentActive,
+    selectedModelRef,
+    initializeSelectorAgent,
+  });
+
+  // Tool execution handlers - extracted to useToolExecution hook
+  const {
+    handlePatchSourceFile,
+    handleListFiles,
+    handleReadFile,
+    handleClickElement,
+    handleNavigate,
+    handleScroll,
+    primeAgentWithPageContext,
+  } = useToolExecution({
+    webviewRefs: webviewRefs as unknown as React.RefObject<Map<string, {
+      getURL: () => string
+      canGoBack: () => boolean
+      canGoForward: () => boolean
+      send: (channel: string, ...args: unknown[]) => void
+      executeJavaScript: (code: string) => Promise<unknown>
+      contentWindow?: Window
+      loadURL: (url: string) => void
+      goBack: () => void
+      goForward: () => void
+      reload: () => void
+    }>>,
+    activeTabId,
+    isWebviewReady,
+    setMessages,
+    selectorAgentActive,
+    handleGetPageElements,
+    primeSelectorContext,
+  });
+
+  // Auto-prime selector agent when page loads - extracted to useSelectorAgentPriming hook
+  useSelectorAgentPriming({
+    selectorAgentActive,
+    isWebviewReady,
+    selectorAgentPrimed,
+    primeAgentWithPageContext,
+  });
+
+  // File handlers - extracted to useFileHandlers hook
+  const {
+    handleFileTreeSelect,
+    handleReadFile: handleReadFileFromHandler,
+    showFileBrowser,
+    openFileBrowserItem,
+    fileBrowserBack,
+    closeFileBrowser,
+    openFolder,
+    openFile,
+    handleListFilesWithOverlay,
+    loadDirectoryFiles,
+    navigateToDirectory,
+    navigateBack,
+    handleFileSelect,
+    formatFileDisplay,
+    addEditedFile,
+    undoFileEdit,
+    undoAllEdits,
+    keepAllEdits,
+  } = useFileHandlers({
+    isElectron,
+    activeTabProjectPath: activeTab?.projectPath,
+    activeTabId,
+    setEditorFilePath,
+    setEditorFileContent,
+    setHasUnsavedEdits,
+    setIsEditorMode,
+    fileBrowserBasePath,
+    setFileBrowserBasePath,
+    fileBrowserStackRef,
+    fileBrowserVisibleRef,
+    setFileBrowserStack,
+    setFileBrowserVisible,
+    directoryStack,
+    setDirectoryStack,
+    currentDirectory,
+    setDirectoryFiles,
+    setCurrentDirectory,
+    setFileSearchQuery,
+    setAutocompleteIndex,
+    setShowFileAutocomplete,
+    selectedFiles,
+    setSelectedFiles,
+    setInput,
+    editedFiles,
+    setEditedFiles,
+    setIsEditedFilesDrawerOpen,
+    webviewRefs: webviewRefs as unknown as React.MutableRefObject<Map<string, Electron.WebviewTag>>,
+  });
+
+  // Populate addEditedFile ref for webview setup
   useEffect(() => {
-    if (isElectron && !selectorAgentActive) {
-      const preferredModelId = selectedModelRef.current?.id;
-      initializeSelectorAgent({ modelId: preferredModelId }).then(success => {
-        if (success) {
-          console.log('[SelectorAgent] Initialized successfully', preferredModelId ? `with model ${preferredModelId}` : '');
-          return;
-        }
-        // Retry with default model if custom selection failed
-        if (preferredModelId) {
-          console.warn('[SelectorAgent] Init failed with model', preferredModelId, '- retrying default');
-          initializeSelectorAgent().then(retrySuccess => {
-            if (retrySuccess) {
-              console.log('[SelectorAgent] Initialized successfully with default model');
-            }
-          });
-        }
-      });
-    }
-  }, [isElectron, selectorAgentActive, initializeSelectorAgent]);
-
-  // Prime selector agent with page context when page elements are fetched
-  const primeAgentWithPageContext = useCallback(async () => {
-    if (!selectorAgentActive) return;
-
-    // Pass false for showBadges - we just need the data, not visual badges
-    const pageElements = await handleGetPageElements('all', false);
-    if (pageElements && !pageElements.startsWith('Error')) {
-      const webview = webviewRefs.current.get(activeTabId);
-      const pageUrl = webview ? await webview.executeJavaScript('window.location.href').catch(() => '') as string : '';
-      const pageTitle = webview ? await webview.executeJavaScript('document.title').catch(() => '') as string : '';
-
-      await primeSelectorContext({
-        pageElements,
-        pageUrl,
-        pageTitle,
-      });
-      console.log('[SelectorAgent] Context primed');
-    }
-  }, [selectorAgentActive, handleGetPageElements, primeSelectorContext, activeTabId]);
-
-  // Auto-prime selector agent when page loads
-  useEffect(() => {
-    if (selectorAgentActive && isWebviewReady && !selectorAgentPrimed) {
-      // Debounce priming slightly to ensure page is stable
-      const timer = setTimeout(() => {
-        primeAgentWithPageContext();
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [selectorAgentActive, isWebviewReady, selectorAgentPrimed, primeAgentWithPageContext]);
-
-  // Handle patch_source_file tool - writes changes to actual source files
-  const handlePatchSourceFile = useCallback(async (
-    filePath: string,
-    searchCode: string,
-    replaceCode: string,
-    description: string
-  ): Promise<{ success: boolean; error?: string }> => {
-    console.log('[AI] Patching source file:', filePath, description);
-
-    const patchResult = await fileService.patchFileBySearch({
-      filePath,
-      searchCode,
-      replaceCode,
-      description,
-    });
-
-    if (!patchResult.success) {
-      return { success: false, error: patchResult.error || `Failed to patch file: ${filePath}` };
-    }
-
-    setMessages(prev => [...prev, {
-      id: Date.now().toString(),
-      role: 'system',
-      content: `✓ Patched ${filePath}: ${description}`,
-      timestamp: new Date()
-    }]);
-
-    return { success: true };
-  }, []);
-
-  // Handle list_files tool - list files in a directory
-  const handleListFiles = useCallback(async (path?: string): Promise<string> => {
-    console.log('[AI] Listing files:', path);
-    try {
-      const result = await fileService.listDirectory(path);
-      if (result.success && result.data) {
-        const formatted = result.data.map(f =>
-          `${f.isDirectory ? '📁' : '📄'} ${f.name}${f.isDirectory ? '/' : ''}`
-        ).join('\n');
-        return formatted || 'Empty directory';
-      }
-      return 'Error: ' + (result.error || 'Could not list directory');
-    } catch (err) {
-      return 'Error: ' + (err as Error).message;
-    }
-  }, []);
-
-  // Handle read_file tool - read a file's contents
-  const handleReadFile = useCallback(async (filePath: string): Promise<string> => {
-    console.log('[AI] Reading file:', filePath);
-    try {
-      const result = await fileService.readFile(filePath, { truncateAt: 10000 });
-      if (result.success && result.data) return result.data;
-      return 'Error: ' + (result.error || 'Could not read file');
-    } catch (err) {
-      return 'Error: ' + (err as Error).message;
-    }
-  }, []);
-
-  // Handle click_element tool - click on an element
-  const handleClickElement = useCallback(async (selector: string): Promise<{ success: boolean; error?: string }> => {
-    console.log('[AI] Clicking element:', selector);
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview || !isWebviewReady) {
-      return { success: false, error: 'Webview not ready' };
-    }
-    try {
-      const code = `
-        (function() {
-          const el = document.querySelector('${selector.replace(/'/g, "\\'")}');
-          if (el) {
-            el.click();
-            return { success: true };
-          }
-          return { success: false, error: 'Element not found' };
-        })()
-      `;
-      const result = await webview.executeJavaScript(code) as { success: boolean; error?: string };
-      return result;
-    } catch (err) {
-      return { success: false, error: (err as Error).message };
-    }
-  }, [isWebviewReady, activeTabId]);
-
-  // Handle navigate tool - browser navigation
-  const handleNavigate = useCallback(async (action: string, url?: string): Promise<{ success: boolean; error?: string }> => {
-    console.log('[AI] Navigating:', action, url);
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview) {
-      return { success: false, error: 'Webview not available' };
-    }
-    try {
-      switch (action) {
-        case 'back':
-          webview.goBack();
-          break;
-        case 'forward':
-          webview.goForward();
-          break;
-        case 'reload':
-          webview.reload();
-          break;
-        case 'goto':
-          if (url) {
-            webview.loadURL(url);
-          } else {
-            return { success: false, error: 'URL required for goto action' };
-          }
-          break;
-        default:
-          return { success: false, error: `Unknown action: ${action}` };
-      }
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: (err as Error).message };
-    }
-  }, [activeTabId]);
-
-  // Handle scroll tool - scroll the page
-  const handleScroll = useCallback(async (target: string): Promise<{ success: boolean; error?: string }> => {
-    console.log('[AI] Scrolling to:', target);
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!webview || !isWebviewReady) {
-      return { success: false, error: 'Webview not ready' };
-    }
-    try {
-      let code: string;
-      if (target === 'top') {
-        code = `window.scrollTo({ top: 0, behavior: 'smooth' }); true;`;
-      } else if (target === 'bottom') {
-        code = `window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); true;`;
-      } else {
-        // Assume it's a selector
-        code = `
-          (function() {
-            const el = document.querySelector('${target.replace(/'/g, "\\'")}');
-            if (el) {
-              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              return true;
-            }
-            return false;
-          })()
-        `;
-      }
-      const result = await webview.executeJavaScript(code);
-      return { success: !!result };
-    } catch (err) {
-      return { success: false, error: (err as Error).message };
-    }
-  }, [isWebviewReady, activeTabId]);
-
-  // File Browser Overlay Functions
-  const showFileBrowser = useCallback(async (path?: string): Promise<string> => {
-    console.log('[FileBrowser] Opening:', path);
-    if (!isElectron) {
-      return 'Error: File browser only available in Electron mode';
-    }
-    try {
-      const targetPath = path || fileBrowserBasePath || '.';
-      const result = await fileService.listDirectory(targetPath);
-      if (result.success && result.data) {
-        const items: FileBrowserItem[] = result.data.map(f => ({
-          name: f.name,
-          isDirectory: f.isDirectory,
-          path: `${targetPath}/${f.name}`.replace(/\/\//g, '/')
-        }));
-
-        // Set base path if not set
-        if (!fileBrowserBasePath) {
-          setFileBrowserBasePath(targetPath);
-        }
-
-        const panel: FileBrowserPanel = {
-          type: 'directory',
-          path: targetPath,
-          title: targetPath.split('/').pop() || targetPath,
-          items
-        };
-
-        // Update refs immediately (before React re-renders) so subsequent tool calls see the update
-        fileBrowserStackRef.current = [panel];
-        fileBrowserVisibleRef.current = true;
-
-        setFileBrowserStack([panel]);
-        setFileBrowserVisible(true);
-
-        console.log('[FileBrowser] Opened - refs updated:', fileBrowserVisibleRef.current, fileBrowserStackRef.current.length);
-        return `Showing ${items.length} items. Say "open" followed by a number to open an item.`;
-      }
-      return 'Error: Could not list directory';
-    } catch (err) {
-      return 'Error: ' + (err as Error).message;
-    }
-  }, [isElectron, fileBrowserBasePath]);
-
-  const openFileBrowserItem = useCallback(async (itemNumber: number): Promise<string> => {
-    console.log('[FileBrowser] Opening item:', itemNumber);
-    console.log('[FileBrowser] State check - visible:', fileBrowserVisibleRef.current, 'stack length:', fileBrowserStackRef.current.length);
-
-    // Use refs to get the latest state (avoids stale closure in Gemini session)
-    const currentStack = fileBrowserStackRef.current;
-    const isVisible = fileBrowserVisibleRef.current;
-
-    if (!isVisible || currentStack.length === 0) {
-      return `Error: No file browser open. (visible: ${isVisible}, stack: ${currentStack.length})`;
-    }
-
-    const currentPanel = currentStack[currentStack.length - 1];
-    if (currentPanel.type !== 'directory' || !currentPanel.items) {
-      return 'Error: Current panel is not a directory';
-    }
-
-    const index = itemNumber - 1;
-    if (index < 0 || index >= currentPanel.items.length) {
-      return `Error: Invalid item number. Choose 1-${currentPanel.items.length}`;
-    }
-
-    const item = currentPanel.items[index];
-
-    if (item.isDirectory) {
-      // Open directory
-      const result = await fileService.listDirectory(item.path);
-      if (result.success && result.data) {
-        const items: FileBrowserItem[] = result.data.map(f => ({
-          name: f.name,
-          isDirectory: f.isDirectory,
-          path: `${item.path}/${f.name}`.replace(/\/\//g, '/')
-        }));
-
-        const panel: FileBrowserPanel = {
-          type: 'directory',
-          path: item.path,
-          title: item.name,
-          items
-        };
-
-        // Update ref immediately
-        fileBrowserStackRef.current = [...currentStack, panel];
-        setFileBrowserStack(prev => [...prev, panel]);
-        return `Opened folder "${item.name}" with ${items.length} items.`;
-      }
-      return 'Error: Could not open folder';
-    } else {
-      // Open file
-      const ext = item.name.split('.').pop()?.toLowerCase();
-      const isImage = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext || '');
-
-      if (isImage) {
-        const panel: FileBrowserPanel = {
-          type: 'image',
-          path: item.path,
-          title: item.name
-        };
-        // Update ref immediately
-        fileBrowserStackRef.current = [...currentStack, panel];
-        setFileBrowserStack(prev => [...prev, panel]);
-        return `Showing image "${item.name}"`;
-      } else {
-        // Read file content
-        const result = await fileService.readFile(item.path, { truncateAt: 50000 });
-        if (result.success && result.data) {
-          const panel: FileBrowserPanel = {
-            type: 'file',
-            path: item.path,
-            title: item.name,
-            content: result.data
-          };
-          // Update ref immediately
-          fileBrowserStackRef.current = [...currentStack, panel];
-          setFileBrowserStack(prev => [...prev, panel]);
-          return `Opened file "${item.name}"`;
-        }
-        return 'Error: ' + (result.error || 'Could not read file');
-      }
-    }
-  }, [isElectron]); // Uses refs for state, so no dependency on fileBrowserVisible/fileBrowserStack
-
-  const fileBrowserBack = useCallback((): string => {
-    // Use refs to get the latest state (avoids stale closure in Gemini session)
-    const isVisible = fileBrowserVisibleRef.current;
-    const currentStack = fileBrowserStackRef.current;
-
-    if (!isVisible) {
-      return 'No file browser open';
-    }
-    if (currentStack.length <= 1) {
-      // Update refs immediately
-      fileBrowserVisibleRef.current = false;
-      fileBrowserStackRef.current = [];
-      setFileBrowserVisible(false);
-      setFileBrowserStack([]);
-      return 'Closed file browser';
-    }
-    // Update ref immediately
-    fileBrowserStackRef.current = currentStack.slice(0, -1);
-    setFileBrowserStack(prev => prev.slice(0, -1));
-    const prevPanel = currentStack[currentStack.length - 2];
-    return `Back to "${prevPanel?.title || 'root'}"`;
-  }, []); // Uses refs for state
-
-  const closeFileBrowser = useCallback((): string => {
-    // Update refs immediately
-    fileBrowserVisibleRef.current = false;
-    fileBrowserStackRef.current = [];
-    setFileBrowserVisible(false);
-    setFileBrowserStack([]);
-    return 'Closed file browser';
-  }, []);
-
-  // Open folder by name or number
-  const openFolder = useCallback(async (name?: string, itemNumber?: number): Promise<string> => {
-    console.log('[FileBrowser] Opening folder:', name || `#${itemNumber}`);
-    console.log('[FileBrowser] State check - visible:', fileBrowserVisibleRef.current, 'stack length:', fileBrowserStackRef.current.length);
-
-    // Use refs to get the latest state (avoids stale closure in Gemini session)
-    const currentStack = fileBrowserStackRef.current;
-    const isVisible = fileBrowserVisibleRef.current;
-
-    if (!isVisible || currentStack.length === 0) {
-      return `Error: No file browser open. Use list_files first to show the file browser. (visible: ${isVisible}, stack: ${currentStack.length})`;
-    }
-
-    const currentPanel = currentStack[currentStack.length - 1];
-    if (currentPanel.type !== 'directory' || !currentPanel.items) {
-      return 'Error: Current panel is not a directory';
-    }
-
-    let targetItem: FileBrowserItem | undefined;
-    let foundIndex: number = -1;
-
-    // Find by name
-    if (name) {
-      const lowerName = name.toLowerCase();
-      foundIndex = currentPanel.items.findIndex(item =>
-        item.isDirectory && item.name.toLowerCase() === lowerName
-      );
-      if (foundIndex === -1) {
-        // Try partial match
-        foundIndex = currentPanel.items.findIndex(item =>
-          item.isDirectory && item.name.toLowerCase().includes(lowerName)
-        );
-      }
-      if (foundIndex !== -1) {
-        targetItem = currentPanel.items[foundIndex];
-      } else {
-        const folders = currentPanel.items.filter(i => i.isDirectory).map(i => i.name).join(', ');
-        return `Error: No folder named "${name}" found. Available folders: ${folders || 'none'}`;
-      }
-    }
-    // Find by number
-    else if (itemNumber !== undefined) {
-      const index = itemNumber - 1;
-      if (index < 0 || index >= currentPanel.items.length) {
-        return `Error: Invalid item number. Choose 1-${currentPanel.items.length}`;
-      }
-      const item = currentPanel.items[index];
-      if (!item.isDirectory) {
-        return `Error: Item ${itemNumber} "${item.name}" is a file, not a folder. Use open_item for files.`;
-      }
-      targetItem = item;
-      foundIndex = index;
-    }
-    else {
-      return 'Error: Please provide either a folder name or item number';
-    }
-
-    // Open the folder
-    if (!targetItem) {
-      return 'Error: Could not find folder';
-    }
-
-    if (!isElectron) {
-      return 'Error: File browser only available in Electron mode';
-    }
-
-    const result = await fileService.listDirectory(targetItem.path);
-    if (result.success && result.data) {
-      const items: FileBrowserItem[] = result.data.map(f => ({
-        name: f.name,
-        isDirectory: f.isDirectory,
-        path: `${targetItem.path}/${f.name}`.replace(/\/\//g, '/')
-      }));
-
-      const panel: FileBrowserPanel = {
-        type: 'directory',
-        path: targetItem.path,
-        title: targetItem.name,
-        items
-      };
-
-      // Update ref immediately
-      fileBrowserStackRef.current = [...currentStack, panel];
-      setFileBrowserStack(prev => [...prev, panel]);
-      return `Opened folder "${targetItem.name}" (item ${foundIndex + 1}) with ${items.length} items: ${items.slice(0, 5).map((i, idx) => `${idx + 1}. ${i.name}${i.isDirectory ? '/' : ''}`).join(', ')}${items.length > 5 ? '...' : ''}`;
-    }
-    return 'Error: Could not open folder';
-  }, [isElectron]); // Uses refs for state, so no dependency on fileBrowserVisible/fileBrowserStack
-
-  // Open file by name or path
-  const openFile = useCallback(async (name?: string, path?: string): Promise<string> => {
-    console.log('[FileBrowser] Opening file:', name || path);
-
-    if (!isElectron) {
-      return 'Error: File browser only available in Electron mode';
-    }
-
-    // If path is provided, use it directly
-    if (path) {
-      const result = await fileService.readFile(path, { truncateAt: 50000 });
-      if (result.success && result.data) {
-        const fileName = path.split('/').pop() || path;
-        const ext = fileName.split('.').pop()?.toLowerCase();
-        const isImage = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext || '');
-
-        if (isImage) {
-          const panel: FileBrowserPanel = {
-            type: 'image',
-            path: path,
-            title: fileName
-          };
-          fileBrowserStackRef.current = [panel];
-          fileBrowserVisibleRef.current = true;
-          setFileBrowserStack([panel]);
-          setFileBrowserVisible(true);
-          return `Showing image "${fileName}"`;
-        } else {
-          const panel: FileBrowserPanel = {
-            type: 'file',
-            path: path,
-            title: fileName,
-            content: result.data
-          };
-          fileBrowserStackRef.current = [panel];
-          fileBrowserVisibleRef.current = true;
-          setFileBrowserStack([panel]);
-          setFileBrowserVisible(true);
-          return `Opened file "${fileName}"`;
-        }
-      }
-      return `Error: ${result.error || `Could not read file at ${path}`}`;
-    }
-
-    // Search by name
-    if (!name) {
-      return 'Error: Please provide either a file name or path';
-    }
-
-    // First check the current file browser directory
-    const currentStack = fileBrowserStackRef.current;
-    let searchPath = fileBrowserBasePath || '.';
-
-    if (currentStack.length > 0 && currentStack[currentStack.length - 1].type === 'directory') {
-      searchPath = currentStack[currentStack.length - 1].path;
-    }
-
-    // List directory and search for file
-    const result = await fileService.listDirectory(searchPath);
-    if (result.success && result.data) {
-      const lowerName = name.toLowerCase();
-      // Find exact match first
-      let found = result.data.find(f => !f.isDirectory && f.name.toLowerCase() === lowerName);
-      // Then try partial match
-      if (!found) {
-        found = result.data.find(f => !f.isDirectory && f.name.toLowerCase().includes(lowerName));
-      }
-
-      if (found) {
-        const filePath = `${searchPath}/${found.name}`.replace(/\/\//g, '/');
-        const fileResult = await fileService.readFile(filePath, { truncateAt: 50000 });
-
-        if (fileResult.success && fileResult.data) {
-          const ext = found.name.split('.').pop()?.toLowerCase();
-          const isImage = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext || '');
-
-          // If browser not visible, show it first with the directory
-          if (!fileBrowserVisibleRef.current) {
-            const dirItems: FileBrowserItem[] = result.data.map(f => ({
-              name: f.name,
-              isDirectory: f.isDirectory,
-              path: `${searchPath}/${f.name}`.replace(/\/\//g, '/')
-            }));
-
-            const dirPanel: FileBrowserPanel = {
-              type: 'directory',
-              path: searchPath,
-              title: searchPath.split('/').pop() || searchPath,
-              items: dirItems
-            };
-
-            if (isImage) {
-              const filePanel: FileBrowserPanel = {
-                type: 'image',
-                path: filePath,
-                title: found.name
-              };
-              fileBrowserStackRef.current = [dirPanel, filePanel];
-              fileBrowserVisibleRef.current = true;
-              setFileBrowserStack([dirPanel, filePanel]);
-              setFileBrowserVisible(true);
-              return `Showing image "${found.name}"`;
-            } else {
-              const filePanel: FileBrowserPanel = {
-                type: 'file',
-                path: filePath,
-                title: found.name,
-                content: fileResult.data
-              };
-              fileBrowserStackRef.current = [dirPanel, filePanel];
-              fileBrowserVisibleRef.current = true;
-              setFileBrowserStack([dirPanel, filePanel]);
-              setFileBrowserVisible(true);
-              return `Opened file "${found.name}"`;
-            }
-          } else {
-            // Browser already visible, just add the file panel
-            if (isImage) {
-              const panel: FileBrowserPanel = {
-                type: 'image',
-                path: filePath,
-                title: found.name
-              };
-              fileBrowserStackRef.current = [...currentStack, panel];
-              setFileBrowserStack(prev => [...prev, panel]);
-              return `Showing image "${found.name}"`;
-            } else {
-              const content = fileResult.data.length > 50000
-                ? fileResult.data.substring(0, 50000) + '\n... (truncated)'
-                : fileResult.data;
-
-              const panel: FileBrowserPanel = {
-                type: 'file',
-                path: filePath,
-                title: found.name,
-                content
-              };
-              fileBrowserStackRef.current = [...currentStack, panel];
-              setFileBrowserStack(prev => [...prev, panel]);
-              return `Opened file "${found.name}"`;
-            }
-          }
-        }
-        return `Error: Could not read file "${found.name}"`;
-      }
-
-      // File not found in current directory
-      const files = result.data.filter(f => !f.isDirectory).map(f => f.name).slice(0, 10).join(', ');
-      return `Error: File "${name}" not found in ${searchPath}. Available files: ${files || 'none'}${result.data.filter(f => !f.isDirectory).length > 10 ? '...' : ''}`;
-    }
-
-    return 'Error: Could not search directory';
-  }, [isElectron, fileBrowserBasePath]);
-
-  // Update handleListFiles to show overlay
-  const handleListFilesWithOverlay = useCallback(async (path?: string): Promise<string> => {
-    return showFileBrowser(path);
-  }, [showFileBrowser]);
+    addEditedFileRef.current = addEditedFile;
+  }, [addEditedFile]);
 
   // Handle instant code updates from Gemini's update_ui tool
   // IMPORTANT: Only updates the selected element if one exists, not the entire page
@@ -4705,115 +1790,12 @@ export default function App() {
     }
   }, [pendingPreview, activeTabId])
 
-  // Load available prompts and directory files on mount
-  useEffect(() => {
-    if (!isElectron) return;
-    fileService.listPrompts().then(result => {
-      if (result.success && result.data) {
-        setAvailableCommands(result.data.map(name => ({ name, prompt: '' })));
-      }
-    });
-    fileService.listDirectory().then(result => {
-      if (result.success && result.data) {
-        console.log('[Files] Loaded directory:', result.data.length, 'files');
-        setDirectoryFiles(result.data);
-      }
-    });
-  }, [isElectron]);
-
-  // Load directory listing for @ command
-  const loadDirectoryFiles = useCallback(async (dirPath?: string) => {
-    if (!isElectron) return;
-    console.log('[@ Files] Loading directory:', dirPath || '(default)');
-    const result = await fileService.listDirectory(dirPath);
-    if (result.success && result.data) {
-      console.log('[@ Files] Loaded', result.data.length, 'files from:', dirPath || '(default)');
-      setDirectoryFiles(result.data);
-      if (dirPath) {
-        setCurrentDirectory(dirPath);
-      }
-    }
-  }, [isElectron]);
-
-  // Navigate into a subdirectory
-  const navigateToDirectory = useCallback((dirPath: string) => {
-    setDirectoryStack(prev => [...prev, currentDirectory]);
-    loadDirectoryFiles(dirPath);
-    setFileSearchQuery('');
-    setAutocompleteIndex(0);
-  }, [currentDirectory, loadDirectoryFiles]);
-
-  // Navigate back to parent directory - use project path as root
-  const navigateBack = useCallback(() => {
-    const newStack = [...directoryStack];
-    const parentDir = newStack.pop();
-    setDirectoryStack(newStack);
-    // If no parent in stack, go back to project root (or system root if no project)
-    loadDirectoryFiles(parentDir || activeTab.projectPath || undefined);
-    setFileSearchQuery('');
-    setAutocompleteIndex(0);
-  }, [directoryStack, loadDirectoryFiles, activeTab.projectPath]);
-
-  // Handle @ command - select a file from the list
-  const handleFileSelect = useCallback(async (filePath: string) => {
-    if (!isElectron) return;
-
-    const result = await fileService.selectFile(filePath);
-    if (result.success && result.data) {
-      const { path, content } = result.data;
-
-      // Parse line range from path if present: "file.tsx (1426-1431)" or "file.tsx?t=123 (1426-1431)"
-      let lineStart: number | undefined;
-      let lineEnd: number | undefined;
-      let elementType: string | undefined;
-
-      const lineMatch = path.match(/\((\d+)-(\d+)\)$/);
-      if (lineMatch) {
-        lineStart = parseInt(lineMatch[1], 10);
-        lineEnd = parseInt(lineMatch[2], 10);
-      } else {
-        // Try single line format: "(1426)"
-        const singleLineMatch = path.match(/\((\d+)\)$/);
-        if (singleLineMatch) {
-          lineStart = parseInt(singleLineMatch[1], 10);
-        }
-      }
-
-      // Try to detect element type from content (look for function/component names near start)
-      if (content && lineStart) {
-        const lines = content.split('\n');
-        const startLine = lines[0] || '';
-        // Look for common patterns: function X, const X, export function X, etc.
-        const funcMatch = startLine.match(/(?:function|const|export\s+(?:default\s+)?(?:function|const)?)\s+(\w+)/);
-        if (funcMatch) {
-          elementType = funcMatch[1];
-        }
-      }
-
-      setSelectedFiles(prev => [...prev, { path, content, lineStart, lineEnd, elementType }]);
-
-      // Replace the @query with the file reference in the input
-      // Find the last @ and replace from there to the end (or to the next space)
-      setInput(prevInput => {
-        const lastAtIndex = prevInput.lastIndexOf('@');
-        if (lastAtIndex === -1) return ''; // Fallback: clear input
-
-        // Get everything before the @
-        const beforeAt = prevInput.substring(0, lastAtIndex);
-
-        // Create a short display name for the file reference
-        const fileName = path.split('/').pop() || path;
-
-        // Return the text before @ + a reference marker (file is now in selectedFiles)
-        // Add a space after so user can continue typing
-        return `${beforeAt}[${fileName}] `;
-      });
-
-      setShowFileAutocomplete(false);
-      setFileSearchQuery('');
-      setAutocompleteIndex(0);
-    }
-  }, [isElectron]);
+  // Load available prompts and directory files on mount - extracted to useCommandsLoader hook
+  useCommandsLoader({
+    isElectron,
+    setAvailableCommands,
+    setDirectoryFiles,
+  })
 
   // Handle / command - execute prompt
   const handleCommandSelect = useCallback(async (commandName: string) => {
@@ -5085,40 +2067,21 @@ export default function App() {
     }
   }, [loadDirectoryFiles, processCodingMessage, activeTab.projectPath]);
 
-  // Auto-resize textarea
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (textarea) {
-      textarea.style.height = 'auto';
-      textarea.style.height = Math.min(textarea.scrollHeight, 144) + 'px';
-    }
-  }, [input]);
+  // Auto-resize textarea - extracted to useAutoTextareaResize hook
+  useAutoTextareaResize({
+    input,
+    textareaRef,
+  });
 
-  // Handle Screen Sharing logic
-  useEffect(() => {
-    if (streamState.isConnected && isScreenSharing) {
-        navigator.mediaDevices.getDisplayMedia({ video: true }).then(stream => {
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-                startVideoStreaming();
-            }
-            stream.getVideoTracks()[0].onended = () => {
-                setIsScreenSharing(false);
-                stopVideoStreaming();
-            };
-        }).catch(err => {
-            console.error("Failed to get display media", err);
-            setIsScreenSharing(false);
-        });
-    } else {
-        stopVideoStreaming();
-        if (videoRef.current && videoRef.current.srcObject) {
-            const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
-            tracks.forEach(t => t.stop());
-            videoRef.current.srcObject = null;
-        }
-    }
-  }, [isScreenSharing, streamState.isConnected, startVideoStreaming, stopVideoStreaming]);
+  // Handle Screen Sharing logic - extracted to useScreenSharing hook
+  useScreenSharing({
+    isScreenSharing,
+    setIsScreenSharing,
+    streamState,
+    videoRef,
+    startVideoStreaming,
+    stopVideoStreaming,
+  });
 
   // Track cleanup functions for webview event handlers per tab
   const webviewCleanups = useRef<Map<string, () => void>>(new Map());
@@ -5781,7 +2744,9 @@ export default function App() {
         }]);
       } else if (channel === 'inline-edit-accept') {
         // Handle inline text edit acceptance - INSTANT SAVE (no approval flow)
+        console.log('[Inline Edit] *** MESSAGE RECEIVED ***');
         const data = args[0] as { oldText: string; newText: string; element: SelectedElement };
+        console.log('[Inline Edit] Data:', { hasOldText: !!data.oldText, hasNewText: !!data.newText, hasElement: !!data.element });
 
         // Log all available source location data
         const msgSource = data.element?.sourceLocation;
@@ -5804,6 +2769,16 @@ export default function App() {
 
         const currentTab = tabsRef.current.find(t => t.id === tabId);
         const projectPath = currentTab?.projectPath;
+
+        console.log('[Inline Edit] Condition check:', {
+          hasElementWithSource: !!elementWithSource,
+          hasSourceLocation: !!elementWithSource?.sourceLocation,
+          projectPath: projectPath || 'NONE',
+          hasOldText: !!data.oldText,
+          hasNewText: !!data.newText,
+          tabId,
+          currentTabId: currentTab?.id
+        });
 
         // INSTANT SAVE: Direct find/replace in source file
         if (elementWithSource?.sourceLocation && projectPath && data.oldText && data.newText) {
@@ -6137,173 +3112,24 @@ export default function App() {
     };
   }, [updateTab, enqueueConsoleLog]);
 
-  // Ref callback for webview elements - sets up handlers when mounted
-  // Returns a STABLE callback for each tabId to prevent constant re-setup
-  const getWebviewRefCallback = useCallback((tabId: string) => {
-    // Return existing callback if we have one
-    let callback = webviewRefCallbacks.current.get(tabId);
-    if (callback) return callback;
-
-    // Create new stable callback for this tab
-    callback = (element: HTMLElement | null) => {
-      if (element) {
-        const webview = element as unknown as WebviewElement;
-        webviewRefs.current.set(tabId, webview);
-
-        // Small delay to ensure webview is fully mounted
-        setTimeout(() => {
-          // Clean up previous handlers if any
-          const prevCleanup = webviewCleanups.current.get(tabId);
-          if (prevCleanup) prevCleanup();
-
-          // Set up new handlers
-          const cleanup = setupWebviewHandlers(tabId, webview);
-          webviewCleanups.current.set(tabId, cleanup);
-        }, 100);
-      } else {
-        // Element unmounted - clean up
-        const cleanup = webviewCleanups.current.get(tabId);
-        if (cleanup) cleanup();
-        webviewCleanups.current.delete(tabId);
-        webviewRefs.current.delete(tabId);
-      }
-    };
-    webviewRefCallbacks.current.set(tabId, callback);
-    return callback;
-  }, [setupWebviewHandlers]);
 
   // Auto-scroll for console is handled in useConsolePanel hook
 
-  // Initialize ghostty terminal when terminal tab is selected
-  useEffect(() => {
-    if (consolePanelTab !== 'terminal' || !terminalContainerRef.current || terminalInstanceRef.current) return
-    if (!ptyPort) return // Wait for PTY port to be available
-
-    let mounted = true
-
-    async function initTerminal() {
-      try {
-        // Dynamic import ghostty-web
-        const ghostty = await import('ghostty-web')
-        await ghostty.init()
-
-        if (!mounted || !terminalContainerRef.current) return
-
-        const term = new ghostty.Terminal({
-          cols: 80,
-          rows: 12,
-          fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, monospace',
-          fontSize: 13,
-          theme: {
-            background: isDarkMode ? '#1e1e1e' : '#fafaf9',
-            foreground: isDarkMode ? '#d4d4d4' : '#292524',
-            cursor: isDarkMode ? '#d4d4d4' : '#292524',
-          },
-        })
-
-        const fitAddon = new ghostty.FitAddon()
-        term.loadAddon(fitAddon)
-
-        await term.open(terminalContainerRef.current)
-        fitAddon.fit()
-
-        terminalInstanceRef.current = { term, fitAddon }
-
-        // Connect to WebSocket PTY using dynamic port
-        const wsUrl = `ws://127.0.0.1:${ptyPort}`
-        const cols = term.cols || 80
-        const rows = term.rows || 12
-        const url = `${wsUrl}?cols=${cols}&rows=${rows}`
-
-        const ws = new WebSocket(url)
-
-        ws.onopen = () => {
-          console.log('[Terminal Panel] Connected to PTY')
-        }
-
-        let pendingWrites = ''
-        let flushScheduled = false
-        const scheduleFlush = () => {
-          if (flushScheduled) return
-          flushScheduled = true
-          requestAnimationFrame(() => {
-            flushScheduled = false
-            if (!pendingWrites) return
-            term.write(pendingWrites)
-            pendingWrites = ''
-          })
-        }
-
-        ws.onmessage = (event) => {
-          pendingWrites += typeof event.data === 'string' ? event.data : String(event.data)
-          scheduleFlush()
-        }
-
-        ws.onclose = () => {
-          term.write('\r\n\x1b[33mConnection closed.\x1b[0m\r\n')
-        }
-
-        // Handle terminal input
-        term.onData((data: string) => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(data)
-          }
-        })
-
-        // Handle resize
-        term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'resize', cols, rows }))
-          }
-        })
-
-        // Store WebSocket for cleanup
-        ;(terminalInstanceRef.current as { term: unknown; fitAddon: unknown; ws?: WebSocket }).ws = ws
-      } catch (error) {
-        console.error('[Terminal Panel] Failed to initialize terminal:', error)
-      }
-    }
-
-    initTerminal()
-
-    return () => {
-      mounted = false
-      if (terminalInstanceRef.current) {
-        const instance = terminalInstanceRef.current as { term: { dispose?: () => void }; ws?: WebSocket }
-        instance.ws?.close()
-        instance.term?.dispose?.()
-        terminalInstanceRef.current = null
-      }
-    }
-  }, [consolePanelTab, isDarkMode, ptyPort])
-
-  // Fit terminal when console panel resizes
-  useEffect(() => {
-    if (consolePanelTab === 'terminal' && terminalInstanceRef.current) {
-      const instance = terminalInstanceRef.current as { fitAddon: { fit?: () => void } }
-      setTimeout(() => {
-        instance.fitAddon?.fit?.()
-      }, 50)
-    }
-  }, [consoleHeight, consolePanelTab])
+  // Terminal panel is now handled by useTerminalPanel hook (called earlier)
 
   // Ref for updateCodingContext to avoid triggering effect when function identity changes
   const updateCodingContextRef = useRef(updateCodingContext)
   updateCodingContextRef.current = updateCodingContext
 
-  // Sync coding agent context when selections change
-  useEffect(() => {
-    updateCodingContextRef.current({
-      selectedElement: selectedElement || null,
-      selectedFiles: selectedFiles,
-      selectedLogs: selectedLogs?.map(log => ({
-        type: log.type,
-        message: log.message,
-      })) || [],
-      projectPath: activeTab?.projectPath || null,
-      recentMessages: messages.slice(-10) as any[],
-    });
-  }, [selectedElement, selectedFiles, selectedLogs, activeTab?.projectPath, messages]);
+  // Sync coding agent context when selections change - extracted to useCodingContextSync hook
+  useCodingContextSync({
+    selectedElement,
+    selectedFiles,
+    selectedLogs,
+    projectPath: activeTab?.projectPath,
+    messages,
+    updateCodingContextRef,
+  });
 
   // Instant web search for console errors
   const performInstantSearch = useCallback(async (query: string) => {
@@ -6347,202 +3173,30 @@ export default function App() {
     }
   }, [searchResults]);
 
-  // Keyboard shortcuts for console log actions
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle if console is open and logs are selected
-      if (!isConsolePanelOpen || selectedLogIndices.size === 0) return;
-      
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-      const modKey = isMac ? e.metaKey : e.ctrlKey;
-      
-      if (e.key === 'Escape') {
-        // Clear selection
-        setSelectedLogIndices(new Set());
-        e.preventDefault();
-      } else if (modKey && e.key === 'g') {
-        // Instant web search for selected logs
-        const logsText = Array.from(selectedLogIndices)
-          .sort((a, b) => a - b)
-          .map(i => consoleLogs[i]?.message || '')
-          .join('\n');
-        performInstantSearch(logsText);
-        e.preventDefault();
-      } else if (modKey && e.key === 'c' && selectedLogIndices.size > 0) {
-        // Copy (only if in console context, don't override normal copy)
-        const activeElement = document.activeElement;
-        const isInputFocused = activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA';
-        if (!isInputFocused) {
-          const logsText = Array.from(selectedLogIndices)
-            .sort((a, b) => a - b)
-            .map(i => {
-              const log = consoleLogs[i];
-              return log ? `[${log.type}] ${log.message}` : '';
-            })
-            .filter(Boolean)
-            .join('\n');
-          navigator.clipboard.writeText(logsText);
-          e.preventDefault();
-        }
-      }
-    };
-    
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isConsolePanelOpen, selectedLogIndices, consoleLogs, setInput]);
+  // Keyboard shortcuts for console log actions - extracted to useConsoleKeyboardShortcuts hook
+  useConsoleKeyboardShortcuts({
+    isConsolePanelOpen,
+    selectedLogIndices,
+    setSelectedLogIndices,
+    consoleLogs,
+    performInstantSearch,
+  });
 
   // filteredLogs is now provided by useConsolePanel hook
   const filteredConsoleLogs = filteredLogs;
 
-  // Click-outside handler for thinking popover
+  // Click-outside handler for thinking popover - extracted to useThinkingPopover hook
+  useThinkingPopover({
+    showThinkingPopover,
+    setShowThinkingPopover,
+  });
+
+
+  // Bridge effect: populate addEditedFileRef for useWebviewSetup
+  // (addEditedFile, undoFileEdit, undoAllEdits, keepAllEdits are now from useFileHandlers hook)
   useEffect(() => {
-    if (!showThinkingPopover) return;
-
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('[data-thinking-popover]')) {
-        setShowThinkingPopover(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showThinkingPopover]);
-
-  // Edited files management
-  const addEditedFile = useCallback((file: {
-    path: string;
-    additions?: number;
-    deletions?: number;
-    undoCode?: string;
-    originalContent?: string;
-    isFileModification?: boolean;
-  }) => {
-    // Extract filename without query strings (e.g., "?t=123456")
-    const rawFileName = file.path.split('/').pop() || file.path;
-    const fileName = rawFileName.split('?')[0];
-    setEditedFiles(prev => {
-      // Check if file already exists, update it
-      const existing = prev.findIndex(f => f.path === file.path);
-      if (existing >= 0) {
-        const updated = [...prev];
-        updated[existing] = {
-          ...updated[existing],
-          additions: updated[existing].additions + (file.additions || 0),
-          deletions: updated[existing].deletions + (file.deletions || 0),
-          undoCode: file.undoCode || updated[existing].undoCode,
-          // Keep original content from first modification for undo
-          originalContent: updated[existing].originalContent || file.originalContent,
-          isFileModification: file.isFileModification || updated[existing].isFileModification,
-          timestamp: new Date()
-        };
-        return updated;
-      }
-      return [...prev, {
-        path: file.path,
-        fileName,
-        additions: file.additions || 0,
-        deletions: file.deletions || 0,
-        undoCode: file.undoCode,
-        originalContent: file.originalContent,
-        isFileModification: file.isFileModification,
-        timestamp: new Date()
-      }];
-    });
-  }, []);
-
-  const undoFileEdit = useCallback(async (path: string) => {
-    const file = editedFiles.find(f => f.path === path);
-    if (!file) return;
-
-    // Handle file-based undo (restore original content)
-    if (file.isFileModification && file.originalContent !== undefined) {
-      console.log('[Undo] Restoring file:', path);
-      const result = await fileService.writeFile(path, file.originalContent);
-      if (result.success) {
-        console.log('[Undo] File restored successfully');
-        setEditedFiles(prev => prev.filter(f => f.path !== path));
-      } else {
-        console.error('[Undo] Failed to restore file:', result.error);
-      }
-      return;
-    }
-
-    // Handle DOM-based undo (execute JavaScript in webview)
-    if (file.undoCode) {
-      const webview = webviewRefs.current.get(activeTabId);
-      if (webview) {
-        webview.executeJavaScript(file.undoCode)
-          .then(() => {
-            setEditedFiles(prev => prev.filter(f => f.path !== path));
-          })
-          .catch((err: Error) => console.error('[Undo] Error:', err));
-      }
-    } else if (file.isFileModification) {
-      // File was modified but we don't have originalContent - use git to restore
-      console.log('[Undo] Using git checkoutFile to restore:', path);
-      const { api: electronAPI } = getElectronAPI();
-      if (electronAPI?.git?.checkoutFile) {
-        try {
-          const result = await electronAPI.git.checkoutFile(path);
-          if (result.success) {
-            console.log('[Undo] File restored via git checkoutFile');
-            setEditedFiles(prev => prev.filter(f => f.path !== path));
-          } else {
-            console.error('[Undo] Git checkoutFile failed:', result.error);
-            // Still remove from list - user will need to manually revert
-            setEditedFiles(prev => prev.filter(f => f.path !== path));
-          }
-        } catch (err) {
-          console.error('[Undo] Git checkoutFile error:', err);
-          setEditedFiles(prev => prev.filter(f => f.path !== path));
-        }
-      } else {
-        console.warn('[Undo] Git checkoutFile not available, cannot restore file');
-        setEditedFiles(prev => prev.filter(f => f.path !== path));
-      }
-    } else {
-      // No undo mechanism, just remove from list
-      setEditedFiles(prev => prev.filter(f => f.path !== path));
-    }
-  }, [editedFiles, activeTabId]);
-
-  const undoAllEdits = useCallback(async () => {
-    const webview = webviewRefs.current.get(activeTabId);
-    const { api: electronAPI } = getElectronAPI();
-
-    // Undo in reverse order
-    const filesToUndo = [...editedFiles].reverse();
-
-    for (const file of filesToUndo) {
-      // Handle file-based undo with original content
-      if (file.isFileModification && file.originalContent !== undefined) {
-        await fileService.writeFile(file.path, file.originalContent).catch((err) => {
-          console.warn(`[Undo] Failed to restore file ${file.path}:`, err)
-        });
-      } else if (file.isFileModification) {
-        // No original content - use git to restore
-        if (electronAPI?.git?.checkoutFile) {
-          await electronAPI.git.checkoutFile(file.path).catch((err) => {
-            console.warn(`[Undo] Failed to git checkout ${file.path}:`, err)
-          });
-        }
-      } else if (file.undoCode && webview) {
-        // Handle DOM-based undo
-        await webview.executeJavaScript(file.undoCode).catch((err) => {
-          console.warn(`[Undo] Failed to execute undo script for ${file.path}:`, err)
-        });
-      }
-    }
-
-    setEditedFiles([]);
-    setIsEditedFilesDrawerOpen(false);
-  }, [editedFiles, activeTabId]);
-
-  const keepAllEdits = useCallback(() => {
-    setEditedFiles([]);
-    setIsEditedFilesDrawerOpen(false);
-  }, []);
+    addEditedFileRef.current = addEditedFile;
+  }, [addEditedFile]);
 
   // Wire up file modification handler for coding agent tools
   // This allows write_file, create_file, delete_file to update the edited files drawer
@@ -6626,180 +3280,43 @@ export default function App() {
     return removeListener;
   }, [isElectron, addEditedFile]);
 
-  // Track which projects have active watchers (persistent across tab switches)
-  const activeWatchersRef = useRef<Set<string>>(new Set())
+  // Note: addEditedFileRef is declared earlier and populated via useEffect for useWebviewSetup
 
-  // Ref for addEditedFile to avoid triggering effect when function identity changes
-  const addEditedFileRef = useRef(addEditedFile)
-  addEditedFileRef.current = addEditedFile
+  // File watcher - extracted to useFileWatcher hook
+  useFileWatcher({
+    isElectron: !!isElectron,
+    projectPath: activeTab.projectPath,
+    addEditedFile,
+    setFileWatcherActive,
+  })
 
-  // File watcher - global listener (runs once, never cleaned up)
-  useEffect(() => {
-    if (!isElectron || !window.electronAPI?.fileWatcher) {
-      return;
-    }
+  // Load recent context chips from localStorage when project changes - extracted to useContextChipsPersistence hook
+  useContextChipsPersistence({
+    projectPath: activeTab.projectPath,
+    setRecentContextChips,
+    setContextChips,
+  })
 
-    // Set up global listener for all file changes
-    const removeListener = window.electronAPI.fileWatcher.onChange((event: {
-      type: 'add' | 'change' | 'unlink';
-      path: string;
-      relativePath: string;
-      projectPath: string;
-    }) => {
-      console.log('[FileWatcher] File changed:', event.type, event.relativePath);
+  // Sync Inspector State with Webview - extracted to useInspectorSync hook
+  useInspectorSync({
+    isElectron: !!isElectron,
+    isWebviewReady,
+    activeTabId,
+    activeTabType: activeTab.type,
+    isInspectorActive,
+    isScreenshotActive,
+    isMoveActive,
+    webviewRefs: webviewRefs as unknown as React.MutableRefObject<Map<string, { send: (channel: string, ...args: unknown[]) => void; isConnected: boolean; getWebContentsId: () => number }>>,
+    setSelectedElement: () => setSelectedElement(null),
+    setShowElementChat,
+  })
 
-      // Add to edited files drawer
-      addEditedFileRef.current({
-        path: event.path,
-        additions: event.type === 'add' ? 1 : event.type === 'change' ? 1 : 0,
-        deletions: event.type === 'unlink' ? 1 : event.type === 'change' ? 1 : 0,
-        isFileModification: true,
-      });
-    });
-
-    // DON'T cleanup - let watchers run until app closes
-    // This is intentional to avoid start/stop churn
-    return () => {
-      console.log('[FileWatcher] App unmounting')
-      removeListener();
-    };
-  }, [isElectron])
-
-  // Start watcher for current project if not already watching
-  useEffect(() => {
-    const projectPath = activeTab.projectPath
-    if (!isElectron || !projectPath || !window.electronAPI?.fileWatcher) {
-      setFileWatcherActive(false);
-      return;
-    }
-
-    // Check if we're already watching this project
-    if (activeWatchersRef.current.has(projectPath)) {
-      console.log('[FileWatcher] Already watching:', projectPath)
-      setFileWatcherActive(true);
-      return;
-    }
-
-    // Start new watcher for this project (never stopped until app exit)
-    console.log('[FileWatcher] Starting watcher for:', projectPath)
-    window.electronAPI.fileWatcher.start(projectPath).then((result: { success: boolean }) => {
-      if (result.success) {
-        activeWatchersRef.current.add(projectPath)
-        setFileWatcherActive(true);
-        console.log('[FileWatcher] ✓ Watching:', projectPath)
-      }
-    }).catch(err => {
-      console.error('[FileWatcher] Start failed:', err)
-    });
-
-    // NO CLEANUP - watchers stay active until app closes
-  }, [isElectron, activeTab.projectPath]);
-
-  // Load recent context chips from localStorage when project changes
-  useEffect(() => {
-    try {
-      const storageKey = `cluso-context-chips-${activeTab.projectPath || 'global'}`;
-      const stored = localStorage.getItem(storageKey);
-      if (stored) {
-        const chips = JSON.parse(stored);
-        if (Array.isArray(chips)) {
-          setRecentContextChips(chips);
-          console.log('[ContextChips] Loaded', chips.length, 'recent chips for', storageKey);
-        }
-      } else {
-        // No chips stored for this project, start fresh
-        setRecentContextChips([]);
-      }
-    } catch (e) {
-      console.warn('[ContextChips] Failed to load from localStorage:', e);
-      setRecentContextChips([]);
-    }
-    // Also clear current context chips when switching projects
-    setContextChips([]);
-  }, [activeTab.projectPath]);
-
-  // Sync Inspector State with Webview
-  useEffect(() => {
-    // Only sync for browser tabs
-    if (activeTab.type !== 'browser') {
-      return;
-    }
-
-    const webview = webviewRefs.current.get(activeTabId);
-    console.log('[Inspector Sync] Effect triggered:', { isElectron, hasWebview: !!webview, isWebviewReady, isInspectorActive, isScreenshotActive });
-    if (!isElectron) {
-      console.log('[Inspector Sync] Skipping: not in Electron');
-      return;
-    }
-    if (!webview) {
-      console.log('[Inspector Sync] Skipping: no webview ref');
-      return;
-    }
-    if (!isWebviewReady) {
-      console.log('[Inspector Sync] Skipping: webview not ready');
-      return;
-    }
-
-    // Extra safety check - ensure webview is attached to DOM
-    try {
-      // This will throw if webview is not attached
-      if (!webview.isConnected) {
-        console.log('[Inspector Sync] Skipping: webview not connected to DOM');
-        return;
-      }
-    } catch (e) {
-      console.log('[Inspector Sync] Skipping: webview check failed', e);
-      return;
-    }
-
-    // Check if webview is actually ready to receive messages
-    // getWebContentsId() throws if webview isn't fully attached and ready
-    try {
-      webview.getWebContentsId();
-    } catch (e) {
-      console.log('[Inspector Sync] Skipping: webview not ready to receive messages');
-      return;
-    }
-
-    console.log('[Inspector Sync] Sending inspector modes to webview:', { isInspectorActive, isScreenshotActive, isMoveActive });
-    try {
-      webview.send('set-inspector-mode', isInspectorActive);
-      webview.send('set-screenshot-mode', isScreenshotActive);
-      webview.send('set-move-mode', isMoveActive);
-
-      if (!isInspectorActive && !isMoveActive) {
-        setSelectedElement(null);
-        setShowElementChat(false);
-        // Clear canvas indicators when modes are deactivated
-        webview.send('clear-selection');
-      }
-    } catch (e) {
-      console.warn('[Inspector Sync] Failed to send to webview:', e);
-    }
-  }, [isInspectorActive, isScreenshotActive, isMoveActive, isElectron, isWebviewReady, activeTabId]);
-
-  // Auto-reload webview on HMR (Hot Module Replacement)
-  useEffect(() => {
-    const webview = webviewRefs.current.get(activeTabId);
-    if (!isElectron || !webview) return;
-
-    // Vite HMR - reload webview when app code changes
-    if (import.meta.hot) {
-      const handleHmrUpdate = () => {
-        console.log('[HMR] Reloading webview...');
-        const currentWebview = webviewRefs.current.get(activeTabId);
-        if (currentWebview) {
-          currentWebview.reload();
-        }
-      };
-
-      import.meta.hot.on('vite:afterUpdate', handleHmrUpdate);
-
-      return () => {
-        import.meta.hot?.off('vite:afterUpdate', handleHmrUpdate);
-      };
-    }
-  }, [isElectron, activeTabId]);
+  // Auto-reload webview on HMR - extracted to useWebviewHmr hook
+  useWebviewHmr({
+    isElectron: !!isElectron,
+    activeTabId,
+    webviewRefs: webviewRefs as unknown as React.MutableRefObject<Map<string, { reload: () => void }>>,
+  })
 
   // Reset element chat when sidebar opens
   useEffect(() => {
@@ -6808,55 +3325,19 @@ export default function App() {
     }
   }, [isSidebarOpen]);
 
-  // Scroll to bottom of chat (respects auto-scroll setting)
-  // Also scrolls during streaming content updates
+  // Scroll effects - extracted to useScrollEffects hook
   const streamingContent = streamingMessage?.content ?? ''
-  useEffect(() => {
-    if (isAutoScrollEnabled && !isUserScrollingRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    } else if (!isAutoScrollEnabled && (messages.length > 0 || isStreaming)) {
-      // Show scroll-to-bottom button when new messages arrive and auto-scroll is off
-      setShowScrollToBottom(true);
-    }
-  }, [messages, isAutoScrollEnabled, streamingContent, isStreaming]);
-
-  // Handle scroll events to detect manual scrolling
-  useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-
-    let scrollTimeout: ReturnType<typeof setTimeout>;
-
-    const handleScroll = () => {
-      // Mark that user is scrolling
-      isUserScrollingRef.current = true;
-      clearTimeout(scrollTimeout);
-
-      // Check if user is near the bottom (within 100px)
-      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
-
-      if (isNearBottom) {
-        // User scrolled to bottom, re-enable auto-scroll
-        setIsAutoScrollEnabled(true);
-        setShowScrollToBottom(false);
-      } else {
-        // User scrolled up, disable auto-scroll and show button
-        setIsAutoScrollEnabled(false);
-        setShowScrollToBottom(true);
-      }
-
-      // Reset user scrolling flag after scroll stops
-      scrollTimeout = setTimeout(() => {
-        isUserScrollingRef.current = false;
-      }, 150);
-    };
-
-    container.addEventListener('scroll', handleScroll, { passive: true });
-    return () => {
-      container.removeEventListener('scroll', handleScroll);
-      clearTimeout(scrollTimeout);
-    };
-  }, []);
+  useScrollEffects({
+    messages,
+    isStreaming,
+    streamingContent,
+    isAutoScrollEnabled,
+    setIsAutoScrollEnabled,
+    setShowScrollToBottom,
+    messagesEndRef,
+    messagesContainerRef,
+    isUserScrollingRef,
+  })
 
   // Scroll to bottom handler (for the button)
   const scrollToBottom = useCallback(() => {
@@ -6886,47 +3367,6 @@ export default function App() {
       reader.readAsDataURL(file);
     });
   };
-
-  // Handle drag and drop for images
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.dataTransfer.types.includes('Files')) {
-      setIsDraggingOver(true);
-    }
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDraggingOver(false);
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDraggingOver(false);
-
-    const files = Array.from(e.dataTransfer.files);
-    const imageFiles = files.filter(f => f.type.startsWith('image/'));
-    const filesToProcess = imageFiles.slice(0, 5 - attachedImages.length);
-
-    filesToProcess.forEach(file => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = reader.result as string;
-        setAttachedImages(prev => {
-          if (prev.length >= 5) return prev;
-          return [...prev, base64];
-        });
-      };
-      reader.readAsDataURL(file);
-    });
-  }, [attachedImages.length]);
-
-  const removeAttachedImage = useCallback((index: number) => {
-    setAttachedImages(prev => prev.filter((_, i) => i !== index));
-  }, []);
 
   // Built-in slash command definitions
   const BUILT_IN_COMMANDS = [
@@ -7134,32 +3574,12 @@ Keep the summary brief but comprehensive enough to continue the conversation eff
     }
   };
 
-  // Load Todos from File System
-  const loadTodosFromDisk = async () => {
-    const projectPath = activeTab?.projectPath;
-    if (!projectPath) return;
-
-    const result = await fileService.listTodos(projectPath);
-    if (result.success && result.data) {
-      setTabs(prev => prev.map(tab =>
-        tab.id === activeTabId
-          ? {
-              ...tab,
-              todosData: {
-                items: result.data || []
-              }
-            }
-          : tab
-      ));
-    }
-  };
-
-  // Load todos when project path changes
-  React.useEffect(() => {
-    if (activeTab?.projectPath) {
-      loadTodosFromDisk();
-    }
-  }, [activeTab?.projectPath]);
+  // Load todos when project path changes - extracted to useTodosLoader hook
+  useTodosLoader({
+    projectPath: activeTab?.projectPath,
+    activeTabId,
+    setTabs,
+  })
 
   // Handle Text Submission
   const processPrompt = async (promptText: string) => {
@@ -7686,6 +4106,8 @@ If you're not sure what the user wants, ask for clarification.
             };
             setMessages(prev => [...prev, errorMessage]);
             setAttachedImages([]);
+            setIsStreaming(false);
+            setStreamingMessage(null);
             return;
           }
 
@@ -7951,8 +4373,10 @@ If you're not sure what the user wants, ask for clarification.
               source: 'dom',
             });
 
-            // Clear attached images
+            // Clear attached images and streaming state
             setAttachedImages([]);
+            setIsStreaming(false);
+            setStreamingMessage(null);
             return;
           } catch (error) {
             console.error('[Image Insert] Error:', error);
@@ -7965,6 +4389,8 @@ If you're not sure what the user wants, ask for clarification.
             };
             setMessages(prev => [...prev, errorMessage]);
             setAttachedImages([]);
+            setIsStreaming(false);
+            setStreamingMessage(null);
             return;
           }
         }
@@ -8889,6 +5315,11 @@ If you're not sure what the user wants, ask for clarification.
       });
   }, [clearDomApprovalPatchTimeout, markDomTelemetry]);
 
+  // Populate prepareDomPatchRef for webview setup hook
+  useEffect(() => {
+    prepareDomPatchRef.current = prepareDomPatch;
+  }, [prepareDomPatch]);
+
   // Handle accepting DOM preview - generates source patch and auto-approves
   const handleAcceptDOMApproval = useCallback(async () => {
     if (!pendingDOMApproval) return;
@@ -9074,95 +5505,6 @@ If you're not sure what the user wants, ask for clarification.
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [pendingChange, pendingDOMApproval, handleApproveChange, handleRejectChange, handleAcceptDOMApproval, handleRejectDOMApproval]);
-
-  // Handle opening a project from new tab page - triggers setup flow
-  const handleOpenProject = useCallback(async (projectPath: string, projectName: string) => {
-    console.log('Starting project setup flow:', projectPath, projectName);
-
-    // Lock this window to the project (if not already locked)
-    if (!lockedProjectPath && window.electronAPI?.window) {
-      const lockResult = await window.electronAPI.window.lockProject(projectPath, projectName);
-      if (lockResult.success) {
-        setLockedProjectPath(projectPath);
-        setLockedProjectName(projectName);
-        console.log(`[Window] Locked to project: ${projectPath}`);
-      } else if (lockResult.error?.includes('already open in another window')) {
-        // Focus the other window instead
-        if (lockResult.existingWindowId) {
-          await window.electronAPI.window.focus(lockResult.existingWindowId);
-        }
-        return; // Don't open project in this window
-      }
-    }
-
-    // Get saved port from recent projects
-    const recent = getRecentProject(projectPath);
-    setSetupProject({ path: projectPath, name: projectName, port: recent?.port });
-  }, [lockedProjectPath]);
-
-  // Handle setup flow completion - actually opens the browser
-  const handleSetupComplete = useCallback((url: string, port: number) => {
-    if (setupProject) {
-      updateCurrentTab({ url, title: setupProject.name, projectPath: setupProject.path });
-      // Save port to recent projects
-      addToRecentProjects(setupProject.name, setupProject.path, port);
-      // URL input is synced via useEffect when tab.url changes
-      setSetupProject(null);
-    }
-  }, [setupProject, updateCurrentTab]);
-
-  // Handle setup flow cancel - go back to new tab page
-  const handleSetupCancel = useCallback(() => {
-    setSetupProject(null);
-  }, []);
-
-  // Handle opening a URL from new tab page
-  const handleOpenUrl = useCallback((url: string) => {
-    updateCurrentTab({ url, title: new URL(url).hostname });
-    // URL input is synced via useEffect when tab.url changes
-  }, [updateCurrentTab]);
-
-  // Patch Approval Handlers
-  const handleApprovePatch = useCallback((patch: SourcePatch) => {
-    console.log('[PatchApproval] Approved patch:', patch.filePath);
-    // Move to next patch
-    const nextIndex = currentPatchIndex + 1;
-    if (nextIndex < pendingPatches.length) {
-      setCurrentPatchIndex(nextIndex);
-    } else {
-      // All patches approved
-      setPendingPatches([]);
-      setCurrentPatchIndex(0);
-      setIsApprovalDialogOpen(false);
-    }
-  }, [currentPatchIndex, pendingPatches.length]);
-
-  const handleRejectPatch = useCallback((patch: SourcePatch) => {
-    console.log('[PatchApproval] Rejected patch:', patch.filePath);
-    // Remove rejected patch and move to next
-    const updatedPatches = pendingPatches.filter((_, i) => i !== currentPatchIndex);
-    setPendingPatches(updatedPatches);
-    if (updatedPatches.length > 0) {
-      setCurrentPatchIndex(Math.min(currentPatchIndex, updatedPatches.length - 1));
-    } else {
-      setCurrentPatchIndex(0);
-      setIsApprovalDialogOpen(false);
-    }
-  }, [currentPatchIndex, pendingPatches]);
-
-  const handleEditPatch = useCallback((patch: SourcePatch) => {
-    console.log('[PatchApproval] Edit requested for patch:', patch.filePath);
-    // TODO: Open editor with patch content
-    // For now, just close the dialog
-    setIsApprovalDialogOpen(false);
-  }, []);
-
-  // Function to show patch approval dialog with patches
-  const showPatchApprovalDialog = useCallback((patches: SourcePatch[]) => {
-    setPendingPatches(patches);
-    setCurrentPatchIndex(0);
-    setIsApprovalDialogOpen(true);
-  }, []);
 
   // Check if current tab is "new tab" (no URL)
   const isNewTabPage = !activeTab.url;
@@ -10045,173 +6387,31 @@ If you're not sure what the user wants, ask for clarification.
 
             {/* Floating Toolbar - always visible when enabled */}
             {isFloatingToolbarVisible && (
-                <div className={`absolute bottom-8 left-1/2 transform -translate-x-1/2 flex items-center gap-1 backdrop-blur shadow-2xl p-2 rounded-full z-40 ${isDarkMode ? 'bg-neutral-800/90 border border-neutral-700/50' : 'bg-white/90 border border-stone-200/50'}`}>
-                    {/* Canvas controls - only shown in multi-viewport mode */}
-                    {isMultiViewportMode && (
-                      <>
-                        {/* Viewport count */}
-                        <div className={`flex items-center gap-1 px-2 py-1 rounded-full ${isDarkMode ? 'bg-neutral-700' : 'bg-stone-100'}`}>
-                          <LayoutGrid size={12} className={isDarkMode ? 'text-neutral-400' : 'text-stone-500'} />
-                          <span className={`text-xs font-medium ${isDarkMode ? 'text-neutral-300' : 'text-stone-600'}`}>
-                            {viewportCount}
-                          </span>
-                        </div>
-
-                        <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
-
-                        {/* Add device buttons */}
-                        <button
-                          onClick={() => viewportControlsRef.current?.addDevice('desktop')}
-                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
-                          title="Add Desktop"
-                        >
-                          <ScreenShare size={16} />
-                        </button>
-                        <button
-                          onClick={() => viewportControlsRef.current?.addDevice('tablet')}
-                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
-                          title="Add Tablet"
-                        >
-                          <Tablet size={16} />
-                        </button>
-                        <button
-                          onClick={() => viewportControlsRef.current?.addDevice('mobile')}
-                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
-                          title="Add Mobile"
-                        >
-                          <Smartphone size={16} />
-                        </button>
-
-                        <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
-
-                        {/* Add internal window buttons */}
-                        <button
-                          onClick={() => viewportControlsRef.current?.addInternalWindow('kanban')}
-                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
-                          title="Add Kanban"
-                        >
-                          <KanbanSquare size={16} />
-                        </button>
-                        <button
-                          onClick={() => viewportControlsRef.current?.addInternalWindow('todo')}
-                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
-                          title="Add Todo"
-                        >
-                          <ListTodo size={16} />
-                        </button>
-                        <button
-                          onClick={() => viewportControlsRef.current?.addInternalWindow('notes')}
-                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
-                          title="Add Notes"
-                        >
-                          <StickyNote size={16} />
-                        </button>
-                        <button
-                          onClick={() => viewportControlsRef.current?.addTerminal()}
-                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
-                          title="Add Ghostty Terminal"
-                        >
-                          <Ghost size={16} />
-                        </button>
-
-                        <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
-
-                        {/* Layout control - auto arrange and fit */}
-                        <button
-                          onClick={() => {
-                            viewportControlsRef.current?.autoLayout('RIGHT')
-                            setTimeout(() => viewportControlsRef.current?.fitView(), 100)
-                          }}
-                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500'}`}
-                          title="Show All"
-                        >
-                          <Maximize size={16} />
-                        </button>
-
-                        <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
-
-                        {/* Exit canvas mode */}
-                        <button
-                          onClick={() => setIsMultiViewportMode(false)}
-                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isDarkMode ? 'hover:bg-neutral-700 text-red-400' : 'hover:bg-stone-100 text-red-500'}`}
-                          title="Exit Canvas"
-                        >
-                          <X size={16} />
-                        </button>
-
-                        <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
-                      </>
-                    )}
-
-                    {/* Screen share - only in single viewport mode */}
-                    {!isMultiViewportMode && (
-                      <button
-                          onClick={() => setIsScreenSharing(!isScreenSharing)}
-                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isScreenSharing ? 'bg-green-100 text-green-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500')}`}
-                          title="Toggle Screen Share"
-                      >
-                          <Monitor size={16} />
-                      </button>
-                    )}
-
-                    <button
-                        onClick={() => {
-                            setIsInspectorActive(!isInspectorActive);
-                            setIsScreenshotActive(false);
-                            setIsMoveActive(false);
-                        }}
-                        className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isInspectorActive ? 'bg-blue-100 text-blue-600' : (isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-100 text-stone-500')}`}
-                        title="Toggle Element Inspector"
-                    >
-                        <MousePointer2 size={16} />
-                    </button>
-
-                    <div className={`w-[1px] h-5 mx-0.5 ${isDarkMode ? 'bg-neutral-600' : 'bg-stone-200'}`}></div>
-
-                    <button
-                        onClick={() => {
-                          // Prevent action while connecting (race condition fix)
-                          if (streamState.isStreaming && !streamState.isConnected) {
-                            console.log('[Voice] Ignoring click - connection in progress');
-                            return;
-                          }
-                          if (streamState.isConnected) {
-                            stopSpeaking(); // Stop any playing audio immediately
-                            disconnect();   // Then disconnect the session
-                          } else {
-                            connect();
-                          }
-                        }}
-                        disabled={streamState.isStreaming && !streamState.isConnected}
-                        data-control-id="voice-button"
-                        data-control-type="button"
-                        className={`flex items-center justify-center w-9 h-9 rounded-full font-medium transition-all ${
-                          streamState.isStreaming && !streamState.isConnected
-                            ? 'bg-yellow-100 text-yellow-600 ring-1 ring-yellow-200 cursor-wait'
-                            : streamState.isConnected
-                              ? 'bg-red-50 text-red-600 ring-1 ring-red-100'
-                              : (isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-800')
-                        }`}
-                        title={
-                          streamState.isStreaming && !streamState.isConnected
-                            ? 'Connecting...'
-                            : streamState.isConnected
-                              ? 'End voice session'
-                              : 'Start voice session'
-                        }
-                    >
-                        {streamState.isStreaming && !streamState.isConnected ? (
-                            <Loader2 size={16} className="animate-spin" />
-                        ) : streamState.isConnected ? (
-                            <span className="relative flex h-2 w-2">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                            </span>
-                        ) : (
-                            <Mic size={16} />
-                        )}
-                    </button>
-                </div>
+              <FloatingToolbar
+                isDarkMode={isDarkMode}
+                isMultiViewportMode={isMultiViewportMode}
+                viewportCount={viewportCount}
+                isScreenSharing={isScreenSharing}
+                isInspectorActive={isInspectorActive}
+                streamState={streamState}
+                viewportControlsRef={viewportControlsRef}
+                onToggleScreenSharing={() => setIsScreenSharing(!isScreenSharing)}
+                onToggleInspector={() => {
+                  setIsInspectorActive(!isInspectorActive)
+                  setIsScreenshotActive(false)
+                  setIsMoveActive(false)
+                }}
+                onToggleVoice={() => {
+                  if (streamState.isStreaming && !streamState.isConnected) return
+                  if (streamState.isConnected) {
+                    stopSpeaking()
+                    disconnect()
+                  } else {
+                    connect()
+                  }
+                }}
+                onExitMultiViewport={() => setIsMultiViewportMode(false)}
+              />
             )}
 
             {/* Element Info Label - shows during inspector hover */}
@@ -10548,211 +6748,26 @@ If you're not sure what the user wants, ask for clarification.
 
           {/* Console Panel */}
           {isConsolePanelOpen && (
-            <div className={`flex flex-col overflow-hidden ${isDarkMode ? 'bg-neutral-900' : 'bg-stone-50'}`} style={{ height: consoleHeight }}>
-              {/* Resize Handle */}
-              <div
-                className={`h-2 cursor-ns-resize flex-shrink-0 flex items-center justify-center group ${isDarkMode ? 'bg-neutral-900' : 'bg-stone-50'}`}
-                onMouseDown={handleConsoleResizeStart}
-              >
-                <div className={`w-8 h-0.5 rounded-full transition-colors ${isConsoleResizing ? (isDarkMode ? 'bg-neutral-400' : 'bg-stone-500') : (isDarkMode ? 'bg-neutral-600 group-hover:bg-neutral-500' : 'bg-stone-300 group-hover:bg-stone-400')}`} />
-              </div>
-              <div className={`flex items-center justify-between px-3 py-1.5 border-b ${isDarkMode ? 'border-neutral-700' : 'border-stone-200'}`}>
-                {/* Left side: Tab buttons */}
-                <div className="flex items-center gap-1.5" style={{ position: 'relative', top: '-3px' }}>
-                  {/* Console tab */}
-                  <button
-                    onClick={() => setConsolePanelTab('console')}
-                    className={`flex items-center gap-2 px-2.5 py-1 rounded-full transition-colors ${
-                      consolePanelTab === 'console'
-                        ? (isDarkMode ? 'bg-neutral-600 text-neutral-200' : 'bg-stone-300 text-stone-700')
-                        : (isDarkMode ? 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700' : 'bg-stone-100 text-stone-500 hover:bg-stone-200')
-                    }`}
-                    title="Console logs"
-                  >
-                    <Terminal size={14} />
-                    <span className="text-xs font-medium">Console</span>
-                    <span className="text-xs opacity-70">{filteredConsoleLogs.length}</span>
-                  </button>
-
-                  {/* Terminal tab */}
-                  <button
-                    onClick={() => setConsolePanelTab('terminal')}
-                    className={`flex items-center gap-2 px-2.5 py-1 rounded-full transition-colors ${
-                      consolePanelTab === 'terminal'
-                        ? (isDarkMode ? 'bg-neutral-600 text-neutral-200' : 'bg-stone-300 text-stone-700')
-                        : (isDarkMode ? 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700' : 'bg-stone-100 text-stone-500 hover:bg-stone-200')
-                    }`}
-                    title="Terminal"
-                  >
-                    <Ghost size={14} />
-                    <span className="text-xs font-medium">Terminal</span>
-                  </button>
-                </div>
-
-                {/* Right side: Filter chips (only for console) + actions */}
-                <div className="flex items-center gap-1">
-                  {/* Filter chips - only show when console tab is active */}
-                  {consolePanelTab === 'console' && (
-                    <div className="flex items-center gap-1 mr-2">
-                      <button
-                        onClick={() => toggleConsoleFilter('log')}
-                        className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
-                          consoleFilters.has('log')
-                            ? (isDarkMode ? 'bg-neutral-500 text-white' : 'bg-stone-500 text-white')
-                            : (isDarkMode ? 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700' : 'bg-stone-100 text-stone-500 hover:bg-stone-200')
-                        }`}
-                        title="Filter by log"
-                      >
-                        log
-                      </button>
-                      <button
-                        onClick={() => toggleConsoleFilter('info')}
-                        className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
-                          consoleFilters.has('info')
-                            ? 'bg-blue-500 text-white'
-                            : (isDarkMode ? 'bg-neutral-800 text-blue-400 hover:bg-neutral-700' : 'bg-blue-50 text-blue-600 hover:bg-blue-100')
-                        }`}
-                        title="Filter by info"
-                      >
-                        info
-                      </button>
-                      <button
-                        onClick={() => toggleConsoleFilter('warn')}
-                        className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
-                          consoleFilters.has('warn')
-                            ? 'bg-yellow-500 text-white'
-                            : (isDarkMode ? 'bg-neutral-800 text-yellow-400 hover:bg-neutral-700' : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100')
-                        }`}
-                        title="Filter by warn"
-                      >
-                        warn
-                      </button>
-                      <button
-                        onClick={() => toggleConsoleFilter('error')}
-                        className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
-                          consoleFilters.has('error')
-                            ? 'bg-red-500 text-white'
-                            : (isDarkMode ? 'bg-neutral-800 text-red-400 hover:bg-neutral-700' : 'bg-red-50 text-red-600 hover:bg-red-100')
-                        }`}
-                        title="Filter by error"
-                      >
-                        error
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Selection actions - only for console */}
-                  {consolePanelTab === 'console' && selectedLogIndices.size > 0 && (
-                    <>
-                      <span className={`text-xs px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-600'}`}>
-                        {selectedLogIndices.size} selected
-                      </span>
-                      <div className="flex items-center gap-0.5 ml-1">
-                        <button
-                          onClick={() => {
-                            const logsText = selectedLogs?.map(l => l.message).join('\n') || '';
-                            performInstantSearch(logsText);
-                          }}
-                          className={`p-1.5 rounded transition-colors ${isDarkMode ? 'hover:bg-neutral-600 text-neutral-400 hover:text-neutral-200' : 'hover:bg-stone-200 text-stone-500 hover:text-stone-700'}`}
-                          title="Search for solutions (⌘G)"
-                        >
-                          <Search size={14} />
-                        </button>
-                        <button
-                          onClick={() => {
-                            const logsText = selectedLogs?.map(l => `[${l.type}] ${l.message}`).join('\n') || '';
-                            navigator.clipboard.writeText(logsText);
-                          }}
-                          className={`p-1.5 rounded transition-colors ${isDarkMode ? 'hover:bg-neutral-600 text-neutral-400 hover:text-neutral-200' : 'hover:bg-stone-200 text-stone-500 hover:text-stone-700'}`}
-                          title="Copy (⌘C)"
-                        >
-                          <Copy size={14} />
-                        </button>
-                        <button
-                          onClick={() => setSelectedLogIndices(new Set())}
-                          className={`p-1.5 rounded transition-colors ${isDarkMode ? 'hover:bg-neutral-600 text-neutral-400 hover:text-neutral-200' : 'hover:bg-stone-200 text-stone-500 hover:text-stone-700'}`}
-                          title="Clear selection (Esc)"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    </>
-                  )}
-
-                  {/* Clear console button - only for console tab */}
-                  {consolePanelTab === 'console' && (
-                    <button
-                      onClick={handleClearConsole}
-                      className={`p-1 rounded hover:bg-opacity-80 transition ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'}`}
-                      title="Clear console"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
-                    </button>
-                  )}
-
-                  <button
-                    onClick={() => setIsConsolePanelOpen(false)}
-                    className={`p-1 rounded hover:bg-opacity-80 transition ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-stone-200 text-stone-500'}`}
-                    title="Close console"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              </div>
-              {/* Content area - switches between console and terminal */}
-              {consolePanelTab === 'console' ? (
-                <div className={`flex-1 overflow-y-auto font-mono text-xs p-2 space-y-0.5 ${isDarkMode ? 'text-neutral-300' : 'text-stone-700'}`}>
-                  {filteredConsoleLogs.length === 0 ? (
-                    <div className={`text-center py-8 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-                      {consoleLogs.length === 0 ? 'No console messages yet' : 'No logs match current filters'}
-                    </div>
-                  ) : (
-                    filteredConsoleLogs.map((log, index) => (
-                      <div
-                        key={index}
-                        onClick={(e) => handleLogRowClick(index, e)}
-                        className={`flex items-start gap-2 px-2 py-0.5 rounded cursor-pointer select-none transition-colors ${
-                          selectedLogIndices.has(index)
-                            ? (isDarkMode ? 'bg-blue-500/20 ring-1 ring-blue-500/50' : 'bg-blue-100 ring-1 ring-blue-300')
-                            : log.type === 'error' ? (isDarkMode ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' : 'bg-red-50 text-red-600 hover:bg-red-100')
-                            : log.type === 'warn' ? (isDarkMode ? 'bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20' : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100')
-                            : log.type === 'info' ? (isDarkMode ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20' : 'bg-blue-50 text-blue-600 hover:bg-blue-100')
-                            : (isDarkMode ? 'hover:bg-neutral-700' : 'hover:bg-stone-100')
-                        }`}
-                        title="Click to select, Shift+click for range"
-                      >
-                        <span className={`flex-shrink-0 ${isDarkMode ? 'text-neutral-500' : 'text-stone-400'}`}>
-                          {log.timestamp.toLocaleTimeString()}
-                        </span>
-                        <span className="flex-shrink-0 w-12 text-center">
-                          [{log.type}]
-                        </span>
-                        <span className="break-all flex-1">{log.message}</span>
-                        <span
-                          className={`flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-                            selectedLogIndices.has(index)
-                              ? (isDarkMode ? 'bg-blue-500 border-blue-500' : 'bg-blue-500 border-blue-500')
-                              : (isDarkMode ? 'border-neutral-500 hover:border-neutral-400' : 'border-stone-300 hover:border-stone-400')
-                          }`}
-                        >
-                          {selectedLogIndices.has(index) && (
-                            <Check size={10} className="text-white" />
-                          )}
-                        </span>
-                      </div>
-                    ))
-                  )}
-                  <div ref={consoleEndRef} />
-                </div>
-              ) : (
-                /* Terminal view */
-                <div
-                  ref={terminalContainerRef}
-                  className={`flex-1 overflow-hidden ${isDarkMode ? 'bg-[#1e1e1e]' : 'bg-stone-50'}`}
-                  style={{ minHeight: 100 }}
-                />
-              )}
-            </div>
+            <ConsolePanel
+              isDarkMode={isDarkMode}
+              consoleLogs={consoleLogs}
+              filteredConsoleLogs={filteredConsoleLogs}
+              consoleFilters={consoleFilters}
+              consolePanelTab={consolePanelTab}
+              selectedLogIndices={selectedLogIndices}
+              selectedLogs={selectedLogs}
+              consoleHeight={consoleHeight}
+              isConsoleResizing={isConsoleResizing}
+              terminalContainerRef={terminalContainerRef}
+              onClose={() => setIsConsolePanelOpen(false)}
+              onClearConsole={handleClearConsole}
+              onToggleFilter={toggleConsoleFilter}
+              onSetConsolePanelTab={setConsolePanelTab}
+              onLogRowClick={handleLogRowClick}
+              onSetSelectedLogIndices={setSelectedLogIndices}
+              onResizeStart={handleConsoleResizeStart}
+              onSearchSolutions={performInstantSearch}
+            />
           )}
 
           {/* Search Results Popover */}
@@ -11830,7 +7845,7 @@ If you're not sure what the user wants, ask for clarification.
                             {displayedSourceCode.fileName} ({displayedSourceCode.startLine}-{displayedSourceCode.endLine})
                           </div>
                           <div
-                            onMouseMove={handleCodeMouseMove}
+                            onMouseMove={lspUI.createCodeMouseMoveHandler(displayedSourceCode.startLine)}
                             onMouseLeave={() => lspUI.hideHover()}
                           >
                             <CodeBlock
@@ -12275,216 +8290,60 @@ If you're not sure what the user wants, ask for clarification.
 
       {/* Stash Confirmation Dialog */}
       {isStashDialogOpen && (
-          <>
-              <div className="fixed inset-0 bg-black/50 z-50" onClick={() => setIsStashDialogOpen(false)}></div>
-              <div className={`fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 w-96 rounded-xl shadow-2xl p-5 ${isDarkMode ? 'bg-neutral-800 border border-neutral-700' : 'bg-white border border-stone-200'}`}>
-                  <h3 className={`text-lg font-semibold mb-3 ${isDarkMode ? 'text-neutral-100' : 'text-stone-900'}`}>Stash Changes</h3>
-                  <p className={`text-sm mb-4 ${isDarkMode ? 'text-neutral-400' : 'text-stone-500'}`}>
-                      This will temporarily save your uncommitted changes. You can restore them later with "stash pop".
-                  </p>
-                  <input
-                      type="text"
-                      value={stashMessage}
-                      onChange={(e) => setStashMessage(e.target.value)}
-                      placeholder="Optional stash message..."
-                      className={`w-full text-sm px-3 py-2 rounded-lg border mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500/20 ${isDarkMode ? 'bg-neutral-700 border-neutral-600 text-neutral-100 placeholder-neutral-400' : 'bg-stone-50 border-stone-200'}`}
-                      autoFocus
-                      onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                              handleStash(stashMessage);
-                          }
-                          if (e.key === 'Escape') {
-                              setIsStashDialogOpen(false);
-                              setStashMessage('');
-                          }
-                      }}
-                  />
-                  <div className="flex gap-2 justify-end">
-                      <button
-                          onClick={() => {
-                              setIsStashDialogOpen(false);
-                              setStashMessage('');
-                          }}
-                          className={`px-4 py-2 text-sm rounded-lg transition ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-300' : 'hover:bg-stone-100 text-stone-600'}`}
-                      >
-                          Cancel
-                      </button>
-                      <button
-                          onClick={() => handleStash(stashMessage)}
-                          className={`px-4 py-2 text-sm rounded-lg font-medium transition ${isDarkMode ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-stone-900 text-white hover:bg-stone-800'}`}
-                      >
-                          Stash Changes
-                      </button>
-                  </div>
-              </div>
-          </>
+        <StashDialog
+          isDarkMode={isDarkMode}
+          stashMessage={stashMessage}
+          onStashMessageChange={setStashMessage}
+          onClose={() => {
+            setIsStashDialogOpen(false)
+            setStashMessage('')
+          }}
+          onStash={handleStash}
+        />
       )}
 
       {/* AI Element Selection Confirmation - Toolbar */}
       {aiSelectedElement && aiSelectedElement.elements && aiSelectedElement.elements.length > 0 && (
-          <div className={`absolute top-20 left-1/2 transform -translate-x-1/2 rounded-lg shadow-2xl px-4 py-3 z-50 max-w-3xl ${isDarkMode ? 'bg-neutral-800 border border-neutral-700' : 'bg-white border border-neutral-200'}`}>
-              {aiSelectedElement.count === 1 ? (
-                  // Single element - simple confirmation
-                  <div className="flex items-center gap-4">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${isDarkMode ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>
-                          <Check size={16} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                          <div className={`text-sm leading-relaxed ${isDarkMode ? 'text-neutral-200' : 'text-neutral-800'}`}>
-                              Found <code className={`px-1.5 py-0.5 rounded font-mono text-xs ${isDarkMode ? 'bg-neutral-700 text-blue-400' : 'bg-blue-50 text-blue-700'}`}>{aiSelectedElement.elements[0].tagName}</code>
-                              {aiSelectedElement.elements[0].text && (
-                                  <span className="ml-1">"{aiSelectedElement.elements[0].text.substring(0, 40)}{aiSelectedElement.elements[0].text.length > 40 ? '...' : ''}"</span>
-                              )}
-                              <span className={`ml-1 ${isDarkMode ? 'text-neutral-400' : 'text-neutral-500'}`}>- Is this correct?</span>
-                          </div>
-                      </div>
-                      <div className="flex gap-2 flex-shrink-0">
-                          <button
-                              onClick={() => handleConfirmSelection(false)}
-                              className={`px-4 py-2 text-sm rounded-lg font-medium transition ${isDarkMode ? 'bg-neutral-700 hover:bg-neutral-600 text-neutral-200' : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-700'}`}
-                          >
-                              No
-                          </button>
-                          <button
-                              onClick={() => handleConfirmSelection(true, 1)}
-                              className={`px-4 py-2 text-sm rounded-lg font-medium transition ${isDarkMode ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
-                          >
-                              Yes
-                          </button>
-                      </div>
-                  </div>
-              ) : (
-                  // Multiple elements - show list with numbers
-                  <div>
-                      <div className="flex items-center gap-2 mb-3">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${isDarkMode ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>
-                              <Check size={16} />
-                          </div>
-                          <div className={`text-sm font-medium ${isDarkMode ? 'text-neutral-200' : 'text-neutral-800'}`}>
-                              Found {aiSelectedElement.count} elements - which one?
-                          </div>
-                          <button
-                              onClick={() => handleConfirmSelection(false)}
-                              className={`ml-auto px-3 py-1.5 text-sm rounded-lg font-medium transition ${isDarkMode ? 'bg-neutral-700 hover:bg-neutral-600 text-neutral-200' : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-700'}`}
-                          >
-                              Cancel
-                          </button>
-                      </div>
-                      <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto">
-                          {aiSelectedElement.elements.map((element, index) => (
-                              <button
-                                  key={index}
-                                  onClick={() => handleConfirmSelection(true, index + 1)}
-                                  className={`flex items-center gap-3 p-2 rounded-lg text-left transition ${isDarkMode ? 'hover:bg-neutral-700' : 'hover:bg-neutral-50'}`}
-                              >
-                                  <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold ${isDarkMode ? 'bg-blue-500 text-white' : 'bg-blue-600 text-white'}`}>
-                                      {index + 1}
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                      <code className={`text-xs font-mono ${isDarkMode ? 'text-blue-400' : 'text-blue-700'}`}>{element.tagName}</code>
-                                      {element.text && (
-                                          <span className={`ml-2 text-xs ${isDarkMode ? 'text-neutral-400' : 'text-neutral-600'}`}>
-                                              "{element.text.substring(0, 50)}{element.text.length > 50 ? '...' : ''}"
-                                          </span>
-                                      )}
-                                  </div>
-                              </button>
-                          ))}
-                      </div>
-                  </div>
-              )}
-          </div>
+        <AIElementSelectionToolbar
+          isDarkMode={isDarkMode}
+          aiSelectedElement={aiSelectedElement}
+          onConfirmSelection={handleConfirmSelection}
+        />
       )}
 
       {/* Pending Change Preview - 3 Button Popup */}
       {pendingPreview && showCompactApprovalPopup && (
-          <div className={`absolute bottom-24 left-1/2 transform -translate-x-1/2 flex items-center gap-2 rounded-full shadow-xl p-2 z-50 ${isDarkMode ? 'bg-neutral-800 border border-neutral-700' : 'bg-white border border-neutral-200'}`}>
-              {/* Diff Stats */}
-              <div className="flex items-center gap-1.5 px-2 text-xs font-mono">
-                  <span className="text-green-500">+{pendingPreview.additions}</span>
-                  <span className="text-red-500">-{pendingPreview.deletions}</span>
-              </div>
-              <div className={`w-[1px] h-6 ${isDarkMode ? 'bg-neutral-600' : 'bg-neutral-200'}`}></div>
-              <button
-                  onMouseDown={() => {
-                    const webview = webviewRefs.current.get(activeTabId);
-                    if (pendingPreview.undoCode && webview) {
-                      console.log('[Preview] Showing original');
-                      webview.executeJavaScript(pendingPreview.undoCode);
-                      setIsPreviewingOriginal(true);
-                    }
-                  }}
-                  onMouseUp={() => {
-                    const webview = webviewRefs.current.get(activeTabId);
-                    if (pendingPreview.applyCode && webview) {
-                      console.log('[Preview] Showing change');
-                      webview.executeJavaScript(pendingPreview.applyCode);
-                      setIsPreviewingOriginal(false);
-                    }
-                  }}
-                  onMouseLeave={() => {
-                    if (!isPreviewingOriginal) return;
-                    const webview = webviewRefs.current.get(activeTabId);
-                    if (pendingPreview.applyCode && webview) {
-                      console.log('[Preview] Showing change (mouse leave)');
-                      webview.executeJavaScript(pendingPreview.applyCode);
-                      setIsPreviewingOriginal(false);
-                    }
-                  }}
-                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${isDarkMode ? 'hover:bg-neutral-700 text-neutral-400' : 'hover:bg-neutral-100 text-neutral-600'}`}
-                  title="Hold to see original"
-              >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-              </button>
-              <div className={`w-[1px] h-6 ${isDarkMode ? 'bg-neutral-600' : 'bg-neutral-200'}`}></div>
-              <button
-                  onClick={pendingDOMApproval ? handleRejectDOMApproval : handleRejectChange}
-                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${isDarkMode ? 'hover:bg-red-900/20 text-neutral-400 hover:text-red-400' : 'hover:bg-red-50 text-neutral-600 hover:text-red-600'}`}
-                  title="Reject (Esc)"
-              >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-              </button>
-              <button
-                  onClick={pendingDOMApproval ? handleAcceptDOMApproval : handleApproveChange}
-                  disabled={isGeneratingSourcePatch}
-                  className={`w-10 h-10 rounded-full flex items-center justify-center shadow-md transition-colors disabled:opacity-50 ${
-                    isGeneratingSourcePatch
-                      ? 'cursor-not-allowed'
-                      : (isDarkMode ? 'bg-neutral-100 text-neutral-900 hover:bg-white' : 'bg-neutral-900 text-white hover:bg-neutral-800')
-                  }`}
-                  title="Accept (⌘+Enter)"
-              >
-                  {isGeneratingSourcePatch ? (
-                    <Loader2 size={20} className="animate-spin" />
-                  ) : (
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-                  )}
-              </button>
-          </div>
+        <PendingChangePreview
+          isDarkMode={isDarkMode}
+          pendingPreview={pendingPreview}
+          isGeneratingSourcePatch={isGeneratingSourcePatch}
+          isPreviewingOriginal={isPreviewingOriginal}
+          onSetPreviewingOriginal={setIsPreviewingOriginal}
+          onShowOriginal={() => {
+            const webview = webviewRefs.current.get(activeTabId)
+            if (pendingPreview.undoCode && webview) {
+              console.log('[Preview] Showing original')
+              webview.executeJavaScript(pendingPreview.undoCode)
+            }
+          }}
+          onShowChange={() => {
+            const webview = webviewRefs.current.get(activeTabId)
+            if (pendingPreview.applyCode && webview) {
+              console.log('[Preview] Showing change')
+              webview.executeJavaScript(pendingPreview.applyCode)
+            }
+          }}
+          onReject={pendingDOMApproval ? handleRejectDOMApproval : handleRejectChange}
+          onApprove={pendingDOMApproval ? handleAcceptDOMApproval : handleApproveChange}
+        />
       )}
 
       {/* Screenshot Preview Modal */}
       {showScreenshotPreview && capturedScreenshot && (
-          <div
-              className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
-              onClick={() => setShowScreenshotPreview(false)}
-          >
-              <div className="relative max-w-4xl max-h-[90vh] p-4">
-                  <button
-                      onClick={() => setShowScreenshotPreview(false)}
-                      className="absolute -top-10 right-0 text-white hover:text-gray-300 transition-colors"
-                      title="Close preview"
-                  >
-                      <X size={24} />
-                  </button>
-                  <img
-                      src={capturedScreenshot}
-                      alt="Screenshot preview"
-                      className="max-w-full max-h-[90vh] rounded-lg shadow-2xl"
-                      onClick={(e) => e.stopPropagation()}
-                  />
-              </div>
-          </div>
+        <ScreenshotPreviewModal
+          screenshot={capturedScreenshot}
+          onClose={() => setShowScreenshotPreview(false)}
+        />
       )}
 
       {/* Hidden Media Elements */}
@@ -12494,161 +8353,13 @@ If you're not sure what the user wants, ask for clarification.
 
       {/* File Browser Overlay */}
       {fileBrowserVisible && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 bg-black/70 z-[100] backdrop-blur-md"
-            onClick={closeFileBrowser}
-          />
-
-          {/* Stacked Panels */}
-          <div className="fixed inset-0 z-[101] flex items-center justify-center pointer-events-none">
-            {fileBrowserStack.map((panel, index) => {
-              const isActive = index === fileBrowserStack.length - 1;
-              const stackOffset = (fileBrowserStack.length - 1 - index) * 350; // Much bigger offset
-
-              // Get file icon based on extension
-              const getFileIcon = (name: string, isDir: boolean) => {
-                if (isDir) return <Folder size={18} className="text-blue-400" />;
-                const ext = name.split('.').pop()?.toLowerCase() || '';
-                if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext))
-                  return <Image size={18} className="text-purple-400" />;
-                if (['ts', 'tsx'].includes(ext))
-                  return <FileCode size={18} className="text-blue-400" />;
-                if (['js', 'jsx'].includes(ext))
-                  return <FileCode size={18} className="text-yellow-400" />;
-                if (['css', 'scss', 'less'].includes(ext))
-                  return <Palette size={18} className="text-pink-400" />;
-                if (['json', 'yaml', 'yml', 'toml'].includes(ext))
-                  return <Settings size={18} className="text-orange-400" />;
-                if (['md', 'txt', 'mdx'].includes(ext))
-                  return <FileText size={18} className="text-neutral-400" />;
-                if (['html', 'htm'].includes(ext))
-                  return <Globe size={18} className="text-orange-400" />;
-                return <File size={18} className="text-neutral-500" />;
-              };
-
-              return (
-                <div
-                  key={`${panel.path}-${index}`}
-                  className={`absolute pointer-events-auto transition-all duration-500 ease-out backdrop-blur-xl border rounded-xl shadow-2xl overflow-hidden ${
-                    isDarkMode
-                      ? 'bg-neutral-900/80 border-white/10'
-                      : 'bg-white/80 border-black/10'
-                  }`}
-                  style={{
-                    width: panel.type === 'image' ? 'auto' : '480px',
-                    maxWidth: '90vw',
-                    maxHeight: '60vh',
-                    transform: isActive
-                      ? 'translateX(0) scale(1)'
-                      : `translateX(-${stackOffset}px) scale(0.95)`,
-                    opacity: isActive ? 1 : 0.4,
-                    zIndex: index,
-                  }}
-                >
-                  {/* Header - Compact */}
-                  <div className={`flex items-center gap-2 px-3 py-2 border-b ${
-                    isDarkMode ? 'border-white/10' : 'border-black/5'
-                  }`}>
-                    <button
-                      onClick={fileBrowserBack}
-                      className={`p-1 rounded transition ${
-                        isDarkMode ? 'hover:bg-white/10 text-neutral-400' : 'hover:bg-black/5 text-neutral-500'
-                      }`}
-                    >
-                      <ChevronLeft size={18} />
-                    </button>
-                    <div className="flex-1 min-w-0">
-                      <div className={`text-sm font-medium truncate ${isDarkMode ? 'text-white' : 'text-neutral-900'}`}>
-                        {panel.title}
-                      </div>
-                    </div>
-                    <button
-                      onClick={closeFileBrowser}
-                      className={`p-1 rounded transition ${
-                        isDarkMode ? 'hover:bg-white/10 text-neutral-400' : 'hover:bg-black/5 text-neutral-500'
-                      }`}
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-
-                  {/* Content */}
-                  <div className="overflow-y-auto" style={{ maxHeight: 'calc(60vh - 44px)' }}>
-                    {panel.type === 'directory' && panel.items && (
-                      <div className="py-1">
-                        {panel.items.length === 0 ? (
-                          <div className={`text-center py-6 text-sm ${isDarkMode ? 'text-neutral-500' : 'text-neutral-400'}`}>
-                            Empty folder
-                          </div>
-                        ) : (
-                          panel.items.map((item, itemIndex) => (
-                            <button
-                              key={item.path}
-                              onClick={() => openFileBrowserItem(itemIndex + 1)}
-                              className={`w-full flex items-center gap-3 px-3 py-2 text-left transition ${
-                                isDarkMode ? 'hover:bg-white/5' : 'hover:bg-black/5'
-                              }`}
-                            >
-                              {/* Number badge */}
-                              <div className={`w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold flex-shrink-0 ${
-                                isDarkMode ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-500/10 text-blue-600'
-                              }`}>
-                                {itemIndex + 1}
-                              </div>
-                              {/* Icon */}
-                              <div className="flex-shrink-0">
-                                {getFileIcon(item.name, item.isDirectory)}
-                              </div>
-                              {/* Name */}
-                              <div className={`flex-1 min-w-0 text-sm truncate ${
-                                isDarkMode ? 'text-white' : 'text-neutral-900'
-                              }`}>
-                                {item.name}
-                              </div>
-                              {/* Arrow for folders */}
-                              {item.isDirectory && (
-                                <ChevronRight size={16} className={isDarkMode ? 'text-neutral-600' : 'text-neutral-400'} />
-                              )}
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    )}
-
-                    {panel.type === 'file' && panel.content && (
-                      <pre className={`p-3 text-xs font-mono overflow-x-auto ${
-                        isDarkMode ? 'text-neutral-300' : 'text-neutral-700'
-                      }`}>
-                        {panel.content}
-                      </pre>
-                    )}
-
-                    {panel.type === 'image' && (
-                      <div className="p-3 flex items-center justify-center">
-                        <img
-                          src={`file://${panel.path}`}
-                          alt={panel.title}
-                          className="max-w-full max-h-[50vh] object-contain rounded"
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Voice hint */}
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[102] pointer-events-none">
-            <div className={`px-3 py-1.5 rounded-full text-xs backdrop-blur-xl ${
-              isDarkMode ? 'bg-white/10 text-white/60' : 'bg-black/10 text-black/60'
-            }`}>
-              "open 3" / "open App.tsx" / "open src folder" / "go back" / "close"
-            </div>
-          </div>
-        </>
+        <FileBrowserOverlay
+          isDarkMode={isDarkMode}
+          fileBrowserStack={fileBrowserStack}
+          onBack={fileBrowserBack}
+          onClose={closeFileBrowser}
+          onOpenItem={openFileBrowserItem}
+        />
       )}
 
       {/* Settings Dialog */}

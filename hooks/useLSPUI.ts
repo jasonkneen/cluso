@@ -243,6 +243,33 @@ export function useLSPUI(filePath?: string) {
     completionCacheRef.current.clear()
   }, [])
 
+  /**
+   * Create a mouse move handler for code preview with LSP hover.
+   * Pass the displayedSourceCode context and startLine for position calculation.
+   */
+  const createCodeMouseMoveHandler = useCallback(
+    (startLine: number) => (e: React.MouseEvent<HTMLDivElement>) => {
+      // Get position relative to the code block
+      const target = e.target as HTMLElement
+      const codeElement = target.closest('pre')
+      if (!codeElement) return
+
+      // Calculate approximate line and character from mouse position
+      const rect = codeElement.getBoundingClientRect()
+      const lineHeight = 20 // Approximate line height in pixels
+      const charWidth = 8   // Approximate character width in monospace
+
+      const relativeY = e.clientY - rect.top
+      const relativeX = e.clientX - rect.left
+
+      const line = Math.floor(relativeY / lineHeight) + startLine
+      const character = Math.floor(relativeX / charWidth)
+
+      showHover(e.clientX, e.clientY, line, character)
+    },
+    [showHover]
+  )
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -267,6 +294,8 @@ export function useLSPUI(filePath?: string) {
     // Navigation
     goToDefinition,
     findReferences,
+    // Code preview mouse handler
+    createCodeMouseMoveHandler,
     // Utility
     clearCache,
   }

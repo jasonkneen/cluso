@@ -93,3 +93,15 @@ export * from './changes'
 
 // Webview feature - webview preload path state management
 export * from './webview'
+
+// AI Handlers feature - AI element interaction handlers
+export * from './ai-handlers'
+
+// Terminal feature - ghostty-web terminal panel integration
+export * from './terminal'
+
+// Mgrep feature - project indexing integration
+export * from './mgrep'
+
+// File Watcher feature - file system watching
+export * from './file-watcher'

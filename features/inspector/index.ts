@@ -5,6 +5,7 @@
  */
 
 export { useInspectorState } from './useInspectorState'
+export { useInspectorSync } from './useInspectorSync'
 export type { UseInspectorStateReturn } from './useInspectorState'
 export type {
   InspectorState,
@@ -13,4 +14,6 @@ export type {
   MoveTargetPosition,
   PreInspectorSettings,
   InspectorTool,
+  InspectorWebviewRef,
+  UseInspectorSyncOptions,
 } from './types'

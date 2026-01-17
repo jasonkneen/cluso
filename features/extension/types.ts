@@ -64,3 +64,30 @@ export interface ExtensionStateActions {
   /** Clear cursor data (when sharing stops) */
   clearCursor: () => void
 }
+
+/**
+ * Cursor data sent to extension (outgoing)
+ */
+export interface OutgoingCursorData {
+  pageX: number
+  pageY: number
+  clientX: number
+  clientY: number
+  scrollX: number
+  scrollY: number
+  viewportWidth: number
+  viewportHeight: number
+  documentWidth: number
+  documentHeight: number
+  pageUrl: string
+}
+
+/**
+ * Options for useExtensionCursorSync hook
+ */
+export interface UseExtensionCursorSyncOptions {
+  /** Whether cursor sharing is active */
+  extensionSharing: boolean
+  /** Current active tab URL */
+  activeTabUrl: string | undefined
+}

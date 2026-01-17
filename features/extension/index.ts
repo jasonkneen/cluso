@@ -5,5 +5,12 @@
  */
 
 export { useExtensionState } from './useExtensionState'
+export { useExtensionCursorSync } from './useExtensionCursorSync'
 export type { UseExtensionStateReturn } from './useExtensionState'
-export type { ExtensionState, ExtensionStateActions, ExtensionCursor } from './types'
+export type {
+  ExtensionState,
+  ExtensionStateActions,
+  ExtensionCursor,
+  OutgoingCursorData,
+  UseExtensionCursorSyncOptions,
+} from './types'

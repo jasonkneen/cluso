@@ -7,3 +7,6 @@
 export { useMediaState } from './useMediaState'
 export type { UseMediaStateReturn } from './useMediaState'
 export type { MediaState, MediaStateActions } from './types'
+
+export { useAudioHandlers } from './useAudioHandlers'
+export type { UseAudioHandlersDeps, UseAudioHandlersReturn, WebviewElement } from './useAudioHandlers'

@@ -6,6 +6,7 @@
 
 export { useScrollState } from './useScrollState'
 export type { UseScrollStateReturn } from './useScrollState'
+export { useScrollEffects } from './useScrollEffects'
 export type {
   ScrollState,
   ScrollStateActions,
